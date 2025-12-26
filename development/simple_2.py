@@ -1,11 +1,13 @@
-from src.orin_ai_crm.core.models import Pass, Agent, HTTPRequestNode, Log
+import asyncio
+
+from src.orin_ai_crm.core.models import PassNode, Agent, HTTPRequestNode, LogNode
 from src.orin_ai_crm.core.models.logic_node import IfNode
 
 # 1. Initialize Nodes
-passing = Pass(name="Pass", input_data={"data": "Hello"})
+passing = PassNode(name="Pass")
 check_hello = IfNode("IsHello", condition_key="data", expected_value="Helloo")
-success_node = Log("SuccessLog", message="Node success!", log_type="info")
-fail_node = Log("FailureLog", message="Node fail!", log_type="error")
+success_node = LogNode("SuccessLog", message="Node success!", log_type="info")
+fail_node = LogNode("FailureLog", message="Node fail!", log_type="error")
 
 # 2. Setup Workflow
 agent_1 = Agent()
@@ -20,5 +22,6 @@ agent_1.add_edge("IsHello", "SuccessLog", branch="true")
 agent_1.add_edge("IsHello", "FailureLog", branch="false")
 
 # 4. Run
-agent_1.run("Pass", {})
+if __name__ == "__main__":
+    asyncio.run(agent_1.run("Pass", {"data": "Hello"}))
 # fetch_user.execute(None)

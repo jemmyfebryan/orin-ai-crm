@@ -10,11 +10,12 @@ class Node:
     def __init__(self, name: str):
         self.name = name
         self.input_data: Any = None
+        self.async_node = False
 
     def execute(self, input_data: Any) -> Any:
         raise NotImplementedError("Subclasses must implement execute()")
     
-class Log(Node):
+class LogNode(Node):
     def __init__(self, name: str, message: str, log_type: str = ""):
         super().__init__(name)
         self.log_type = log_type
@@ -30,13 +31,12 @@ class Log(Node):
         else:
             logger.info(f"[UNKNOWN] {self.message}")
             
-class Pass(Node):
-    def __init__(self, name: str, input_data: Any):
+class PassNode(Node):
+    def __init__(self, name: str):
         super().__init__(name)
-        self.input_data = input_data
 
     def execute(self, input_data: Any) -> Dict[str, Any]:
-        return self.input_data
+        return input_data
     
 class Random(Node):
     def __init__(self, name: str, random_type: str, value: tuple):
@@ -74,13 +74,16 @@ class Agent:
             "branch": branch
         })
 
-    def run(self, start_node_name: str, initial_data: Any, is_return: bool = False):
+    async def run(self, start_node_name: str, initial_data: Any, is_return: bool = False):
+        logger.info(f"Workflow start at {start_node_name}")
+                
         current_node_name = start_node_name
         current_data = initial_data
 
         while current_node_name:
             node = self.nodes[current_node_name]
-            result = node.execute(current_data)
+            
+            result = await node.execute(current_data) if node.async_node else node.execute(current_data)
 
             # If the result is a branch string (like 'true'/'false'), use it to find the next node
             branch = result if isinstance(result, str) else "main"
@@ -97,7 +100,11 @@ class Agent:
                 if not isinstance(result, str):
                     current_data = result
             else:
-                print(f"Workflow finished at {current_node_name}")
+                if isinstance(result, str):
+                    logger.error(f"No branch found for '{result}' from node '{current_node_name}'.")
+                    logger.warning("String result from a node will always recognized as a branch name")
+                else:
+                    logger.info(f"Workflow finished at {current_node_name}")
                 break
         
-        if is_return: return result
+        return result if is_return else None

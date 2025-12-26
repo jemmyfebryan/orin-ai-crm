@@ -1,4 +1,4 @@
-from src.orin_ai_crm.core.models import Node, Agent, HTTPRequestNode, Log
+from src.orin_ai_crm.core.models import Node, Agent, HTTPRequestNode, LogNode
 from src.orin_ai_crm.core.models.logic_node import IfNode
 
 # 1. Initialize Nodes

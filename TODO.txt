@@ -1,0 +1,12 @@
+-Bring all output from each Node forward, instead of {"data": {LAST_NODE_OUTPUT}}, we will use {"data": {"NODE_1": {CONTENT}, {"NODE_2": {CONTENT}}}, {"last": {CONTENT}}}, last node will stored as {NODE_NAME} after the next node executed
+-All other nodes will run default using 'last' data, except being set using `node_input_data`: str arg.
+-Filter output from each Node by add arg filter_node: List[str] on Node object initialization, this filter the memory brought to the next node. For example `filter_node = ["NODE_1", "NODE_2"], so the past output from NODE_1 and NODE_2 will be removed. Meanwhile `filter_node = ["ALL_EXCEPT", "NODE_4"]` will only store the NODE_4 instead of removing it, last node output is still stored.
+-Add AgentNode, node to run other agent
+-Add BranchNode, node to branch to multiple path/branches, run in parallel
+-Add MergeNode, node to merge output from two or more node, will wait until all Branch input node done
+-BranchNode and MergeNode implemented using agent.add_edge with either from_node or to_node a tuple
+-Add Sqlite for Data Management and ChromaDB/LanceDB for VectorDB Management
+-Add node to store/fetch document by embed it
+-Develop an RAG agent
+-Develop a Profiling agent
+-...

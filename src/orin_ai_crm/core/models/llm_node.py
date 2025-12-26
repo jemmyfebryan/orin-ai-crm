@@ -1,9 +1,50 @@
+import copy
 from typing import Any, Dict, List, Optional, Union
 
 from openai import OpenAI
 
 from src.orin_ai_crm.core.models import Node
 from src.orin_ai_crm.core.openai import chat_completion
+
+class LLMNode(Node):
+    def __init__(
+        self, 
+        name: str,
+        llm_client: OpenAI,
+        system_prompt: str,
+        user_prompt: str,
+        formatted_schema: Dict = None,
+        model_name: str = "gpt-5-nano",
+        use_temperature: bool = False,
+    ):
+        super().__init__(name)
+        self.system_prompt = system_prompt
+        self.user_prompt = user_prompt
+        self.formatted_schema = formatted_schema
+        self.llm_client = llm_client
+        self.model_name = model_name
+        self.use_temperature = use_temperature
+        
+        self.async_node = True
+        
+    async def execute(self, input_data: Dict[str, Any]) -> str:
+        """
+        Generate LLM text
+        """
+        
+        llm_result = await chat_completion(
+            openai_client=self.llm_client,
+            user_prompt=self.user_prompt,
+            system_prompt=self.system_prompt,
+            formatted_schema=self.formatted_schema,
+            model_name=self.model_name,
+            use_temperature=self.use_temperature,
+        )
+        
+        output_data = copy.deepcopy(input_data)
+        output_data["data"] = llm_result
+
+        return output_data
 
 class LLMIfNode(Node):
     def __init__(
@@ -52,5 +93,8 @@ class LLMIfNode(Node):
             model_name=self.model_name,
             use_temperature=self.use_temperature,
         )
+        
+        output_data = copy.deepcopy(input_data)
+        output_data["data"] = logic_result.get("logic_result")
 
-        return logic_result.get("logic_result")
+        return output_data

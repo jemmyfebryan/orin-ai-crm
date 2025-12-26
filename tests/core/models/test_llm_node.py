@@ -1,8 +1,27 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from src.orin_ai_crm.core.models.llm_node import LLMIfNode
+from src.orin_ai_crm.core.models.llm_node import LLMNode, LLMIfNode
 
 # LLM-based Node
+def test_llm_node_initialization():
+    """Verify that the node initializes with correct attributes."""
+    mock_client = MagicMock()
+    node = LLMNode(
+        name="InitTest",
+        llm_client=mock_client,
+        system_prompt="Test Prompt",
+        user_prompt="Test User Prompt",
+        model_name="custom-model",
+        use_temperature=True
+    )
+    
+    assert node.name == "InitTest"
+    assert node.model_name == "custom-model"
+    assert node.system_prompt == "Test Prompt"
+    assert node.user_prompt == "Test User Prompt"
+    assert node.use_temperature is True
+    assert node.async_node is True
+
 @pytest.mark.asyncio
 async def test_llm_if_node_true_branch():
     """Test LLMIfNode when the LLM returns a True result."""
@@ -28,7 +47,7 @@ async def test_llm_if_node_true_branch():
         result = await node.execute(input_data)
         
         # 4. Assertions
-        assert result is True
+        assert result.get("data") is True
         mock_chat.assert_called_once()
         # Verify the user prompt format matches your class implementation
         args, kwargs = mock_chat.call_args
@@ -46,7 +65,7 @@ async def test_llm_if_node_false_branch():
         
         result = await node.execute({"message": "I am very happy"})
         
-        assert result is False
+        assert result.get("data") is False
 
 @pytest.mark.asyncio
 async def test_llm_if_node_handles_none_result():
@@ -61,7 +80,7 @@ async def test_llm_if_node_handles_none_result():
         result = await node.execute({"data": "test"})
         
         # .get() on empty dict returns None
-        assert result is None
+        assert result.get("data") is None
 
 def test_llm_if_node_initialization():
     """Verify that the node initializes with correct attributes."""

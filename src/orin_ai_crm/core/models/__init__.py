@@ -5,6 +5,26 @@ from src.orin_ai_crm.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+class AgentEnvironment:
+    """
+    Simulates the n8n 'Global' environment.
+    Holds shared clients and variables.
+    """
+    def __init__(self, env_vars: dict = None):
+        self.variables = env_vars or {}
+        self.clients = {}  # Store initialized LLM, SQL, or Redis clients here
+
+    def set_client(self, key: str, client_instance: Any):
+        self.clients[key] = client_instance
+
+    def get_variable(self, key: str):
+        if key in self.variables.keys():
+            return self.variables.get(key)
+        else:
+            logger.error(f"No key {key} in environment variables.")
+            return None
+
 class Node:
     """Base class for all n8n nodes."""
     def __init__(self, name: str):
@@ -12,14 +32,15 @@ class Node:
         self.input_data: Any = None
         self.async_node = False
 
-    def execute(self, input_data: Any) -> Any:
+    def execute(self, input_data: Any, env: AgentEnvironment = None) -> Any:
         raise NotImplementedError("Subclasses must implement execute()")
     
 class LogNode(Node):
-    def __init__(self, name: str, message: str, log_type: str = ""):
+    def __init__(self, name: str, message: str, log_type: str = "", pass_data: bool = False):
         super().__init__(name)
         self.log_type = log_type
         self.message = message
+        self.pass_data = pass_data
         
     def execute(self, input_data: Dict[str, Any]):
         if self.log_type == "info":
@@ -30,6 +51,7 @@ class LogNode(Node):
             logger.warning(f"{self.message}")
         else:
             logger.info(f"[UNKNOWN] {self.message}")
+        return input_data if self.pass_data else None
             
 class PassNode(Node):
     def __init__(self, name: str):
@@ -38,7 +60,7 @@ class PassNode(Node):
     def execute(self, input_data: Any) -> Dict[str, Any]:
         return input_data
     
-class Random(Node):
+class RandomNode(Node):
     def __init__(self, name: str, random_type: str, value: tuple):
         super().__init__(name)
         self.random_type = random_type
@@ -108,3 +130,28 @@ class Agent:
                 break
         
         return result if is_return else None
+
+# Environment Models
+class GetEnvironmentVarNode(Node):
+    def __init__(self, name: str, key: str, env: AgentEnvironment):
+        super().__init__(name)
+        self.key = key
+        self.env = env
+        
+    def execute(self, input_data: Any):
+        # Instead of initializing a new connection, use the one from the environment
+        value = self.env.get_variable(self.key)
+        if isinstance(input_data, Dict):
+            new_data = input_data | {self.key: value}
+        else:
+            new_data = input_data
+            logger.warning(f"input_data is {type(input_data)}, not a Dict, return the original instead")
+        return new_data
+
+class SQLNode(Node):
+    def execute(self, input_data: Any, env: AgentEnvironment):
+        # Instead of initializing a new connection, use the one from the environment
+        db = env.clients.get("db_client")
+        print(f"[{self.name}] Querying database using shared client...")
+        # db.execute("SELECT...") 
+        return {"status": "success"}

@@ -1,15 +1,23 @@
 import pytest
 import random
 from unittest.mock import MagicMock, patch
-from src.orin_ai_crm.core.models import Agent, LogNode, PassNode, Random, HTTPRequestNode
+from src.orin_ai_crm.core.models import (
+    Agent,
+    LogNode,
+    PassNode,
+    RandomNode,
+    HTTPRequestNode,
+    AgentEnvironment,
+    GetEnvironmentVarNode,
+)
 
 # --- Node Tests ---
 @pytest.mark.asyncio
 async def test_random_node():
-    """Verify that the Random node uses the random module correctly."""
+    """Verify that the Random node uses the Random module correctly."""
     random.seed(42)
     # randint(1, 10) with seed 42 usually produces 2
-    node = Random(name="Rand", random_type="randint", value=(1, 10))
+    node = RandomNode(name="Rand", random_type="randint", value=(1, 10))
     result = node.execute(None)
     
     assert "data" in result
@@ -114,3 +122,68 @@ async def test_agent_branching_logic():
         # Run with low value
         await agent.run("Checker", initial_data={"val": 2})
         mock_logger.info.assert_any_call("Value is low")
+
+# --- AgentEnvironment Tests ---
+
+def test_agent_environment_variables():
+    """Verify that environment variables can be set and retrieved."""
+    env = AgentEnvironment(env_vars={"API_KEY": "12345", "DB_URL": "localhost"})
+    
+    assert env.get_variable("API_KEY") == "12345"
+    assert env.get_variable("DB_URL") == "localhost"
+    
+    # Test missing key returns None
+    assert env.get_variable("MISSING_KEY") is None
+
+def test_agent_environment_clients():
+    """Verify that client instances can be stored and retrieved."""
+    env = AgentEnvironment()
+    mock_db_client = MagicMock()
+    
+    env.set_client("postgres", mock_db_client)
+    
+    assert "postgres" in env.clients
+    assert env.clients["postgres"] == mock_db_client
+
+# --- GetEnvironmentVarNode Tests ---
+
+@pytest.mark.asyncio
+async def test_get_environment_var_node_success():
+    """Verify that the node correctly injects env vars into the data dictionary."""
+    env = AgentEnvironment(env_vars={"target_key": "secret_value"})
+    node = GetEnvironmentVarNode(name="GetEnv", key="target_key", env=env)
+    
+    input_data = {"existing_field": "hello"}
+    result = node.execute(input_data)
+    
+    # Check that the new key is merged into the dictionary
+    assert result["target_key"] == "secret_value"
+    assert result["existing_field"] == "hello"
+
+@pytest.mark.asyncio
+@patch("src.orin_ai_crm.core.models.logger")
+async def test_get_environment_var_node_invalid_input(mock_logger):
+    """Verify node behavior when input_data is not a dictionary."""
+    env = AgentEnvironment(env_vars={"foo": "bar"})
+    node = GetEnvironmentVarNode(name="GetEnv", key="foo", env=env)
+    
+    # Input is a string instead of a Dict
+    input_data = "not-a-dict"
+    result = node.execute(input_data)
+    
+    # Should return original data and log a warning
+    assert result == "not-a-dict"
+    mock_logger.warning.assert_called()
+
+@pytest.mark.asyncio
+async def test_get_environment_var_node_missing_var():
+    """Verify node behavior when the requested key does not exist in env."""
+    env = AgentEnvironment(env_vars={}) # Empty env
+    node = GetEnvironmentVarNode(name="GetEnv", key="missing_key", env=env)
+    
+    input_data = {"data": 1}
+    result = node.execute(input_data)
+    
+    # Key should be added as None (or however get_variable handles misses)
+    assert "missing_key" in result
+    assert result["missing_key"] is None

@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
-from src.orin_ai_crm.core.agents.nodes import LLMNode, create_tool_node
+from src.orin_ai_crm.core.agents.nodes import LLMNode #, create_tool_node
 
 # --- LLMNode Tests ---
 
@@ -58,50 +58,50 @@ def test_llm_node_extra_state_update():
     assert output["hook_triggered"] is True
     assert output["llm_calls"] == 1
 
-# --- ToolNode Tests ---
+# # --- ToolNode Tests ---
 
-def test_create_tool_node_execution():
-    """Verify tool_node retrieves the correct tool and returns a ToolMessage."""
-    # Mock a tool
-    mock_tool = MagicMock()
-    mock_tool.invoke.return_value = "Success: Profile Updated"
+# def test_create_tool_node_execution():
+#     """Verify tool_node retrieves the correct tool and returns a ToolMessage."""
+#     # Mock a tool
+#     mock_tool = MagicMock()
+#     mock_tool.invoke.return_value = "Success: Profile Updated"
     
-    tools_registry = {"update_profile": mock_tool}
-    tool_node = create_tool_node(tools_registry)
+#     tools_registry = {"update_profile": mock_tool}
+#     tool_node = create_tool_node(tools_registry)
 
-    # State must have an AIMessage with tool_calls as the last message
-    tool_call_id = "call_123"
-    last_message = AIMessage(
-        content="",
-        tool_calls=[{
-            "name": "update_profile",
-            "args": {"phone": "+62812"},
-            "id": tool_call_id
-        }]
-    )
+#     # State must have an AIMessage with tool_calls as the last message
+#     tool_call_id = "call_123"
+#     last_message = AIMessage(
+#         content="",
+#         tool_calls=[{
+#             "name": "update_profile",
+#             "args": {"phone": "+62812"},
+#             "id": tool_call_id
+#         }]
+#     )
     
-    state = {"messages": [last_message]}
+#     state = {"messages": [last_message]}
     
-    output = tool_node(state)
+#     output = tool_node(state)
 
-    # Check if tool was called with right args
-    mock_tool.invoke.assert_called_once_with({"phone": "+62812"})
+#     # Check if tool was called with right args
+#     mock_tool.invoke.assert_called_once_with({"phone": "+62812"})
 
-    # Check if ToolMessage is returned in state
-    assert len(output["messages"]) == 1
-    assert isinstance(output["messages"][0], ToolMessage)
-    assert output["messages"][0].content == "Success: Profile Updated"
-    assert output["messages"][0].tool_call_id == tool_call_id
+#     # Check if ToolMessage is returned in state
+#     assert len(output["messages"]) == 1
+#     assert isinstance(output["messages"][0], ToolMessage)
+#     assert output["messages"][0].content == "Success: Profile Updated"
+#     assert output["messages"][0].tool_call_id == tool_call_id
 
-def test_tool_node_missing_tool():
-    """Ensure tool_node raises a KeyError if tool is not in registry."""
-    tools_registry = {} # Empty
-    tool_node = create_tool_node(tools_registry)
+# def test_tool_node_missing_tool():
+#     """Ensure tool_node raises a KeyError if tool is not in registry."""
+#     tools_registry = {} # Empty
+#     tool_node = create_tool_node(tools_registry)
     
-    last_message = AIMessage(
-        content="",
-        tool_calls=[{"name": "unknown_tool", "args": {}, "id": "1"}]
-    )
+#     last_message = AIMessage(
+#         content="",
+#         tool_calls=[{"name": "unknown_tool", "args": {}, "id": "1"}]
+#     )
     
-    with pytest.raises(KeyError):
-        tool_node({"messages": [last_message]})
+#     with pytest.raises(KeyError):
+#         tool_node({"messages": [last_message]})

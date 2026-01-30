@@ -34,10 +34,11 @@ async def run_tutorial():
                     },
                     {
                         "name": "crm_agent",
-                        "node": "mcp_agent_node",
+                        "node": "mcp_node",
                         "args": {
                             "mcp_client": session,
-                            "system_prompt": "You are a WhatsApp CRM assistant. Use your tools to look up contacts."
+                            "system_prompt": "You are a WhatsApp CRM assistant, use tools to help answering user.If a tool returns a 'Server error', please try the call again up to 3 times before reporting the failure to the user.",
+                            "recursion_limit": 10,
                         },
                         "to": ["end"]
                     }

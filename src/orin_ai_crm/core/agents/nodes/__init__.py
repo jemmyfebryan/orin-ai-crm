@@ -105,57 +105,19 @@ class ConditionalNode:
         return matches[-1] if matches else self.default_node
 
 class MCPNode(Node):
-    """Node that connects to an MCP server to process requests"""
-    def __init__(
-        self,
-        mcp_client: ClientSession,
-        system_prompt: str,
-        message_key: str = "messages",
-        mcp_calls_key: str = "mcp_calls",
-        extra_state_update: Optional[Callable[[Dict], Dict]] = None,
-    ):
-        self.mcp_client = mcp_client
-        self.system_prompt = system_prompt
-        self.message_key = message_key
-        self.mcp_calls_key = mcp_calls_key
-        self.extra_state_update = extra_state_update
-
-    def __call__(self, state: Dict[str, Any], config=None) -> Dict[str, Any]:
-        """LangGraph node handler for MCP communication"""
-
-        messages = [
-            SystemMessage(content=self.system_prompt)
-        ] + state[self.message_key]
-
-        try:
-            # Send messages to MCP server and get response
-            mcp_response = self.mcp_client.send_request(messages)
-        except Exception as e:
-            raise RuntimeError(f"MCP request failed: {e}")
-
-        new_state = {
-            self.message_key: [mcp_response],
-            self.mcp_calls_key: state.get(self.mcp_calls_key, 0) + 1,
-        }
-
-        # Optional extension hook
-        if self.extra_state_update:
-            new_state.update(self.extra_state_update(state | new_state))
-
-        return new_state
-
-class MCPAgentNode(Node):
     def __init__(
         self,
         llm: Any,
         mcp_client: ClientSession, # The MCP session/client
         system_prompt: str = "You are a helpful assistant.",
         message_key: str = "messages",
+        recursion_limit: int = 3,
     ):
         self.llm = llm
         self.mcp_client = mcp_client
         self.system_prompt = system_prompt
         self.message_key = message_key
+        self.recursion_limit = recursion_limit
         # self.llm = ChatOpenAI(model=model_name, temperature=0)
 
     async def __call__(self, state: Dict[str, Any], config=None) -> Dict[str, Any]:
@@ -175,7 +137,9 @@ class MCPAgentNode(Node):
         )
 
         # 3. Invoke the agent with the current state
-        result = await agent.ainvoke(state)
+        result = await agent.ainvoke(state, config={
+            "recursion_limit": self.recursion_limit
+        })
 
         # 4. Return the updated messages
         # LangGraph ReAct agents return the full message history

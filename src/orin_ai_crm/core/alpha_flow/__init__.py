@@ -6,7 +6,11 @@ from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.alpha_flow.utils import get_state_schema
-from src.orin_ai_crm.core.agents.nodes import LLMNode, ConditionalNode, MCPNode, MCPAgentNode
+from src.orin_ai_crm.core.agents.nodes import (
+    LLMNode,
+    ConditionalNode,
+    MCPNode,
+)
 from src.orin_ai_crm.core.logger import get_logger
 
 load_dotenv()
@@ -64,18 +68,13 @@ def create_mcp_node(**kwargs):
     # from src.orin_ai_crm.core.mcp.client import default_mcp_client
     # mcp_client = kwargs.pop("mcp_client", default_mcp_client)
     
-    return MCPNode(**kwargs)
-
-def create_mcp_agent_node(**kwargs):
-    # You would pass the authenticated mcp_client here
     llm = ChatOpenAI(model_name="gpt-4.1-nano", temperature=0)
-    return MCPAgentNode(llm=llm, **kwargs)
+    return MCPNode(llm=llm, **kwargs)
 
 # --- Registering the Node ---
 registry.register("llm_node", create_llm_node)
 registry.register("conditional_node", create_conditional_node)
 registry.register("mcp_node", create_mcp_node)
-registry.register("mcp_agent_node", create_mcp_agent_node)
 
 conditional_nodes = []
 

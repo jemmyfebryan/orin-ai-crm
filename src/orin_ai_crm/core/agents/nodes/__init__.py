@@ -2,8 +2,12 @@ from typing import Callable, Dict, Any, Optional, List
 
 from pydantic import BaseModel
 from langchain.messages import SystemMessage, ToolMessage
+from langchain.agents import create_agent
+from langchain_mcp_adapters.tools import load_mcp_tools
+from mcp import ClientSession
 
 from src.orin_ai_crm.core.agents.nodes.conditional import EVALUATORS, resolve_state_path
+
 
 class Node:
     pass
@@ -51,13 +55,10 @@ class LLMNode(Node):
             new_state.update(self.extra_state_update(state | new_state))
 
         return new_state
-    
+
+
 class ConditionalNode:
-    """
-    A configuration-driven router for LangGraph.
-    It evaluates a list of rules against the current state and returns 
-    the name of the next node to execute.
-    """
+    """A configuration-driven router for LangGraph."""
     def __init__(
         self,
         rules: List[Dict[str, Any]],
@@ -103,87 +104,81 @@ class ConditionalNode:
         # If we reached here with 'AND' logic, return the last matching target
         return matches[-1] if matches else self.default_node
 
-# class ConditionalNode(Node):
-#     """
-#         ConditionalNode is used as a substitute of conditional_edges in LangGraph
-#         While conditional_edges using separate function to check the state,
-#         ConditionalNode do the same but with strict, Dictionary args
+class MCPNode(Node):
+    """Node that connects to an MCP server to process requests"""
+    def __init__(
+        self,
+        mcp_client: ClientSession,
+        system_prompt: str,
+        message_key: str = "messages",
+        mcp_calls_key: str = "mcp_calls",
+        extra_state_update: Optional[Callable[[Dict], Dict]] = None,
+    ):
+        self.mcp_client = mcp_client
+        self.system_prompt = system_prompt
+        self.message_key = message_key
+        self.mcp_calls_key = mcp_calls_key
+        self.extra_state_update = extra_state_update
+
+    def __call__(self, state: Dict[str, Any], config=None) -> Dict[str, Any]:
+        """LangGraph node handler for MCP communication"""
+
+        messages = [
+            SystemMessage(content=self.system_prompt)
+        ] + state[self.message_key]
+
+        try:
+            # Send messages to MCP server and get response
+            mcp_response = self.mcp_client.send_request(messages)
+        except Exception as e:
+            raise RuntimeError(f"MCP request failed: {e}")
+
+        new_state = {
+            self.message_key: [mcp_response],
+            self.mcp_calls_key: state.get(self.mcp_calls_key, 0) + 1,
+        }
+
+        # Optional extension hook
+        if self.extra_state_update:
+            new_state.update(self.extra_state_update(state | new_state))
+
+        return new_state
+
+class MCPAgentNode(Node):
+    def __init__(
+        self,
+        llm: Any,
+        mcp_client: ClientSession, # The MCP session/client
+        system_prompt: str = "You are a helpful assistant.",
+        message_key: str = "messages",
+    ):
+        self.llm = llm
+        self.mcp_client = mcp_client
+        self.system_prompt = system_prompt
+        self.message_key = message_key
+        # self.llm = ChatOpenAI(model=model_name, temperature=0)
+
+    async def __call__(self, state: Dict[str, Any], config=None) -> Dict[str, Any]:
+        # 1. Dynamically fetch tools from the MCP server
+        # This makes the node "live"—if the MCP server adds a tool, the agent gets it
+        await self.mcp_client.initialize()
+        tools = await load_mcp_tools(self.mcp_client)
         
-#         Supported condition:
-#         state: Checking whether a state has to do with something, multiple output nodes
-        
-#         For example we check whether the user message positive, negative, neutral will decide the node output, with extra condition from state "force_sentiment":
-#         **args = {
-#             "conditions": [
-#                 {
-#                     "condition": "state",
-#                     "state_name": "messages",
-#                     "tools": [
-#                         {
-#                             "tool": "llm_tool",
-#                             "args": {
-#                                 "system_prompt": "If the message from user is positive sentiment return 'positive_node', if the message is negative sentiment return 'negative_node', if the message is neutral sentiment return 'neutral_node'."
-#                             }
-#                         }
-#                     ]
-#                 },
-#                 {
-#                     "condition": "state",
-#                     "state_name": "force_sentiment",
-#                     "tools": [
-#                         {
-#                             "tool": "is_equal",
-#                             "args": {
-#                                 "a": "state",
-#                                 "b": "positive"
-#                             },
-#                             "output_node": "positive"
-#                         },
-#                         {
-#                             "tool": "is_equal",
-#                             "args": {
-#                                 "a": "state",
-#                                 "b": "negative"
-#                             },
-#                             "output_node": "negative"
-#                         },
-#                         {
-#                             "tool": "is_equal",
-#                             "args": {
-#                                 "a": "state",
-#                                 "b": "neutral"
-#                             },
-#                             "output_node": "neutral"
-#                         }
-#                     ]
-#                 }
-#             ],
-#             "operator": "and"
-#         }
-#     """
+        # 2. Create a temporary ReAct agent
+        # We use create_react_agent from langgraph.prebuilt
+        agent = create_agent(
+            model=self.llm,
+            tools=tools,
+            system_prompt=(
+                self.system_prompt
+            )
+        )
 
-# def create_tool_node(tools_by_name: Dict[str, Any]) -> Callable:
-#     """
-#     Returns a tool_node callable that performs tool execution using the
-#     provided tools_by_name registry.
-#     """
+        # 3. Invoke the agent with the current state
+        result = await agent.ainvoke(state)
 
-#     def tool_node(state: Dict[str, Any]):
-#         """Performs the tool call"""
-#         result = []
-
-#         # Get the tool calls from the last message
-#         last = state["messages"][-1]
-#         for tool_call in last.tool_calls:
-#             tool = tools_by_name[tool_call["name"]]
-#             observation = tool.invoke(tool_call["args"])
-#             result.append(
-#                 ToolMessage(
-#                     content=observation,
-#                     tool_call_id=tool_call["id"],
-#                 )
-#             )
-
-#         return {"messages": result}
-
-#     return tool_node
+        # 4. Return the updated messages
+        # LangGraph ReAct agents return the full message history
+        return {
+            self.message_key: result["messages"]
+        }

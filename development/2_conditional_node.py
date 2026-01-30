@@ -68,9 +68,9 @@ agent = builder.build()
 
 input_state = {
     "messages": [HumanMessage(content=
-        "Hello bro"
+        "Hello bro are you"
     )],
-    "sentiment": "positive"
+    "sentiment": "negative"
 }
 
 for chunk in agent.stream(input_state):

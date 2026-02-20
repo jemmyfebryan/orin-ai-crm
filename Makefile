@@ -53,7 +53,7 @@ local-run:
 
 # Run app in background using PM2
 pm2-run:
-	pm2 start $(PYTHON) --name $(APP_NAME) -- -m uvicorn app:app --host 0.0.0.0 --port $(PORT)
+	pm2 start $(PYTHON) --name $(APP_NAME) -- -m uvicorn src.orin_ai_crm.server.main:app --host 0.0.0.0 --port $(PORT)
 	pm2 save
 
 pm2-stop:

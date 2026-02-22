@@ -1,7 +1,7 @@
 import os
 import json
 from typing import Literal, Optional
-from datetime import timedelta, timezone
+from datetime import timedelta, timezone, datetime
 from datetime import datetime as dt
 from sqlalchemy import select
 from langchain_openai import ChatOpenAI
@@ -9,7 +9,8 @@ from langchain_core.messages import AIMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.models.database import (
-    AsyncSessionLocal, Customer, ChatSession, LeadRouting, CustomerAction
+    AsyncSessionLocal, Customer, ChatSession, LeadRouting, CustomerAction,
+    CustomerMeeting, ProductInquiry
 )
 from src.orin_ai_crm.core.models.schemas import AgentState, CustomerProfile
 from src.orin_ai_crm.core.logger import get_logger
@@ -322,80 +323,257 @@ async def update_customer_action(
 class MeetingInfo(BaseModel):
     """Extract meeting information dari chat"""
     has_meeting_agreement: bool = Field(description="True jika user sudah sepakat untuk booking meeting")
+    wants_reschedule: bool = Field(default=False, description="True jika user ingin reschedule meeting yang sudah ada")
     meeting_date: Optional[str] = Field(default=None, description="Tanggal meeting dalam format DD/MM/YYYY atau natural seperti 'besok', 'Senin depan'")
-    meeting_time: Optional[str] = Field(default=None, description="Jam meeting dalam format HH:MM atau natural seperti 'jam 2 siang'")
+    meeting_time: Optional[str] = Field(default=None, description="Jam meeting dalam format HH:MM atau natural seperti 'jam 2 siang', 'pagi', 'sore'")
     meeting_format: Optional[str] = Field(default="online", description="Format meeting: online, offline, atau belum ditentukan")
     notes: Optional[str] = Field(default=None, description="Catatan tambahan dari user")
 
-def extract_meeting_info(messages: list, customer_name: str) -> MeetingInfo:
+async def get_pending_meeting(customer_id: int) -> Optional[CustomerMeeting]:
+    """Get pending meeting untuk customer"""
+    async with AsyncSessionLocal() as db:
+        query = select(CustomerMeeting).where(
+            (CustomerMeeting.customer_id == customer_id) &
+            (CustomerMeeting.status.in_(["pending", "confirmed"]))
+        ).order_by(CustomerMeeting.created_at.desc())
+
+        result = await db.execute(query)
+        meeting = result.scalars().first()
+
+        if meeting:
+            db.expunge(meeting)
+            return meeting
+        return None
+
+async def create_meeting(
+    customer_id: int,
+    meeting_date: str,
+    meeting_time: str,
+    meeting_format: str = "online"
+) -> CustomerMeeting:
+    """Create new meeting record"""
+    async with AsyncSessionLocal() as db:
+        meeting = CustomerMeeting(
+            customer_id=customer_id,
+            meeting_datetime=None,  # Will be parsed and set
+            meeting_format=meeting_format,
+            status="pending",
+            notes=f"Date: {meeting_date}, Time: {meeting_time}"
+        )
+        db.add(meeting)
+        await db.commit()
+        await db.refresh(meeting)
+        db.expunge(meeting)
+        return meeting
+
+async def update_meeting(
+    meeting_id: int,
+    meeting_date: Optional[str] = None,
+    meeting_time: Optional[str] = None,
+    status: Optional[str] = None,
+    notes: Optional[str] = None
+) -> bool:
+    """Update existing meeting"""
+    async with AsyncSessionLocal() as db:
+        query = select(CustomerMeeting).where(CustomerMeeting.id == meeting_id)
+        result = await db.execute(query)
+        meeting = result.scalars().first()
+
+        if not meeting:
+            return False
+
+        if notes:
+            meeting.notes = notes
+        if status:
+            meeting.status = status
+
+        await db.commit()
+        return True
+
+def extract_meeting_info(messages: list, customer_name: str, has_existing_meeting: bool = False) -> MeetingInfo:
     """
     Extract meeting info dari pesan user.
     Check apakah user sudah sepakat booking meeting dan extract tanggal/jam.
+    Jika ada existing meeting, detect apakah user ingin reschedule.
     """
-    logger.info(f"extract_meeting_info called for {customer_name}")
+    logger.info(f"extract_meeting_info called for {customer_name}, has_existing_meeting: {has_existing_meeting}")
 
-    system_prompt = f"""Extract informasi meeting dari percakapan dengan customer {customer_name}.
+    existing_context = ""
+    if has_existing_meeting:
+        existing_context = "\nCustomer sudah punya meeting yang di-book. Detect apakah customer ingin:\n1. Reschedule (ganti jadwal)\n2. Confirm meeting\n3. Complain/tanya lain"
+
+    system_prompt = f"""Extract informasi meeting dari percakapan dengan customer {customer_name}.{existing_context}
 
 Check apakah:
 1. Customer sudah SEPAKAT untuk booking meeting (bukan hanya tanya, tapi sudah fix)
 2. Tanggal dan jam yang disepakati
 3. Format meeting (online/offline)
+4. Apakah customer ingin reschedule (jika has_existing_meeting=True)
 
 Contoh agreement:
 - "Boleh, booking meeting besok jam 2" → has_meeting_agreement: True
 - "Oke, Senin depan jam 10 pagi" → has_meeting_agreement: True
+- "Besok jam 2 siang" → has_meeting_agreement: True
 - "Bisa gak jadwalnya diulang?" → has_meeting_agreement: False (masih negosiasi)
 
+Contoh reschedule:
+- "Saya mau ganti jadwal" → wants_reschedule: True
+- "Besok tidak bisa, bisa diganti lusa?" → wants_reschedule: True, has_meeting_agreement: True (baru jadwal)
+
 Return format:
-- meeting_date: dalam format YYYY-MM-DD jika jelas, atau natural seperti "besok"
-- meeting_time: dalam format HH:MM jika jelas, atau natural seperti "jam 2 siang"
-"""
+- meeting_date: dalam format YYYY-MM-DD jika jelas, atau natural seperti "besok", "Senin depan"
+- meeting_time: dalam format HH:MM jika jelas, atau natural seperti "jam 2 siang", "pagi", "sore"
+- Jika time tidak spesifik (pagi/siang), set meeting_time to natural text agar AI bisa follow-up"""
 
     extractor_llm = llm.with_structured_output(MeetingInfo)
     result = extractor_llm.invoke([SystemMessage(content=system_prompt)] + messages)
 
-    logger.info(f"extract_meeting_info result: agreement={result.has_meeting_agreement}, date={result.meeting_date}, time={result.meeting_time}")
+    logger.info(f"extract_meeting_info result: agreement={result.has_meeting_agreement}, wants_reschedule={result.wants_reschedule}, date={result.meeting_date}, time={result.meeting_time}")
     return result
 
-async def book_meeting(
+async def book_or_update_meeting(
     customer_id: int,
-    action_id: int,
-    meeting_info: MeetingInfo
+    meeting_info: MeetingInfo,
+    existing_meeting: Optional[CustomerMeeting] = None
 ) -> dict:
     """
-    Update customer_action dengan meeting data yang sudah disepakati.
+    Book new meeting atau update existing meeting.
     Return dict dengan status dan formatted meeting info.
     """
-    logger.info(f"book_meeting called - customer_id: {customer_id}, action_id: {action_id}")
+    logger.info(f"book_or_update_meeting called - customer_id: {customer_id}, existing_meeting: {existing_meeting.id if existing_meeting else None}")
 
-    # Format meeting data untuk storage
-    meeting_data = {
-        "meeting_date": meeting_info.meeting_date,
-        "meeting_time": meeting_info.meeting_time,
-        "meeting_format": meeting_info.meeting_format,
-        "booked_at": dt.now(WIB).isoformat()
-    }
+    meeting_date = meeting_info.meeting_date
+    meeting_time = meeting_info.meeting_time
+    meeting_format = meeting_info.meeting_format
 
-    logger.info(f"Meeting data: {meeting_data}")
+    # Check if time is specific enough
+    needs_clarification = False
+    clarification_msg = ""
 
-    # Update action record
-    await update_customer_action(
-        action_id=action_id,
-        action_data=meeting_data,
-        status="booked",
-        notes=f"Meeting booked. Date: {meeting_info.meeting_date}, Time: {meeting_info.meeting_time}. Notes: {meeting_info.notes or '-'}"
-    )
+    # Check apakah time perlu clarification (pagi/siang/sore tidak spesifik)
+    vague_times = ["pagi", "siang", "sore", "malam", "morning", "afternoon", "evening"]
+    if meeting_time and any(vt in meeting_time.lower() for vt in vague_times):
+        needs_clarification = True
+        clarification_msg = "\n\nKira-kira lebih spesifik jam berapa kak? Misalnya jam 9 pagi atau jam 2 siang?"
 
-    logger.info(f"Meeting BOOKED successfully - action_id: {action_id}")
+    if existing_meeting and meeting_info.wants_reschedule:
+        # Reschedule existing meeting
+        logger.info(f"Rescheduling meeting {existing_meeting.id}")
+        await update_meeting(
+            meeting_id=existing_meeting.id,
+            meeting_date=meeting_date,
+            meeting_time=meeting_time,
+            status="rescheduled",
+            notes=f"Rescheduled to: {meeting_date}, {meeting_time}. Original: {existing_meeting.notes}"
+        )
+        meeting_id = existing_meeting.id
+        status = "rescheduled"
+    elif existing_meeting:
+        # Update existing meeting confirmation
+        logger.info(f"Confirming existing meeting {existing_meeting.id}")
+        await update_meeting(
+            meeting_id=existing_meeting.id,
+            status="confirmed",
+            notes=f"Confirmed: {meeting_date}, {meeting_time}. {meeting_info.notes or ''}"
+        )
+        meeting_id = existing_meeting.id
+        status = "confirmed"
+    else:
+        # Create new meeting
+        logger.info(f"Creating new meeting for customer {customer_id}")
+        meeting = await create_meeting(
+            customer_id=customer_id,
+            meeting_date=meeting_date,
+            meeting_time=meeting_time,
+            meeting_format=meeting_format
+        )
+        meeting_id = meeting.id
+        status = "pending"
+
+    logger.info(f"Meeting processed - id: {meeting_id}, status: {status}")
 
     # Format untuk response ke customer
     formatted_response = {
-        "date": meeting_info.meeting_date,
-        "time": meeting_info.meeting_time,
-        "format": meeting_info.meeting_format
+        "date": meeting_date,
+        "time": meeting_time,
+        "format": meeting_format,
+        "needs_clarification": needs_clarification,
+        "clarification_msg": clarification_msg
     }
 
     return formatted_response
+
+# Product Inquiry Tools
+class ProductInfo(BaseModel):
+    """Extract product information dari chat"""
+    product_type: Optional[str] = Field(default=None, description="Tipe produk: TANAM atau INSTAN")
+    vehicle_type: Optional[str] = Field(default=None, description="Jenis kendaraan")
+    unit_qty: Optional[int] = Field(default=0, description="Jumlah unit")
+
+async def get_pending_inquiry(customer_id: int) -> Optional[ProductInquiry]:
+    """Get pending product inquiry untuk customer"""
+    async with AsyncSessionLocal() as db:
+        query = select(ProductInquiry).where(
+            (ProductInquiry.customer_id == customer_id) &
+            (ProductInquiry.status == "pending")
+        ).order_by(ProductInquiry.created_at.desc())
+
+        result = await db.execute(query)
+        inquiry = result.scalars().first()
+
+        if inquiry:
+            db.expunge(inquiry)
+            return inquiry
+        return None
+
+async def create_product_inquiry(
+    customer_id: int,
+    product_type: str,
+    vehicle_type: str,
+    unit_qty: int
+) -> ProductInquiry:
+    """Create new product inquiry"""
+    async with AsyncSessionLocal() as db:
+        inquiry = ProductInquiry(
+            customer_id=customer_id,
+            product_type=product_type,
+            vehicle_type=vehicle_type,
+            unit_qty=unit_qty,
+            status="pending"
+        )
+        db.add(inquiry)
+        await db.commit()
+        await db.refresh(inquiry)
+        db.expunge(inquiry)
+        return inquiry
+
+async def update_product_inquiry(
+    inquiry_id: int,
+    product_type: Optional[str] = None,
+    ecommerce_link: Optional[str] = None,
+    status: Optional[str] = None,
+    notes: Optional[str] = None
+) -> bool:
+    """Update existing product inquiry"""
+    async with AsyncSessionLocal() as db:
+        query = select(ProductInquiry).where(ProductInquiry.id == inquiry_id)
+        result = await db.execute(query)
+        inquiry = result.scalars().first()
+
+        if not inquiry:
+            return False
+
+        if product_type:
+            inquiry.product_type = product_type
+        if ecommerce_link:
+            inquiry.ecommerce_link = ecommerce_link
+        if status:
+            inquiry.status = status
+        if notes:
+            inquiry.notes = notes
+
+        await db.commit()
+        return True
 
 def extract_customer_info(messages: list, current_profile: dict) -> CustomerProfile:
     """
@@ -561,27 +739,99 @@ async def node_sales(state: AgentState):
 
     logger.info(f"Customer: {customer_name}, vehicle: {natural_vehicle}, qty: {data.get('unit_qty')}, b2b: {data.get('is_b2b')}")
 
-    # 1. Cek apakah user sudah sepakat booking meeting
-    meeting_info = extract_meeting_info(messages, customer_name)
+    # 1. Check existing meeting
+    existing_meeting = await get_pending_meeting(customer_id)
+    has_existing = existing_meeting is not None
+    logger.info(f"Existing meeting: {has_existing}, id={existing_meeting.id if existing_meeting else 'N/A'}")
 
-    # 2. Get or create action record
-    action = None
-    if customer_id:
-        action = await get_or_create_customer_action(
+    # 2. Cek apakah user sudah sepakat booking meeting atau ingin reschedule
+    meeting_info = extract_meeting_info(messages, customer_name, has_existing)
+
+    # 3. Handle reschedule request
+    if meeting_info.wants_reschedule and existing_meeting:
+        logger.info("Customer wants to RESCHEDULE meeting")
+
+        if meeting_info.has_meeting_agreement:
+            # Customer sepakat dengan jadwal baru
+            meeting_details = await book_or_update_meeting(
+                customer_id=customer_id,
+                meeting_info=meeting_info,
+                existing_meeting=existing_meeting
+            )
+
+            confirm_message = f"""Siap kak {customer_name}! 👍
+
+Meeting sudah Hana update:
+📅 Tanggal: {meeting_details['date']}
+⏰ Jam: {meeting_details['time']}
+📍 Format: {meeting_details['format'].title()}
+
+{meeting_details.get('clarification_msg', '')}
+
+Tim sales kami akan menghubungi kakak sesuai jadwal baru tersebut. Sampai jumpa di meeting ya kak! 🙏"""
+
+            logger.info(f"EXIT: node_sales -> Meeting rescheduled")
+            logger.info("=" * 50)
+
+            return {
+                "messages": [AIMessage(content=confirm_message)],
+                "route": "SALES",
+                "customer_id": customer_id
+            }
+        else:
+            # Masih negosiasi jadwal baru
+            prompt = f"""{HANA_PERSONA}
+
+Customer: {customer_name} ingin mengganti jadwal meeting yang sudah ada.
+Meeting lama: {existing_meeting.notes}
+
+Tugas:
+1. Acknowledge permintaan ganti jadwal
+2. Tanyakan kapan waktu yang cocok untuk meeting baru (tanggal & jam yang spesifik)
+3. Jika waktu tidak spesifik (pagi/siang/sore), tanya lebih detail: "Kira-kira jam berapa kak?"
+4. Ramah dan membantu"""
+
+            response = llm.invoke([SystemMessage(content=prompt)] + messages)
+
+            logger.info(f"EXIT: node_sales -> Negotiating reschedule")
+            logger.info("=" * 50)
+
+            return {
+                "messages": [AIMessage(content=response.content)],
+                "route": "SALES",
+                "customer_id": customer_id
+            }
+
+    # 4. Handle new meeting booking
+    if meeting_info.has_meeting_agreement and not existing_meeting:
+        logger.info("Meeting AGREED - booking new meeting")
+
+        meeting_details = await book_or_update_meeting(
             customer_id=customer_id,
-            action_type="quote_requested"
+            meeting_info=meeting_info,
+            existing_meeting=None
         )
-        logger.info(f"Customer action: id={action.id if action else 'N/A'}, type=quote_requested")
 
-    # 3. Jika sudah sepakat meeting, book dan confirm
-    if meeting_info.has_meeting_agreement and action:
-        logger.info("Meeting AGREED - booking meeting now")
+        # Check if need clarification for time
+        if meeting_details.get('needs_clarification'):
+            confirm_message = f"""Siap kak {customer_name}! 👍
 
-        meeting_details = await book_meeting(
-            customer_id=customer_id,
-            action_id=action.id,
-            meeting_info=meeting_info
-        )
+Meeting sudah Hana catat:
+📅 Tanggal: {meeting_details['date']}
+⏰ Jam: {meeting_details['time']}
+
+{meeting_details['clarification_msg']}
+
+Mohon info lebih spesifik ya kak, biar tim sales bisa persisp dengan jadwalnya."""
+
+            logger.info(f"EXIT: node_sales -> Meeting booked, needs clarification")
+            logger.info("=" * 50)
+
+            return {
+                "messages": [AIMessage(content=confirm_message)],
+                "route": "SALES",
+                "customer_id": customer_id
+            }
 
         # Buat konfirmasi meeting
         confirm_message = f"""Siap kak {customer_name}! 👍
@@ -604,7 +854,37 @@ Ada yang bisa Hana bantu sebelum meeting?"""
             "customer_id": customer_id
         }
 
-    # 4. Belum sepakat, lanjutkan negosiasi
+    # 5. Meeting sudah ada, customer menghubungi lagi (bukan reschedule)
+    if existing_meeting and not meeting_info.wants_reschedule:
+        logger.info(f"Existing meeting found, handling other inquiry")
+
+        meeting_info_str = f"📅 Tanggal: {existing_meeting.notes}"
+        prompt = f"""{HANA_PERSONA}
+
+Customer: {customer_name} sudah punya meeting yang di-book.
+Meeting: {meeting_info_str}
+
+Customer sekarang chat lagi (bukan untuk ganti jadwal).
+
+Tugas:
+1. Sapa dengan nama mereka
+2. Remind meeting mereka yang sudah di-book dengan singkat: "Meeting kakak sudah Hana catat ya untuk [tanggal/jam]"
+3. Tanya apakah ada yang bisa dibantu sebelum meeting
+4. Jangan buat meeting baru
+5. Ramah dan membantu"""
+
+        response = llm.invoke([SystemMessage(content=prompt)] + messages)
+
+        logger.info(f"EXIT: node_sales -> Existing meeting reminder")
+        logger.info("=" * 50)
+
+        return {
+            "messages": [AIMessage(content=response.content)],
+            "route": "SALES",
+            "customer_id": customer_id
+        }
+
+    # 6. Belum sepakat, lanjutkan negosiasi meeting baru
     logger.info("Meeting NOT agreed - continuing negotiation")
 
     prompt = f"""{HANA_PERSONA}
@@ -621,22 +901,14 @@ Tugas:
 1. Sapa dengan nama mereka
 2. Konfirmasi kebutuhan mereka
 3. Tawarkan Meeting Online dengan tim sales untuk penawaran khusus
-4. Tanyakan kapan waktu yang cocok untuk meeting (tanggal & jam)
-5. JANGAN gunakan placeholder [Link Booking Meeting]
-6. JANGAN buat action record baru - system sudah handle
+4. Tanyakan kapan waktu yang cocok untuk meeting (tanggal & jam yang SPESIFIK)
+5. Jika customer menyebut "pagi", "siang", atau "sore", tanya jam berapa: "Kira-kira jam berapa kak?"
+6. JANGAN gunakan placeholder [Link Booking Meeting]
 7. Focus untuk dapatkan kesepakatan jadwal meeting"""
 
     response = llm.invoke([SystemMessage(content=prompt)] + messages)
 
     logger.info(f"AI response generated: {response.content[:100]}...")
-
-    # Update notes dengan data terbaru
-    if action:
-        await update_customer_action(
-            action_id=action.id,
-            notes=f"Sales lead. Qty: {data.get('unit_qty')}, B2B: {data.get('is_b2b')}, Vehicle: {data.get('vehicle_type')}. Status: Negotiating meeting"
-        )
-
     logger.info(f"EXIT: node_sales -> Negotiating, route=SALES")
     logger.info("=" * 50)
 
@@ -660,46 +932,139 @@ async def node_ecommerce(state: AgentState):
 
     logger.info(f"Customer: {customer_name}, vehicle: {natural_vehicle}, qty: {data.get('unit_qty')}")
 
-    prompt = f"""{HANA_PERSONA}
+    # 1. Check existing inquiry
+    existing_inquiry = await get_pending_inquiry(customer_id)
+    has_existing = existing_inquiry is not None
+    logger.info(f"Existing inquiry: {has_existing}, id={existing_inquiry.id if existing_inquiry else 'N/A'}")
 
-User ini masuk kategori E-COMMERCE (Pribadi/1-4 Unit).
-Data customer:
-- Nama: {customer_name}
-- Domisili: {data.get('domicile')}
-- Kendaraan: {natural_vehicle} (original: {data.get('vehicle_type')})
-- Jumlah unit: {data.get('unit_qty')}
+    # 2. Extract product type dari conversation
+    product_info = extract_product_type(messages, data)
+    logger.info(f"Extracted product type: {product_info.product_type}, vehicle: {product_info.vehicle_type}, qty: {product_info.unit_qty}")
+
+    # 3. Determine response based on context
+    if existing_inquiry:
+        # Already have inquiry, check if customer asking about product again
+        logger.info("Existing inquiry found - providing product info")
+
+        prompt = f"""{HANA_PERSONA}
+
+Customer: {customer_name} sudah pernah tanya produk dan sudah Hana berikan rekomendasi.
+Inquiry lama:
+- Product Type: {existing_inquiry.product_type}
+- Vehicle: {existing_inquiry.vehicle_type}
+- Qty: {existing_inquiry.unit_qty}
+- Link: {existing_inquiry.ecommerce_link or 'Belum diberikan'}
+
+Customer sekarang chat lagi.
 
 Tugas:
 1. Sapa dengan nama mereka
-2. Tanya apakah mereka butuh tipe TANAM (pasang teknisi, bisa matikan mesin) atau INSTAN (colok sendiri, hanya lacak)
-3. Berikan rekomendasi produk yang cocok
-4. Berikan link e-commerce yang relevan (Tokopedia/Shopee/Official Store)
-5. JANGAN buat action record baru - system sudah handle"""
+2. Tanya apakah mereka ingin info tambahan atau ingin langsung order
+3. Jika mereka tanya lagi tentang produk, berikan info singkat dan reminder link sudah diberikan
+4. Ramah dan membantu
+5. JANGAN buat inquiry baru"""
 
-    response = llm.invoke([SystemMessage(content=prompt)] + messages)
+        response = llm.invoke([SystemMessage(content=prompt)] + messages)
 
-    logger.info(f"AI response generated: {response.content[:100]}...")
+        logger.info(f"EXIT: node_ecommerce -> Existing inquiry follow-up")
+        logger.info("=" * 50)
 
-    # Get or create action record HANYA jika belum ada (cegah spam)
-    if customer_id:
-        action = await get_or_create_customer_action(
-            customer_id=customer_id,
-            action_type="product_inquiry"
-        )
-        logger.info(f"Customer action: id={action.id if action else 'N/A'}, type=product_inquiry")
+        return {
+            "messages": [AIMessage(content=response.content)],
+            "route": "ECOMMERCE",
+            "customer_id": customer_id
+        }
 
-        # Update notes dengan data terbaru
-        if action:
-            await update_customer_action(
-                action_id=action.id,
-                notes=f"Ecommerce inquiry. Vehicle: {data.get('vehicle_type')}, Qty: {data.get('unit_qty')}"
-            )
+    # 4. No existing inquiry, create new one with product recommendation
+    logger.info("Creating new product inquiry")
 
-    logger.info(f"EXIT: node_ecommerce -> route=ECOMMERCE")
+    # Determine product type and generate link
+    product_type = product_info.product_type or "TANAM"  # Default to TANAM
+    vehicle = product_info.vehicle_type or data.get('vehicle_type', 'mobil')
+    qty = product_info.unit_qty or data.get('unit_qty', 1)
+
+    # Generate appropriate e-commerce link based on product type
+    ecommerce_link = generate_ecommerce_link(product_type, vehicle, qty)
+    logger.info(f"Generated e-commerce link: {ecommerce_link}")
+
+    # Create product inquiry record
+    inquiry = await create_product_inquiry(
+        customer_id=customer_id,
+        product_type=product_type,
+        vehicle_type=vehicle,
+        unit_qty=qty
+    )
+
+    # Update with ecommerce link
+    await update_product_inquiry(
+        inquiry_id=inquiry.id,
+        ecommerce_link=ecommerce_link,
+        status="link_sent"
+    )
+
+    # Generate response based on product type
+    if product_type == "TANAM":
+        product_desc = "OBU F & OBU V (Tipe TANAM - Tersembunyi, dipasang teknisi, bisa lacak + matikan mesin)"
+    elif product_type == "INSTAN":
+        product_desc = "OBU D, T1, atau T (Tipe INSTAN - Bisa pasang sendiri tinggal colok OBD, hanya lacak)"
+    else:
+        product_desc = f"{product_type}"
+
+    confirm_message = f"""Siap kak {customer_name}! 👍
+
+Berdasarkan kebutuhan {natural_vehicle} kakak ({qty} unit), Hana rekomendasikan:
+
+📦 {product_desc}
+
+{ecommerce_link}
+
+Kakak bisa langsung order melalui link di atas ya. Kalau ada pertanyaan seputar produk atau butuh bantu pemesanan, bilang saja ke Hana! 😊"""
+
+    logger.info(f"EXIT: node_ecommerce -> New inquiry created with link")
     logger.info("=" * 50)
 
     return {
-        "messages": [AIMessage(content=response.content)],
+        "messages": [AIMessage(content=confirm_message)],
         "route": "ECOMMERCE",
         "customer_id": customer_id
     }
+
+def extract_product_type(messages: list, customer_data: dict) -> ProductInfo:
+    """
+    Extract product type (TANAM/INSTAN) dari conversation.
+    """
+    logger.info(f"extract_product_type called - customer_data: {customer_data}")
+
+    system_prompt = f"""Extract product preference dari conversation.
+
+Data customer:
+- Vehicle: {customer_data.get('vehicle_type')}
+- Unit Qty: {customer_data.get('unit_qty')}
+
+Tipe produk:
+1. TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin) - Lebih mahal tapi lebih lengkap
+2. INSTAN: OBU D, T1, T (Colok OBD sendiri, hanya lacak) - Lebih murah, DIY installation
+
+Extract:
+- product_type: "TANAM" atau "INSTAN" (jika user tidak sebut, return null)
+- vehicle_type: jenis kendaraan dari customer data atau conversation
+- unit_qty: jumlah unit"""
+
+    extractor_llm = llm.with_structured_output(ProductInfo)
+    result = extractor_llm.invoke([SystemMessage(content=system_prompt)] + messages)
+
+    logger.info(f"extract_product_type result: {result.model_dump()}")
+    return result
+
+def generate_ecommerce_link(product_type: str, vehicle_type: str, unit_qty: int) -> str:
+    """
+    Generate appropriate e-commerce link based on product type.
+    Untuk production, ini bisa diupdate dengan link sebenarnya.
+    """
+    # Placeholder links - update dengan link Tokopedia/Shopee yang sebenarnya
+    if product_type == "TANAM":
+        return "🛒 Tokopedia: https://tokopedia.com/orin/gps-tanam\n🛒 Shopee: https://shopee.co.id/orin/gps-tanam"
+    elif product_type == "INSTAN":
+        return "🛒 Tokopedia: https://tokopedia.com/orin/gps-instan\n🛒 Shopee: https://shopee.co.id/orin/gps-instan"
+    else:
+        return "🛒 Tokopedia: https://tokopedia.com/orin\n🛒 Shopee: https://shopee.co.id/orin"

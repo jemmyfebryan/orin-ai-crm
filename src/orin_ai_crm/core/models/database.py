@@ -1,5 +1,4 @@
 import os
-import enum
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -17,14 +16,6 @@ DB_URL = f"mysql+aiomysql://{os.getenv('DB_USERNAME')}:{os.getenv('DB_PASSWORD')
 engine = create_async_engine(DB_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
-
-class ActionType(str, enum.Enum):
-    MEETING_BOOKED = "meeting_booked"
-    QUOTE_REQUESTED = "quote_requested"
-    PRODUCT_INQUIRY = "product_inquiry"
-    COMPLAINT = "complaint"
-    FOLLOW_UP = "follow_up"
-    OTHER = "other"
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -58,13 +49,40 @@ class ChatSession(Base):
     content = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
 
+class CustomerMeeting(Base):
+    """Table untuk meeting bookings - dedicated table untuk meeting management"""
+    __tablename__ = "customer_meetings"
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
+    meeting_datetime = Column(DateTime, nullable=True)  # WIB timezone
+    meeting_format = Column(String(50), default="online")  # online, offline, hybrid
+    status = Column(String(50), default="pending")  # pending, confirmed, cancelled, completed, rescheduled
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))
+    updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
+
+class ProductInquiry(Base):
+    """Table untuk product inquiries yang mengarah ke e-commerce"""
+    __tablename__ = "product_inquiries"
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
+    product_type = Column(String(100), nullable=True)  # TANAM, INSTAN, atau specific product
+    vehicle_type = Column(String(50), nullable=True)
+    unit_qty = Column(Integer, nullable=True)
+    recommended_product = Column(String(200), nullable=True)  # Nama produk yang direkomendasikan
+    ecommerce_link = Column(String(500), nullable=True)  # Link ke Tokopedia/Shopee/Official Store
+    status = Column(String(50), default="pending")  # pending, link_sent, interested, converted, lost
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))
+    updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
+
 class CustomerAction(Base):
-    """Table untuk tracking action penting seperti meeting booking, quote request, dll"""
+    """Table untuk tracking general action lainnya (complaint, follow-up, dll)"""
     __tablename__ = "customer_actions"
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
-    action_type = Column(String(50), nullable=False)  # meeting_booked, quote_requested, etc
-    action_data = Column(Text, nullable=True)  # JSON data untuk detail action (meeting time, dll)
+    action_type = Column(String(50), nullable=False)  # complaint, follow_up, other, dll (NOT meeting or inquiry)
+    action_data = Column(Text, nullable=True)  # JSON data untuk detail action
     status = Column(String(50), default="pending")  # pending, completed, cancelled
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))

@@ -14,6 +14,7 @@ from src.orin_ai_crm.core.agents.nodes.profiling_nodes import (
 
 from src.orin_ai_crm.core.agents.nodes.sales_nodes import node_sales
 from src.orin_ai_crm.core.agents.nodes.ecommerce_nodes import node_ecommerce
+from src.orin_ai_crm.core.agents.nodes.intent_classification_nodes import node_intent_classification
 
 __all__ = [
     # Helper functions
@@ -25,6 +26,9 @@ __all__ = [
     "determine_next_question",
     "create_lead_routing",
     "node_greeting_and_profiling",
+
+    # Intent Classification
+    "node_intent_classification",
 
     # Router
     "router_logic",

@@ -87,3 +87,27 @@ class CustomerAction(Base):
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
+
+class Product(Base):
+    """Table master produk - menyimpan semua informasi produk GPS"""
+    __tablename__ = "products"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False, index=True)  # Nama produk
+    sku = Column(String(100), unique=True, index=True)  # SKU/Code produk
+    category = Column(String(50), nullable=False)  # TANAM, INSTAN
+    subcategory = Column(String(50), nullable=True)  # OBU F, OBU V, OBU D, T1, T
+    vehicle_type = Column(String(50), nullable=True)  # mobil, motor, alat berat, truck
+    description = Column(Text, nullable=True)  # Deskripsi lengkap
+    features = Column(Text, nullable=True)  # Fitur-fitur dalam JSON
+    price = Column(Integer, nullable=True)  # Harga dalam Rupiah
+    installation_type = Column(String(50), nullable=False)  # pasang_technisi, colok_sendiri
+    can_shutdown_engine = Column(Boolean, default=False)  # Bisa matikan mesin?
+    is_realtime_tracking = Column(Boolean, default=True)  # Lacak real-time?
+    ecommerce_links = Column(Text, nullable=True)  # JSON links ke Tokopedia, Shopee, etc
+    images = Column(Text, nullable=True)  # JSON URLs gambar produk
+    specifications = Column(Text, nullable=True)  # Spesifikasi teknis dalam JSON
+    compatibility = Column(Text, nullable=True)  # JSON info kompatibilitas kendaraan
+    is_active = Column(Boolean, default=True)  # Produk masih aktif?
+    sort_order = Column(Integer, default=0)  # Urutan untuk sorting
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))
+    updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))

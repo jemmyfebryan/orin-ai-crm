@@ -49,10 +49,28 @@ async def node_sales(state: AgentState):
     customer_name = data.get('name', 'Kak')
 
     logger.info(f"Customer: {customer_name}, vehicle: {natural_vehicle}, qty: {data.get('unit_qty')}, b2b: {data.get('is_b2b')}")
+    logger.info(f"Flags - wants_meeting: {state.get('wants_meeting')}, existing_meeting_id: {state.get('existing_meeting_id')}")
 
-    # 1. Check existing meeting
+    # 1. Get intent classification flags
+    existing_meeting_id = state.get('existing_meeting_id')
+
+    # 2. Check existing meeting
     existing_meeting = await get_pending_meeting(customer_id)
     has_existing = existing_meeting is not None
+
+    # If intent classification provided an existing meeting ID, use it
+    if existing_meeting_id and not existing_meeting:
+        from src.orin_ai_crm.core.models.database import AsyncSessionLocal, CustomerMeeting
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as db:
+            query = select(CustomerMeeting).where(CustomerMeeting.id == existing_meeting_id)
+            result = await db.execute(query)
+            existing_meeting = result.scalars().first()
+            if existing_meeting:
+                has_existing = True
+                logger.info(f"Loaded meeting from ID: {existing_meeting_id}")
+
     logger.info(f"Existing meeting: {has_existing}, id={existing_meeting.id if existing_meeting else 'N/A'}")
 
     # 2. Cek apakah user sudah sepakat booking meeting atau ingin reschedule

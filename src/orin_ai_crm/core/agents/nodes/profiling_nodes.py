@@ -225,24 +225,53 @@ async def node_greeting_and_profiling(state: AgentState):
     }
 
 
-def router_logic(state: AgentState) -> Literal["sales_node", "ecommerce_node", "node_greeting_and_profiling"]:
-    from src.orin_ai_crm.core.agents.nodes.sales_nodes import node_sales
-    from src.orin_ai_crm.core.agents.nodes.ecommerce_nodes import node_ecommerce
+def router_logic(state: AgentState) -> Literal[
+    "intent_classification",
+    "sales_node",
+    "ecommerce_node",
+    "node_greeting_and_profiling",
+    "__end__"
+]:
+    """
+    Enhanced router logic with intent classification support.
+    """
+    step = state.get("step", "")
+    classified_intent = state.get("classified_intent")
+    logger.info(f"router_logic called - step: {step}, classified_intent: {classified_intent}")
 
-    step = state["step"]
-    logger.info(f"router_logic called - step: {step}")
+    # Special routes for intent classification results
+    if step in ["greeting", "complaint", "support", "product_qa", "handle_reschedule", "no_meeting_found", "need_identifier", "order_guidance", "general"]:
+        logger.info(f"Special step: {step} → END (message sent)")
+        return "__end__"
 
-    if step != "profiling_complete":
-        logger.info("Route -> node_greeting_and_profiling")
-        return "node_greeting_and_profiling"
-
-    data = state["customer_data"]
-    qty = data.get("unit_qty", 0)
-    is_b2b = data.get("is_b2b", False)
-
-    if qty >= 5 or is_b2b:
-        logger.info(f"Route -> sales_node (qty={qty}, b2b={is_b2b})")
+    # Check if wants_meeting flag is set
+    if state.get("wants_meeting"):
+        logger.info("Wants meeting flag set → route to sales_node")
         return "sales_node"
 
-    logger.info(f"Route -> ecommerce_node (qty={qty}, b2b={is_b2b})")
-    return "ecommerce_node"
+    # Check if existing_meeting_id is set
+    if state.get("existing_meeting_id"):
+        logger.info("Has existing meeting ID → route to sales_node")
+        return "sales_node"
+
+    # When profiling is in progress, END the conversation (waiting for user response)
+    if step == "profiling":
+        logger.info("Profiling in progress → END (waiting for user response)")
+        return "__end__"
+
+    # When profiling is complete, route to appropriate node
+    if step == "profiling_complete":
+        data = state["customer_data"]
+        qty = data.get("unit_qty", 0)
+        is_b2b = data.get("is_b2b", False)
+
+        if qty >= 5 or is_b2b:
+            logger.info(f"Route -> sales_node (qty={qty}, b2b={is_b2b})")
+            return "sales_node"
+
+        logger.info(f"Route -> ecommerce_node (qty={qty}, b2b={is_b2b})")
+        return "ecommerce_node"
+
+    # Default fallback
+    logger.info("No matching route → END")
+    return "__end__"

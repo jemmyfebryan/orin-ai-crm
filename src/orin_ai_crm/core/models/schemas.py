@@ -12,6 +12,12 @@ class AgentState(TypedDict):
     step: str
     route: str
     customer_data: dict
+    # Intent classification fields
+    classified_intent: Optional[str]  # Intent yang sudah diklasifikasi
+    intent_confidence: Optional[float]  # Confidence score 0-1
+    # Meeting flags
+    wants_meeting: Optional[bool]  # Set oleh intent_classification untuk meeting request
+    existing_meeting_id: Optional[int]  # Set oleh intent_classification untuk reschedule
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

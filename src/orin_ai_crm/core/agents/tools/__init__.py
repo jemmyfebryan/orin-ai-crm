@@ -24,7 +24,15 @@ from src.orin_ai_crm.core.agents.tools.product_tools import (
     update_product_inquiry,
     extract_product_type,
     generate_ecommerce_link,
-    ProductInfo
+    ProductInfo,
+    # Product query tools
+    get_all_active_products,
+    get_products_by_category,
+    get_products_by_vehicle_type,
+    search_products,
+    format_products_for_llm,
+    answer_product_question,
+    recommend_products
 )
 
 __all__ = [
@@ -49,4 +57,13 @@ __all__ = [
     "extract_product_type",
     "generate_ecommerce_link",
     "ProductInfo",
+
+    # Product Query Tools
+    "get_all_active_products",
+    "get_products_by_category",
+    "get_products_by_vehicle_type",
+    "search_products",
+    "format_products_for_llm",
+    "answer_product_question",
+    "recommend_products",
 ]

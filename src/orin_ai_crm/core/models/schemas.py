@@ -8,6 +8,7 @@ class AgentState(TypedDict):
     phone_number: Optional[str]
     lid_number: Optional[str]
     contact_name: Optional[str]
+    customer_id: Optional[int]  # Reference ke customers table
     step: str
     route: str
     customer_data: dict

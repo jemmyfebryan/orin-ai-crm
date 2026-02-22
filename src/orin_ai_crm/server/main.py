@@ -4,11 +4,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, delete
 
 # Import dari file modular sebelumnya
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
-from src.orin_ai_crm.core.agents.nodes.hana_nodes import save_message_to_db
+from src.orin_ai_crm.core.agents.nodes.hana_nodes import (
+    save_message_to_db, get_or_create_customer, get_chat_history
+)
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -40,6 +42,7 @@ class ChatRequest(BaseModel):
         return v
 
 class ChatResponse(BaseModel):
+    customer_id: Optional[int]
     phone_number: Optional[str]
     lid_number: Optional[str]
     reply: str
@@ -65,32 +68,6 @@ class ResetHistoryResponse(BaseModel):
     message: str
     deleted_count: int
 
-# --- HELPER: AMBIL HISTORY DARI DB ---
-async def get_chat_history(identifier: dict):
-    """Mengambil riwayat chat dari MySQL untuk menyusun context LangGraph"""
-    async with AsyncSessionLocal() as db:
-        query = (
-            select(ChatSession)
-            .where(
-                or_(
-                    ChatSession.phone_number == identifier.get('phone_number'),
-                    ChatSession.lid_number == identifier.get('lid_number')
-                )
-            )
-            .order_by(ChatSession.created_at.asc())
-            .limit(20) # Ambil 20 pesan terakhir agar context tidak terlalu gemuk
-        )
-        result = await db.execute(query)
-        rows = result.scalars().all()
-
-        history = []
-        for row in rows:
-            if row.message_role == "user":
-                history.append(HumanMessage(content=row.content))
-            else:
-                history.append(AIMessage(content=row.content))
-        return history
-
 # --- ENDPOINT UTAMA ---
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
@@ -101,13 +78,25 @@ async def chat_endpoint(req: ChatRequest):
             "lid_number": req.lid_number
         }
 
-        # 2. Tarik riwayat chat lama dari Database
-        history = await get_chat_history(identifier)
+        # 2. Get or create customer (returns detached object)
+        customer = await get_or_create_customer(identifier, req.contact_name)
+        customer_id = customer.id
 
-        # 3. Simpan pesan baru dari user ke Database
-        await save_message_to_db(identifier, "user", req.message)
+        # 3. Tarik riwayat chat lama dari Database
+        history_rows = await get_chat_history(customer_id)
 
-        # 4. Susun State untuk LangGraph
+        # 4. Build history list untuk LangGraph
+        history = []
+        for row in history_rows:
+            if row.message_role == "user":
+                history.append(HumanMessage(content=row.content))
+            else:
+                history.append(AIMessage(content=row.content))
+
+        # 5. Simpan pesan baru dari user ke Database
+        await save_message_to_db(customer_id, "user", req.message)
+
+        # 6. Susun State untuk LangGraph
         # Tambahkan pesan terbaru ke dalam history
         current_messages = history + [HumanMessage(content=req.message)]
 
@@ -116,22 +105,24 @@ async def chat_endpoint(req: ChatRequest):
             "phone_number": req.phone_number,
             "lid_number": req.lid_number,
             "contact_name": req.contact_name,
+            "customer_id": customer_id,
             "step": "start", # Akan diupdate oleh node profiling
             "route": "UNASSIGNED",
             "customer_data": {}
         }
 
-        # 5. Jalankan AI Workflow (LangGraph)
+        # 7. Jalankan AI Workflow (LangGraph)
         final_state = await hana_bot.ainvoke(initial_state)
 
-        # 6. Ambil balasan terakhir dari AI
+        # 8. Ambil balasan terakhir dari AI
         last_message = final_state["messages"][-1]
         ai_reply = last_message.content
 
-        # 7. Simpan balasan AI ke Database
-        await save_message_to_db(identifier, "ai", ai_reply)
+        # 9. Simpan balasan AI ke Database
+        await save_message_to_db(customer_id, "ai", ai_reply)
 
         return ChatResponse(
+            customer_id=customer_id,
             phone_number=req.phone_number,
             lid_number=req.lid_number,
             reply=ai_reply,
@@ -144,6 +135,8 @@ async def chat_endpoint(req: ChatRequest):
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Terjadi kesalahan pada server AI.")
 
 # --- ENDPOINT RESET HISTORY (UNTUK TESTING/DEV) ---
@@ -162,39 +155,40 @@ async def reset_history_endpoint(req: ResetHistoryRequest):
         deleted_count = 0
 
         async with AsyncSessionLocal() as db:
-            # 1. Hapus chat sessions
-            chat_query = select(ChatSession).where(
-                or_(
-                    ChatSession.phone_number == identifier.get('phone_number'),
-                    ChatSession.lid_number == identifier.get('lid_number')
-                )
-            )
-            chat_result = await db.execute(chat_query)
-            chats = chat_result.scalars().all()
-
-            for chat in chats:
-                await db.delete(chat)
-                deleted_count += 1
-
-            # 2. Hapus customer data
-            customer_query = select(Customer).where(
+            # 1. Cari customer berdasarkan identifier
+            query = select(Customer).where(
                 or_(
                     Customer.phone_number == identifier.get('phone_number'),
                     Customer.lid_number == identifier.get('lid_number')
                 )
             )
-            customer_result = await db.execute(customer_query)
-            customer = customer_result.scalars().first()
+            result = await db.execute(query)
+            customer = result.scalars().first()
 
-            if customer:
-                await db.delete(customer)
-                deleted_count += 1
+            if not customer:
+                return ResetHistoryResponse(
+                    success=True,
+                    message=f"Tidak ditemukan customer untuk identifier: {identifier}",
+                    deleted_count=0
+                )
+
+            customer_id = customer.id
+
+            # 2. Hapus semua chat sessions untuk customer ini
+            chat_delete = delete(ChatSession).where(ChatSession.customer_id == customer_id)
+            chat_result = await db.execute(chat_delete)
+            deleted_count += chat_result.rowcount
+
+            # 3. Hapus customer
+            cust_delete = delete(Customer).where(Customer.id == customer_id)
+            await db.execute(cust_delete)
+            deleted_count += 1
 
             await db.commit()
 
         return ResetHistoryResponse(
             success=True,
-            message=f"Berhasil reset history untuk identifier: {identifier}",
+            message=f"Berhasil reset history untuk customer_id: {customer_id}",
             deleted_count=deleted_count
         )
 

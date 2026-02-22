@@ -1,6 +1,11 @@
 from langgraph.graph import StateGraph, END
 from src.orin_ai_crm.core.models.schemas import AgentState
-from src.orin_ai_crm.core.agents.nodes.hana_nodes import node_greeting_and_profiling, node_sales, node_ecommerce, router_logic
+from src.orin_ai_crm.core.agents.nodes import (
+    node_greeting_and_profiling,
+    node_sales,
+    node_ecommerce,
+    router_logic
+)
 
 # Inisialisasi Graph
 workflow = StateGraph(AgentState)
@@ -17,7 +22,7 @@ workflow.add_conditional_edges(
     "greeting_profiling",
     router_logic,
     {
-        "node_greeting_and_profiling": END, 
+        "node_greeting_and_profiling": END,
         "sales_node": "sales_node",
         "ecommerce_node": "ecommerce_node"
     }

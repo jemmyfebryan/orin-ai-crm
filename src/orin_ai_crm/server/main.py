@@ -6,10 +6,12 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from sqlalchemy import select, or_, delete
 
-# Import dari file modular sebelumnya
+# Import dari modular structure
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
-from src.orin_ai_crm.core.agents.nodes.hana_nodes import (
-    save_message_to_db, get_or_create_customer, get_chat_history
+from src.orin_ai_crm.core.agents.tools import (
+    get_or_create_customer,
+    get_chat_history,
+    save_message_to_db
 )
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
 from langchain_core.messages import HumanMessage, AIMessage

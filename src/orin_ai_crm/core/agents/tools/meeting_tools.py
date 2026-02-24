@@ -9,41 +9,14 @@ from datetime import datetime as dt
 from sqlalchemy import select
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
-from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, CustomerMeeting
+from src.orin_ai_crm.core.models.schemas import MeetingInfo
 from src.orin_ai_crm.core.logger import get_logger
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
-
-
-class MeetingInfo(BaseModel):
-    """Extract meeting information dari chat"""
-    has_meeting_agreement: bool = Field(
-        description="True jika user sudah sepakat untuk booking meeting"
-    )
-    wants_reschedule: bool = Field(
-        default=False,
-        description="True jika user ingin reschedule meeting yang sudah ada"
-    )
-    meeting_date: Optional[str] = Field(
-        default=None,
-        description="Tanggal meeting dalam format DD/MM/YYYY atau natural seperti 'besok', 'Senin depan'"
-    )
-    meeting_time: Optional[str] = Field(
-        default=None,
-        description="Jam meeting dalam format HH:MM atau natural seperti 'jam 2 siang', 'pagi', 'sore'"
-    )
-    meeting_format: Optional[str] = Field(
-        default="online",
-        description="Format meeting: online, offline, atau belum ditentukan"
-    )
-    notes: Optional[str] = Field(
-        default=None,
-        description="Catatan tambahan dari user"
-    )
 
 
 async def get_pending_meeting(customer_id: int) -> Optional[CustomerMeeting]:

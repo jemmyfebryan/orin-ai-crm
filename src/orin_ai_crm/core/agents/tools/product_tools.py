@@ -10,9 +10,9 @@ from datetime import datetime
 from sqlalchemy import select
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
+from src.orin_ai_crm.core.models.schemas import ProductInfo
 from src.orin_ai_crm.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -276,12 +276,6 @@ Return format:
 # ============================================================================
 # E-COMMERCE INQUIRY MANAGEMENT
 # ============================================================================
-
-class ProductInfo(BaseModel):
-    """Product information extracted from conversation"""
-    product_type: Optional[str] = Field(default="", description="Tipe produk: TANAM atau INSTAN")
-    vehicle_type: Optional[str] = Field(default="", description="Jenis kendaraan")
-    unit_qty: Optional[int] = Field(default=0, description="Jumlah unit")
 
 
 async def get_pending_inquiry(customer_id: int) -> Optional[ProductInquiry]:

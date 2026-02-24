@@ -3,14 +3,12 @@ Intent Classification Node - Classify user intent at the start of conversation
 """
 
 import os
-from typing import Literal
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage
-from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.schemas import AgentState
+from src.orin_ai_crm.core.models.schemas import AgentState, IntentClassification
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal
 from src.orin_ai_crm.core.models.database import IntentClassification as IntentClassificationModel
 
@@ -31,25 +29,6 @@ ATURAN PERCAKAPAN:
 - Jangan ulang informasi yang sudah diketahui dari percakapan sebelumnya
 - Jika user memberikan info baru, acknowledgments dengan sopan
 - Singkat tapi ramah dan membantu"""
-
-
-class IntentClassification(BaseModel):
-    """User Intent Classification"""
-    intent: Literal["greeting", "profiling", "product_inquiry", "meeting_request", "complaint", "support", "reschedule", "order", "general_question"] = Field(
-        description="Intent utama user"
-    )
-    confidence: float = Field(
-        description="Confidence score 0-1",
-        ge=0.0,
-        le=1.0
-    )
-    reasoning: str = Field(
-        description="Alasan klasifikasi intent"
-    )
-    product_keywords: list[str] = Field(
-        default=[],
-        description="Keywords terkait produk yang disebutkan"
-    )
 
 
 def classify_user_intent(messages: list, customer_data: dict) -> IntentClassification:

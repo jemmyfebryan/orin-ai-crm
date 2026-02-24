@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal
+from src.orin_ai_crm.core.models.database import IntentClassification as IntentClassificationModel
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
@@ -120,10 +122,81 @@ Return format:
     return result
 
 
+async def save_intent_classification(
+    customer_id: int,
+    intent_result: IntentClassification,
+    route: str,
+    step: str,
+    message_context: str
+):
+    """
+    Save intent classification ke database untuk dataset training.
+    Table ini dinamis dan dapat mengakomodasi intent type baru di masa depan.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            classification = IntentClassificationModel(
+                customer_id=customer_id,
+                intent=intent_result.intent,
+                confidence=intent_result.confidence,
+                reasoning=intent_result.reasoning,
+                product_keywords=intent_result.product_keywords,
+                route=route,
+                step=step,
+                message_context=message_context[:1000] if message_context else None  # Limit to 1000 chars
+            )
+            db.add(classification)
+            await db.commit()
+            logger.info(f"Intent classification SAVED - id: {classification.id}, customer_id: {customer_id}, intent: {intent_result.intent}, route: {route}, step: {step}")
+    except Exception as e:
+        logger.error(f"Failed to save intent classification: {str(e)}")
+
+
+async def _build_state_and_save(
+    state: AgentState,
+    intent_result: IntentClassification,
+    messages: list = None,
+    route: str = "UNASSIGNED",
+    step: str = "profiling",
+    **kwargs
+):
+    """
+    Helper function untuk build state dict dan save intent classification ke database.
+    Ini memastikan setiap intent classification tersimpan dengan route dan step yang benar.
+    """
+    customer_id = state.get('customer_id')
+    customer_data = state.get('customer_data', {})
+    last_user_msg = (messages or state['messages'])[-1].content if (messages or state['messages']) else ""
+
+    # Build base state
+    result_state = {
+        "messages": messages or [],
+        "step": step,
+        "route": route,
+        "customer_data": customer_data,
+        "classified_intent": intent_result.intent,
+        "intent_confidence": intent_result.confidence,
+        **kwargs
+    }
+
+    # Save intent classification to database for dataset training
+    if customer_id:
+        await save_intent_classification(
+            customer_id=customer_id,
+            intent_result=intent_result,
+            route=route,
+            step=step,
+            message_context=last_user_msg
+        )
+
+    return result_state
+
+
 async def node_intent_classification(state: AgentState):
     """
     Intent Classification Node - Langkah pertama dalam workflow.
     Classify user intent dan return decision untuk next step.
+    Setiap intent classification akan disimpan ke table intent_classifications untuk dataset.
     """
     logger.info("=" * 50)
     logger.info("ENTER: node_intent_classification")
@@ -143,38 +216,32 @@ async def node_intent_classification(state: AgentState):
         logger.info(f"Low confidence ({confidence}), continuing to default flow")
         logger.info(f"EXIT: node_intent_classification -> default flow")
         logger.info("=" * 50)
-
-        return {
-            "messages": [],
-            "step": "profiling",
-            "route": "UNASSIGNED",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            route="UNASSIGNED",
+            step="profiling"
+        )
 
     # High confidence → route based on intent
     if intent == "greeting":
         logger.info("Intent: GREETING → Send greeting message")
-        return {
-            "messages": [AIMessage(content="Halo kak! 👋 Saya Hana dari ORIN GPS Tracker. Ada yang bisa Hana bantu hari ini?")],
-            "step": "greeting",
-            "route": "UNASSIGNED",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            messages=[AIMessage(content="Halo kak! 👋 Saya Hana dari ORIN GPS Tracker. Ada yang bisa Hana bantu hari ini?")],
+            route="UNASSIGNED",
+            step="greeting"
+        )
 
     elif intent == "profiling":
         logger.info("Intent: PROFILING → Continue profiling")
-        return {
-            "messages": [],
-            "step": "profiling",
-            "route": "UNASSIGNED",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            route="UNASSIGNED",
+            step="profiling"
+        )
 
     elif intent == "product_inquiry":
         # Check if profiling complete
@@ -199,24 +266,22 @@ async def node_intent_classification(state: AgentState):
                 customer_qty=customer_data.get('unit_qty')
             )
 
-            return {
-                "messages": [AIMessage(content=answer)],
-                "step": "product_qa",
-                "route": "PRODUCT_INFO",
-                "customer_data": customer_data,
-                "classified_intent": intent,
-                "intent_confidence": confidence
-            }
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                messages=[AIMessage(content=answer)],
+                route="PRODUCT_INFO",
+                step="product_qa"
+            )
         else:
             logger.info("Intent: PRODUCT_INQUIRY (profiling incomplete) → Continue profiling first")
-            return {
-                "messages": [AIMessage(content="Tentang produk kami ada banyak ya kak! 🚗 Tapi boleh kenalan dulu dengan Hana? Kakak nama dari mana ya?")],
-                "step": "profiling",
-                "route": "UNASSIGNED",
-                "customer_data": customer_data,
-                "classified_intent": intent,
-                "intent_confidence": confidence
-            }
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                messages=[AIMessage(content="Tentang produk kami ada banyak ya kak! 🚗 Tapi boleh kenalan dulu dengan Hana? Kakak nama dari mana ya?")],
+                route="UNASSIGNED",
+                step="profiling"
+            )
 
     elif intent == "meeting_request":
         logger.info("Intent: MEETING_REQUEST → Check if profiling complete")
@@ -231,25 +296,22 @@ async def node_intent_classification(state: AgentState):
         if has_all_profile:
             logger.info("Intent: MEETING_REQUEST (profiling complete) → Route to sales")
             # Pass to sales node with meeting intent
-            return {
-                "messages": [],
-                "step": "profiling_complete",
-                "route": "SALES",
-                "customer_data": customer_data,
-                "classified_intent": intent,
-                "intent_confidence": confidence,
-                "wants_meeting": True  # Flag untuk sales node
-            }
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                route="SALES",
+                step="profiling_complete",
+                wants_meeting=True
+            )
         else:
             logger.info("Intent: MEETING_REQUEST (profiling incomplete) → Continue profiling")
-            return {
-                "messages": [AIMessage(content="Siap kak, Hana bantu aturkan meetingnya! 📅 Tapi boleh kenalan dulu ya? Nama kakak siapa dan domisili di mana?")],
-                "step": "profiling",
-                "route": "UNASSIGNED",
-                "customer_data": customer_data,
-                "classified_intent": intent,
-                "intent_confidence": confidence
-            }
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                messages=[AIMessage(content="Siap kak, Hana bantu aturkan meetingnya! 📅 Tapi boleh kenalan dulu ya? Nama kakak siapa dan domisili di mana?")],
+                route="UNASSIGNED",
+                step="profiling"
+            )
 
     elif intent == "reschedule":
         logger.info("Intent: RESCHEDULE → Check for existing meeting")
@@ -263,48 +325,43 @@ async def node_intent_classification(state: AgentState):
             if existing_meeting:
                 logger.info(f"Existing meeting found: {existing_meeting.id} → Handle reschedule")
                 # Pass to sales node with reschedule flag
-                return {
-                    "messages": [],
-                    "step": "handle_reschedule",
-                    "route": "SALES",
-                    "customer_data": customer_data,
-                    "customer_id": customer_id,
-                    "classified_intent": intent,
-                    "intent_confidence": confidence,
-                    "existing_meeting_id": existing_meeting.id
-                }
+                return await _build_state_and_save(
+                    state=state,
+                    intent_result=intent_result,
+                    route="SALES",
+                    step="handle_reschedule",
+                    customer_id=customer_id,
+                    existing_meeting_id=existing_meeting.id
+                )
             else:
                 logger.info("No existing meeting → Ask if they want to book new meeting")
-                return {
-                    "messages": [AIMessage(content="Kakak ingin reschedule meeting ya? Hmm, sepertinya Hana belum ada jadwal meeting untuk kakak sebelumnya. Kakak mau booking meeting baru? 📅")],
-                    "step": "no_meeting_found",
-                    "route": "UNASSIGNED",
-                    "customer_data": customer_data,
-                    "customer_id": customer_id,
-                    "classified_intent": intent,
-                    "intent_confidence": confidence
-                }
+                return await _build_state_and_save(
+                    state=state,
+                    intent_result=intent_result,
+                    messages=[AIMessage(content="Kakak ingin reschedule meeting ya? Hmm, sepertinya Hana belum ada jadwal meeting untuk kakak sebelumnya. Kakak mau booking meeting baru? 📅")],
+                    route="UNASSIGNED",
+                    step="no_meeting_found",
+                    customer_id=customer_id
+                )
         else:
             logger.info("No customer_id → Ask for identification first")
-            return {
-                "messages": [AIMessage(content="Mohon share nomor WhatsApp atau ID kakak ya supaya Hana bisa cek jadwal meeting yang sudah ada 😊")],
-                "step": "need_identifier",
-                "route": "UNASSIGNED",
-                "customer_data": customer_data,
-                "classified_intent": intent,
-                "intent_confidence": confidence
-            }
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                messages=[AIMessage(content="Mohon share nomor WhatsApp atau ID kakak ya supaya Hana bisa cek jadwal meeting yang sudah ada 😊")],
+                route="UNASSIGNED",
+                step="need_identifier"
+            )
 
     elif intent == "complaint":
         logger.info("Intent: COMPLAINT → Route to support")
-        return {
-            "messages": [AIMessage(content="Mohon maaf atas ketidaknyamanan kakak 🙏\n\nBisa ceritakan lebih detail masalahnya apa? Tim support kami akan segera membantu menyelesaikannya.")],
-            "step": "complaint",
-            "route": "SUPPORT",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            messages=[AIMessage(content="Mohon maaf atas ketidaknyamanan kakak 🙏\n\nBisa ceritakan lebih detail masalahnya apa? Tim support kami akan segera membantu menyelesaikannya.")],
+            route="SUPPORT",
+            step="complaint"
+        )
 
     elif intent == "support":
         logger.info("Intent: SUPPORT → Provide technical support")
@@ -319,36 +376,33 @@ async def node_intent_classification(state: AgentState):
             customer_qty=customer_data.get('unit_qty')
         )
 
-        return {
-            "messages": [AIMessage(content=answer)],
-            "step": "support",
-            "route": "SUPPORT",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            messages=[AIMessage(content=answer)],
+            route="SUPPORT",
+            step="support"
+        )
 
     elif intent == "order":
         logger.info("Intent: ORDER → Guide to purchase")
-        return {
-            "messages": [AIMessage(content="Siap kak! Hana bantu proses pembeliannya 😊\n\nKakak mau beli produk yang tipe apa?\n\n• Tipe TANAM (pasang teknisi, bisa matikan mesin)\n• Tipe INSTAN (colok sendiri, tinggal colok OBD)\n\nUntuk pembelian, kakak bisa langsung ke:\n🛒 Tokopedia: https://tokopedia.com/orin\n🛒 Shopee: https://shopee.co.id/orin\n\nAtau kakak bisa konsultasi dulu dengan tim kami untuk memastikan produk yang tepat. Mau booking meeting? 📅")],
-            "step": "order_guidance",
-            "route": "ECOMMERCE",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            messages=[AIMessage(content="Siap kak! Hana bantu proses pembeliannya 😊\n\nKakak mau beli produk yang tipe apa?\n\n• Tipe TANAM (pasang teknisi, bisa matikan mesin)\n• Tipe INSTAN (colok sendiri, tinggal colok OBD)\n\nUntuk pembelian, kakak bisa langsung ke:\n🛒 Tokopedia: https://tokopedia.com/orin\n🛒 Shopee: https://shopee.co.id/orin\n\nAtau kakak bisa konsultasi dulu dengan tim kami untuk memastikan produk yang tepat. Mau booking meeting? 📅")],
+            route="ECOMMERCE",
+            step="order_guidance"
+        )
 
     else:  # general_question
         logger.info("Intent: GENERAL → Answer general question")
-        return {
-            "messages": [AIMessage(content="Terima kasih sudah menghubungi ORIN GPS Tracker! 😊\n\nUntuk pertanyaan tentang produk, fitur, atau pemesanan, kakak bisa tanya langsung ke Hana ya. Ada yang bisa Hana bantu?")],
-            "step": "general",
-            "route": "UNASSIGNED",
-            "customer_data": customer_data,
-            "classified_intent": intent,
-            "intent_confidence": confidence
-        }
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            messages=[AIMessage(content="Terima kasih sudah menghubungi ORIN GPS Tracker! 😊\n\nUntuk pertanyaan tentang produk, fitur, atau pemesanan, kakak bisa tanya langsung ke Hana ya. Ada yang bisa Hana bantu?")],
+            route="UNASSIGNED",
+            step="general"
+        )
 
     logger.info(f"EXIT: node_intent_classification -> intent: {intent}, confidence: {confidence}")
     logger.info("=" * 50)

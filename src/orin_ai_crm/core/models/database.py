@@ -3,7 +3,7 @@ from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Float, JSON
 
 # Setup WIB timezone (UTC+7)
 WIB = timezone(timedelta(hours=7))
@@ -111,3 +111,17 @@ class Product(Base):
     sort_order = Column(Integer, default=0)  # Urutan untuk sorting
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
+
+class IntentClassification(Base):
+    """Table untuk menyimpan intent classification - dataset untuk training model independen atau sebagai additional dataset"""
+    __tablename__ = "intent_classifications"
+    id = Column(Integer, primary_key=True, index=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True)
+    intent = Column(String(100), nullable=False, index=True)  # Intent type: greeting, profiling, product_inquiry, meeting_request, complaint, support, reschedule, order, general_question
+    confidence = Column(Float, nullable=False)  # Confidence score 0.0 - 1.0
+    reasoning = Column(Text, nullable=True)  # Alasan klasifikasi dari LLM
+    product_keywords = Column(JSON, nullable=True)  # List kata kunci terkait produk
+    route = Column(String(50), nullable=True)  # Route yang diambil: UNASSIGNED, SALES, ECOMMERCE, SUPPORT, PRODUCT_INFO
+    step = Column(String(50), nullable=True)  # Step yang dieksekusi
+    message_context = Column(Text, nullable=True)  # Context pesan user (last message for reference)
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))

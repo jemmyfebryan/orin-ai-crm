@@ -89,36 +89,119 @@ Jika user belum menyebutkan, biarkan kosong."""
     return result
 
 
+async def generate_profiling_question(
+    messages: list,
+    profile: CustomerProfile,
+    field_name: str
+) -> str:
+    """
+    Generate personalized profiling question menggunakan LLM.
+
+    Args:
+        messages: Conversation history
+        profile: Current customer profile
+        field_name: Field yang akan ditanya (name, domicile, vehicle_type, unit_qty)
+
+    Returns:
+        Generated question string
+    """
+    profile_data = profile.model_dump()
+
+    # Build context prompt
+    context_prompt = f"""{HANA_PERSONA}
+
+CONVERSATION HISTORY:
+{format_conversation_history_profiling(messages[-3:])}
+
+CURRENT CUSTOMER PROFILE:
+- Nama: {profile_data.get('name') or 'Belum diketahui'}
+- Domisili: {profile_data.get('domicile') or 'Belum diketahui'}
+- Kendaraan: {profile_data.get('vehicle_type') or 'Belum diketahui'}
+- Jumlah unit: {profile_data.get('unit_qty', 0)}
+
+YOUR TASK:
+Generate pertanyaan yang natural dan personalized untuk mendapatkan info: {field_name.upper()}
+
+GUIDELINES PER FIELD:
+"""
+
+    # Add specific guidelines based on field
+    field_to_guideline = {
+        "name": """- Tanyakan nama dengan sopan
+- Perkenalkan diri sebagai Hana dari ORIN GPS Tracker
+- Jangan terlalu formal, gunakan bahasa natural
+- Contoh: "Halo kak! Saya Hana dari ORIN GPS Tracker. Boleh tahu nama kakak agar Hana bisa panggil dengan sopan?"
+""",
+        "domicile": f"""- Gunakan nama customer: {profile_data.get('name') or 'Kak'}
+- Tanyakan domisili/kota
+- Jelaskan bahwa ini untuk penawaran yang lebih pas
+- Natural dan tidak kaku
+""",
+        "vehicle_type": f"""- Gunakan nama & domisili customer: {profile_data.get('name') or 'Kak'} dari {profile_data.get('domicile') or 'kota kakak'}
+- Tanyakan jenis kendaraan yang akan dipasang GPS
+- Berikan opsi: Mobil pribadi, Motor, Alat berat, Armada operasional/kantor, Lainnya
+- Natural dan ramah
+""",
+        "unit_qty": f"""- Gunakan nama customer: {profile_data.get('name') or 'Kak'}
+- Gunakan natural vehicle type: {get_natural_vehicle_type(profile_data.get('vehicle_type', ''))}
+- Tanyakan berapa unit yang akan dipasang GPS
+- Singkat dan natural
+"""
+    }
+
+    context_prompt += field_to_guideline.get(field_name, "")
+
+    context_prompt += """
+RULES:
+- Response HANYA dengan pesan yang akan dikirim (tanpa penjelasan tambahan)
+- Personalized berdasarkan info yang sudah diketahui
+- Gunakan emoji secara wajar
+- Natural seperti chat WhatsApp asli
+- Tidak perlu opsi jawaban (kecuali vehicle_type)
+- Jangan ulang info yang sudah diketahui"""
+
+    response = llm.invoke([SystemMessage(content=context_prompt)] + messages)
+    return response.content
+
+
+def format_conversation_history_profiling(messages: list) -> str:
+    """Format conversation history untuk profiling context"""
+    if not messages:
+        return "No conversation history"
+
+    formatted = []
+    for msg in messages:
+        role = "Customer" if msg.type == "human" else "Hana"
+        content = msg.content[:150]  # Limit untuk profiling context
+        formatted.append(f"{role}: {content}")
+
+    return "\n".join(formatted)
+
+
 def determine_next_question(profile: CustomerProfile) -> tuple[str, str]:
     """
-    Tentukan pertanyaan berikutnya berdasarkan profile yang sudah terisi.
-    Return (question, field_name)
+    Tentukan field berikutnya yang perlu ditanya.
+    Return (empty_question, field_name) - question akan di-generate oleh LLM di node level.
     """
     logger.info(f"determine_next_question called - profile: {profile.model_dump()}")
 
     # Prioritas pertanyaan: name → domicile → vehicle_type → unit_qty
 
     if not profile.name:
-        question = "Halo kak, terima kasih sudah menghubungi ORIN GPS Tracker! Salam kenal, saya Hana 😊\n\nBoleh kakak sebutin nama kakak agar Hana bisa panggil dengan sopan?"
         logger.info("Next question: NAME")
-        return question, "name"
+        return "", "name"
 
     if not profile.domicile:
-        question = f"Terima kasih kak {profile.name}! 👋\n\nBoleh tau kakak domisili di kota mana ya? Supaya Hana bisa bantu penawaran yang pas."
         logger.info(f"Next question: DOMICILE (for {profile.name})")
-        return question, "domicile"
+        return "", "domicile"
 
     if not profile.vehicle_type:
-        question = f"Siap kak {profile.name} dari {profile.domicile}! 📍\n\nNah, yang ingin kakak pasang GPS-nya itu untuk apa ya?\n\n• Mobil pribadi\n• Motor\n• Alat berat\n• Armada operasional/kantor\n• Lainnya"
         logger.info(f"Next question: VEHICLE_TYPE (for {profile.name} from {profile.domicile})")
-        return question, "vehicle_type"
+        return "", "vehicle_type"
 
     if profile.unit_qty == 0:
-        # Gunakan natural vehicle type untuk response
-        natural_vehicle = get_natural_vehicle_type(profile.vehicle_type)
-        question = f"Baik kak, untuk {natural_vehicle} ya. 🚗\n\nKira-kira ada berapa unit yang ingin kakak pasang GPS?"
         logger.info(f"Next question: UNIT_QTY (for {profile.name}, vehicle: {profile.vehicle_type})")
-        return question, "unit_qty"
+        return "", "unit_qty"
 
     logger.info("Profiling COMPLETE - all fields filled")
     return "", "complete"
@@ -183,8 +266,8 @@ async def node_greeting_and_profiling(state: AgentState):
     # 4. Update database dengan data baru/berubah
     await update_customer_profile(customer_id, extracted_data)
 
-    # 5. Tentukan pertanyaan berikutnya
-    question, next_field = determine_next_question(extracted_data)
+    # 5. Tentukan field berikutnya yang perlu ditanya
+    _, next_field = determine_next_question(extracted_data)
 
     # 6. Tentukan response
     if next_field == "complete":
@@ -211,9 +294,17 @@ async def node_greeting_and_profiling(state: AgentState):
             "customer_id": customer_id
         }
 
-    # Masih tahap profiling, kirim pertanyaan berikutnya
+    # Masih tahap profiling, generate dan kirim pertanyaan berikutnya
     logger.info(f"Profiling IN PROGRESS - Next field: {next_field}")
-    logger.info(f"Question to send: {question[:100]}...")
+
+    # Generate personalized question using LLM
+    question = await generate_profiling_question(
+        messages=messages,
+        profile=extracted_data,
+        field_name=next_field
+    )
+
+    logger.info(f"Generated question: {question[:100]}...")
     logger.info(f"EXIT: node_greeting_and_profiling -> step=profiling")
     logger.info("=" * 50)
 

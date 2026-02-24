@@ -18,6 +18,20 @@ logger = get_logger(__name__)
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
+HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
+
+ATURAN PRODUK GPS MOBIL:
+- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
+- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak).
+
+ATURAN PERCAKAPAN:
+- Jawab dengan personalized berdasarkan nama customer jika tersedia
+- Gunakan konteks percakapan sebelumnya untuk memberikan response yang relevan
+- Jangan ulang informasi yang sudah diketahui dari percakapan sebelumnya
+- Jika user memberikan info baru, acknowledgments dengan sopan
+- Singkat tapi ramah dan membantu"""
+
 
 class IntentClassification(BaseModel):
     """User Intent Classification"""
@@ -192,6 +206,73 @@ async def _build_state_and_save(
     return result_state
 
 
+async def generate_llm_response(
+    messages: list,
+    customer_data: dict,
+    response_task: str,
+    context_info: dict = None
+) -> str:
+    """
+    Generate personalized LLM response based on conversation context.
+
+    Args:
+        messages: Conversation history
+        customer_data: Known customer information
+        response_task: What the response should accomplish
+        context_info: Additional context for the specific task
+
+    Returns:
+        Generated response string
+    """
+    customer_name = customer_data.get('name') or customer_data.get('contact_name') or 'Kak'
+
+    # Build context prompt
+    context_prompt = f"""{HANA_PERSONA}
+
+CONVERSATION HISTORY:
+{format_conversation_history(messages[-5:])}
+
+CUSTOMER INFO:
+- Nama: {customer_data.get('name', 'Belum diketahui')}
+- Domisili: {customer_data.get('domicile', 'Belum diketahui')}
+- Kendaraan: {customer_data.get('vehicle_type', 'Belum diketahui')}
+- Jumlah unit: {customer_data.get('unit_qty', 0)}
+"""
+
+    if context_info:
+        context_prompt += f"\nADDITIONAL CONTEXT:\n{context_info}\n"
+
+    context_prompt += f"""
+YOUR TASK:
+{response_task}
+
+Generate response yang:
+1. Personalized dengan nama customer: {customer_name}
+2. Menggunakan konteks percakapan di atas
+3. Tidak mengulang informasi yang sudah diketahui
+4. Singkat, ramah, dan natural (seperti chat WhatsApp asli)
+5. Menggunakan emoji secara wajar
+
+Response only dengan pesan yang akan dikirim ke customer."""
+
+    response = llm.invoke([SystemMessage(content=context_prompt)] + messages)
+    return response.content
+
+
+def format_conversation_history(messages: list) -> str:
+    """Format conversation history for prompt"""
+    if not messages:
+        return "No conversation history"
+
+    formatted = []
+    for msg in messages:
+        role = "User" if msg.type == "human" else "Hana"
+        content = msg.content[:200]  # Limit to 200 chars per message
+        formatted.append(f"{role}: {content}")
+
+    return "\n".join(formatted)
+
+
 async def node_intent_classification(state: AgentState):
     """
     Intent Classification Node - Langkah pertama dalam workflow.
@@ -225,11 +306,16 @@ async def node_intent_classification(state: AgentState):
 
     # High confidence → route based on intent
     if intent == "greeting":
-        logger.info("Intent: GREETING → Send greeting message")
+        logger.info("Intent: GREETING → Send personalized greeting message")
+        response = await generate_llm_response(
+            messages=messages,
+            customer_data=customer_data,
+            response_task="Berikan greeting yang ramah dan perkenalkan diri sebagai Hana dari ORIN GPS Tracker. Tanyakan bagaimana Hana bisa membantu hari ini."
+        )
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            messages=[AIMessage(content="Halo kak! 👋 Saya Hana dari ORIN GPS Tracker. Ada yang bisa Hana bantu hari ini?")],
+            messages=[AIMessage(content=response)],
             route="UNASSIGNED",
             step="greeting"
         )
@@ -275,10 +361,15 @@ async def node_intent_classification(state: AgentState):
             )
         else:
             logger.info("Intent: PRODUCT_INQUIRY (profiling incomplete) → Continue profiling first")
+            response = await generate_llm_response(
+                messages=messages,
+                customer_data=customer_data,
+                response_task="User bertanya tentang produk tapi profiling belum lengkap. Response dengan ramah, jelaskan bahwa Hana akan bantu jelaskan produk, tapi boleh kenalan dulu (tanya data yang belum diketahui: nama/domisili/kendaraan/qty)."
+            )
             return await _build_state_and_save(
                 state=state,
                 intent_result=intent_result,
-                messages=[AIMessage(content="Tentang produk kami ada banyak ya kak! 🚗 Tapi boleh kenalan dulu dengan Hana? Kakak nama dari mana ya?")],
+                messages=[AIMessage(content=response)],
                 route="UNASSIGNED",
                 step="profiling"
             )
@@ -305,10 +396,15 @@ async def node_intent_classification(state: AgentState):
             )
         else:
             logger.info("Intent: MEETING_REQUEST (profiling incomplete) → Continue profiling")
+            response = await generate_llm_response(
+                messages=messages,
+                customer_data=customer_data,
+                response_task="User ingin booking meeting tapi profiling belum lengkap. Response dengan antusias bahwa Hana akan bantu aturkan meeting, tapi kenalan dulu ya (tanya data yang belum diketahui: nama/domisili/kendaraan/qty)."
+            )
             return await _build_state_and_save(
                 state=state,
                 intent_result=intent_result,
-                messages=[AIMessage(content="Siap kak, Hana bantu aturkan meetingnya! 📅 Tapi boleh kenalan dulu ya? Nama kakak siapa dan domisili di mana?")],
+                messages=[AIMessage(content=response)],
                 route="UNASSIGNED",
                 step="profiling"
             )
@@ -335,30 +431,45 @@ async def node_intent_classification(state: AgentState):
                 )
             else:
                 logger.info("No existing meeting → Ask if they want to book new meeting")
+                response = await generate_llm_response(
+                    messages=messages,
+                    customer_data=customer_data,
+                    response_task="User ingin reschedule meeting tapi belum ada meeting yang di-book sebelumnya. Response dengan ramah, jelaskan bahwa belum ada jadwal meeting, dan tanya apakah mau booking meeting baru."
+                )
                 return await _build_state_and_save(
                     state=state,
                     intent_result=intent_result,
-                    messages=[AIMessage(content="Kakak ingin reschedule meeting ya? Hmm, sepertinya Hana belum ada jadwal meeting untuk kakak sebelumnya. Kakak mau booking meeting baru? 📅")],
+                    messages=[AIMessage(content=response)],
                     route="UNASSIGNED",
                     step="no_meeting_found",
                     customer_id=customer_id
                 )
         else:
             logger.info("No customer_id → Ask for identification first")
+            response = await generate_llm_response(
+                messages=messages,
+                customer_data=customer_data,
+                response_task="User ingin reschedule meeting tapi tidak ada customer_id. Response minta user share nomor WhatsApp atau ID supaya Hana bisa cek jadwal meeting."
+            )
             return await _build_state_and_save(
                 state=state,
                 intent_result=intent_result,
-                messages=[AIMessage(content="Mohon share nomor WhatsApp atau ID kakak ya supaya Hana bisa cek jadwal meeting yang sudah ada 😊")],
+                messages=[AIMessage(content=response)],
                 route="UNASSIGNED",
                 step="need_identifier"
             )
 
     elif intent == "complaint":
         logger.info("Intent: COMPLAINT → Route to support")
+        response = await generate_llm_response(
+            messages=messages,
+            customer_data=customer_data,
+            response_task="User mengajukan keluhan/komplain. Response dengan empati, minta maaf atas ketidaknyamanan, dan tanya detail masalahnya agar tim support bisa membantu."
+        )
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            messages=[AIMessage(content="Mohon maaf atas ketidaknyamanan kakak 🙏\n\nBisa ceritakan lebih detail masalahnya apa? Tim support kami akan segera membantu menyelesaikannya.")],
+            messages=[AIMessage(content=response)],
             route="SUPPORT",
             step="complaint"
         )
@@ -386,20 +497,38 @@ async def node_intent_classification(state: AgentState):
 
     elif intent == "order":
         logger.info("Intent: ORDER → Guide to purchase")
+        response = await generate_llm_response(
+            messages=messages,
+            customer_data=customer_data,
+            response_task="""User ingin order/beli produk. Bantu proses pembelian dengan:
+1. Tanya tipe produk yang diinginkan (TANAM vs INSTAN)
+2. Jelaskan singkat bedanya:
+   - TANAM: dipasang teknisi, bisa matikan mesin
+   - INSTAN: colok sendiri ke OBD
+3. Sediakan link e-commerce:
+   - Tokopedia: https://tokopedia.com/orin
+   - Shopee: https://shopee.co.id/orin
+4. Tawarkan konsultasi dulu dengan tim sales jika perlu"""
+        )
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            messages=[AIMessage(content="Siap kak! Hana bantu proses pembeliannya 😊\n\nKakak mau beli produk yang tipe apa?\n\n• Tipe TANAM (pasang teknisi, bisa matikan mesin)\n• Tipe INSTAN (colok sendiri, tinggal colok OBD)\n\nUntuk pembelian, kakak bisa langsung ke:\n🛒 Tokopedia: https://tokopedia.com/orin\n🛒 Shopee: https://shopee.co.id/orin\n\nAtau kakak bisa konsultasi dulu dengan tim kami untuk memastikan produk yang tepat. Mau booking meeting? 📅")],
+            messages=[AIMessage(content=response)],
             route="ECOMMERCE",
             step="order_guidance"
         )
 
     else:  # general_question
         logger.info("Intent: GENERAL → Answer general question")
+        response = await generate_llm_response(
+            messages=messages,
+            customer_data=customer_data,
+            response_task="User mengirim pertanyaan umum. Response dengan ramah, terima kasih sudah menghubungi ORIN GPS Tracker, dan tanya apa yang bisa Hana bantu."
+        )
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            messages=[AIMessage(content="Terima kasih sudah menghubungi ORIN GPS Tracker! 😊\n\nUntuk pertanyaan tentang produk, fitur, atau pemesanan, kakak bisa tanya langsung ke Hana ya. Ada yang bisa Hana bantu?")],
+            messages=[AIMessage(content=response)],
             route="UNASSIGNED",
             step="general"
         )

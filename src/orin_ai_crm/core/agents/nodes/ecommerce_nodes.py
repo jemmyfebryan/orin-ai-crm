@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, SystemMessage
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState
-from src.orin_ai_crm.core.agents.nodes.profiling_nodes import get_natural_vehicle_type
 from src.orin_ai_crm.core.agents.tools import (
     get_pending_inquiry,
     create_product_inquiry,
@@ -47,11 +46,11 @@ async def node_ecommerce(state: AgentState):
     data = state['customer_data']
     customer_id = state.get('customer_id')
 
-    # Gunakan natural vehicle type untuk response
-    natural_vehicle = get_natural_vehicle_type(data.get('vehicle_type', ''))
+    # Gunakan vehicle_alias untuk response (fallback to vehicle_alias)
+    vehicle_alias = data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan')
     customer_name = data.get('name', 'Kak')
 
-    logger.info(f"Customer: {customer_name}, vehicle: {natural_vehicle}, qty: {data.get('unit_qty')}")
+    logger.info(f"Customer: {customer_name}, vehicle: {vehicle_alias}, qty: {data.get('unit_qty')}")
 
     # 1. Check existing inquiry
     existing_inquiry = await get_pending_inquiry(customer_id)
@@ -60,7 +59,7 @@ async def node_ecommerce(state: AgentState):
 
     # 2. Extract product type dari conversation
     product_info: ProductInfo = extract_product_type(messages, data)
-    logger.info(f"Extracted product type: {product_info.product_type}, vehicle: {product_info.vehicle_type}, qty: {product_info.unit_qty}")
+    logger.info(f"Extracted product type: {product_info.product_type}, vehicle: {product_info.vehicle_alias or product_info.vehicle_alias}, qty: {product_info.unit_qty}")
 
     # 3. Determine response based on context
     if existing_inquiry:
@@ -72,7 +71,7 @@ async def node_ecommerce(state: AgentState):
 Customer: {customer_name} sudah pernah tanya produk dan sudah Hana berikan rekomendasi.
 Inquiry lama:
 - Product Type: {existing_inquiry.product_type}
-- Vehicle: {existing_inquiry.vehicle_type}
+- Vehicle: {existing_inquiry.vehicle_type}  # This is from ProductInquiry table, keeps vehicle_type column
 - Qty: {existing_inquiry.unit_qty}
 - Link: {existing_inquiry.ecommerce_link or 'Belum diberikan'}
 
@@ -101,7 +100,7 @@ Tugas:
 
     # Determine product type and generate link
     product_type = product_info.product_type or "TANAM"  # Default to TANAM
-    vehicle = product_info.vehicle_type or data.get('vehicle_type', 'mobil')
+    vehicle = product_info.vehicle_alias or product_info.vehicle_alias or data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan')
     qty = product_info.unit_qty or data.get('unit_qty', 1)
 
     # Generate appropriate e-commerce link based on product type
@@ -133,7 +132,7 @@ Tugas:
 
     confirm_message = f"""Siap kak {customer_name}! 👍
 
-Berdasarkan kebutuhan {natural_vehicle} kakak ({qty} unit), Hana rekomendasikan:
+Berdasarkan kebutuhan kakak ({qty} unit), Hana rekomendasikan:
 
 📦 {product_desc}
 

@@ -229,17 +229,20 @@ async def node_quality_check(state: AgentState):
     ai_answer = last_message.content if hasattr(last_message, 'content') else ""
 
     # Steps that should skip quality evaluation (just pass through)
-    # Only skip very specific, controlled flows that we trust are correct
+    # Skip profiling questions since they're part of normal conversational flow
     SKIP_QUALITY_CHECK_STEPS = {
+        "profiling",  # Profiling questions are conversational and don't need quality check
         "greeting",  # Simple greetings from existing customers
         "human_takeover",  # Already a handover message
         "handle_reschedule",  # Specific flow, pass through
         "no_meeting_found",  # Specific flow, pass through
         "need_identifier",  # Specific flow, pass through
         "order_guidance",  # Specific flow, pass through
+        "vehicle_id",  # Part of profiling flow, asking about vehicle
+        "vehicle_clarification",  # Part of profiling flow, asking for vehicle model clarification
     }
-    # Note: "profiling" is NOT in skip list because profiling responses can be bad
-    # and should be evaluated for quality (e.g., asking irrelevant questions)
+    # Note: Profiling questions should always pass through quality check
+    # They're natural conversational questions, not answers to user queries
 
     # Skip quality evaluation for certain steps - just pass through
     if step in SKIP_QUALITY_CHECK_STEPS:

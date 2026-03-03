@@ -45,7 +45,7 @@ def classify_user_intent(messages: list, customer_data: dict) -> IntentClassific
     # Check profiling status
     has_name = bool(customer_data.get('name'))
     has_domicile = bool(customer_data.get('domicile'))
-    has_vehicle = bool(customer_data.get('vehicle_type'))
+    has_vehicle = bool(customer_data.get('vehicle_alias'))  # User provided vehicle info
     has_qty = customer_data.get('unit_qty', 0) > 0
     profiling_complete = all([has_name, has_domicile, has_vehicle, has_qty])
 
@@ -58,7 +58,7 @@ CONVERSATION:
 CUSTOMER DATA:
 - Name: {customer_data.get('name', '-')}
 - Domicile: {customer_data.get('domicile', '-')}
-- Vehicle: {customer_data.get('vehicle_type', '-')}
+- Vehicle: {customer_data.get('vehicle_alias', '-')}
 - Unit Qty: {customer_data.get('unit_qty', 0)}
 - Profiling Complete: {profiling_complete}
 
@@ -159,11 +159,15 @@ async def _build_state_and_save(
     """
     customer_id = state.get('customer_id')
     customer_data = state.get('customer_data', {})
-    last_user_msg = (messages or state['messages'])[-1].content if (messages or state['messages']) else ""
+
+    # Use provided messages if available, otherwise keep existing messages from state
+    # IMPORTANT: Never clear messages - always preserve conversation history
+    final_messages = messages if messages is not None else state.get('messages', [])
+    last_user_msg = final_messages[-1].content if final_messages else ""
 
     # Build base state
     result_state = {
-        "messages": messages or [],
+        "messages": final_messages,
         "step": step,
         "route": route,
         "customer_data": customer_data,
@@ -214,7 +218,7 @@ CONVERSATION HISTORY:
 CUSTOMER INFO:
 - Nama: {customer_data.get('name', 'Belum diketahui')}
 - Domisili: {customer_data.get('domicile', 'Belum diketahui')}
-- Kendaraan: {customer_data.get('vehicle_type', 'Belum diketahui')}
+- Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
 - Jumlah unit: {customer_data.get('unit_qty', 0)}
 """
 
@@ -289,7 +293,7 @@ async def node_intent_classification(state: AgentState):
         is_new_customer = not any([
             customer_data.get('name'),
             customer_data.get('domicile'),
-            customer_data.get('vehicle_type'),
+            customer_data.get('vehicle_alias'),
             customer_data.get('unit_qty', 0) > 0
         ])
 
@@ -339,7 +343,7 @@ async def node_intent_classification(state: AgentState):
         # We always try to answer the question first, regardless of profiling status
         answer = await answer_product_question(
             question=last_user_msg,
-            customer_vehicle=customer_data.get('vehicle_type'),
+            customer_vehicle=customer_data.get('vehicle_alias') or customer_data.get('vehicle_alias'),
             customer_qty=customer_data.get('unit_qty')
         )
 
@@ -347,7 +351,7 @@ async def node_intent_classification(state: AgentState):
         has_all_profile = all([
             customer_data.get('name'),
             customer_data.get('domicile'),
-            customer_data.get('vehicle_type'),
+            customer_data.get('vehicle_alias'),  # Has provided vehicle info
             customer_data.get('unit_qty', 0) > 0
         ])
 
@@ -390,7 +394,7 @@ Sekarang tambahkan 1-2 kalimat di akhir untuk kenalan (profiling) dengan natural
         has_all_profile = all([
             customer_data.get('name'),
             customer_data.get('domicile'),
-            customer_data.get('vehicle_type'),
+            customer_data.get('vehicle_alias'),  # Has provided vehicle info
             customer_data.get('unit_qty', 0) > 0
         ])
 
@@ -493,7 +497,7 @@ Sekarang tambahkan 1-2 kalimat di akhir untuk kenalan (profiling) dengan natural
         # Answer support question
         answer = await answer_product_question(
             question=last_user_msg,
-            customer_vehicle=customer_data.get('vehicle_type'),
+            customer_vehicle=customer_data.get('vehicle_alias') or customer_data.get('vehicle_alias'),
             customer_qty=customer_data.get('unit_qty')
         )
 

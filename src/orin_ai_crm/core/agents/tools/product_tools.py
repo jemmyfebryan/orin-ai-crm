@@ -198,7 +198,7 @@ Tugasmu adalah menjawab pertanyaan customer tentang produk GPS berdasarkan datab
 
 {products_context}
 
-Customer Vehicle: {customer_vehicle or '-'}
+Customer Vehicle: {customer_vehicle or '-'} (This is user's description, e.g., "CRF", "Avanza", "motor")
 Jumlah Unit: {customer_qty or '-'}
 
 Pertanyaan Customer: {question}
@@ -370,14 +370,16 @@ def extract_product_type(messages: list, customer_data: dict) -> ProductInfo:
     system_prompt = f"""Extract informasi produk yang customer inginkan.
 
 Customer Data:
-- Vehicle Type: {customer_data.get('vehicle_type', '-')}
+- Vehicle: {customer_data.get('vehicle_alias', '-')}
 - Unit Qty: {customer_data.get('unit_qty', 0)}
 - B2B: {customer_data.get('is_b2b', False)}
 
 Tentukan:
 1. product_type: "TANAM" (pasang teknisi, bisa matikan mesin) atau "INSTAN" (colok sendiri, hanya lacak)
-2. vehicle_type: Jenis kendaraan dari customer data atau conversation
-3. unit_qty: Jumlah unit dari customer data atau conversation
+2. vehicle_id: ID kendaraan (gunakan -1 jika tidak diketahui)
+3. vehicle_alias: Nama kendaraan dari customer data atau conversation
+4. vehicle_alias: Teks asli dari user tentang kendaraan
+5. unit_qty: Jumlah unit dari customer data atau conversation
 
 Rules:
 - Jika customer sebut "pasang teknisi", "matikan mesin", "tersembunyi" → TANAM

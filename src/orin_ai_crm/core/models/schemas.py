@@ -22,7 +22,8 @@ class AgentState(TypedDict):
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")
     domicile: Optional[str] = Field(default="", description="Domisili atau kota pelanggan, kosongkan jika belum ada")
-    vehicle_type: Optional[str] = Field(default="", description="Jenis kendaraan: mobil, motor, alat berat, atau lainnya")
+    vehicle_id: int = Field(default=-1, description="ID kendaraan dari vehicles table di VPS DB. -1 jika belum diketahui atau tidak ditemukan")
+    vehicle_alias: Optional[str] = Field(default="", description="Teks asli dari user tentang kendaraan (e.g., 'CRF', 'Avanza', 'XMAX', 'motor', 'mobil'). Disimpan ke DB untuk referensi dan display.")
     unit_qty: int = Field(default=0, description="Jumlah unit yang ingin dipasang, 0 jika belum menyebutkan angka")
     is_b2b: bool = Field(default=False, description="True jika ini perusahaan/armada operasional, False jika pemakaian pribadi")
     
@@ -75,5 +76,6 @@ class MeetingInfo(BaseModel):
 class ProductInfo(BaseModel):
     """Product information extracted from conversation"""
     product_type: Optional[str] = Field(default="", description="Tipe produk: TANAM atau INSTAN")
-    vehicle_type: Optional[str] = Field(default="", description="Jenis kendaraan")
+    vehicle_id: int = Field(default=-1, description="ID kendaraan dari vehicles table di VPS DB. -1 jika tidak diketahui.")
+    vehicle_alias: Optional[str] = Field(default="", description="Teks asli dari user tentang kendaraan (e.g., 'CRF', 'motor', 'mobil')")
     unit_qty: Optional[int] = Field(default=0, description="Jumlah unit")

@@ -116,12 +116,39 @@ def get_user_identifier(state: AgentState) -> dict:
     }
 
 
-def extract_customer_info(messages: list, current_profile: dict) -> CustomerProfile:
+async def extract_customer_info(messages: list, current_profile: dict, vehicle_matches: list[dict] = None) -> tuple[CustomerProfile, dict]:
     """
     Extract/update customer info dari pesan terakhir.
     Structured output akan mengisi field yang kosong dan mengupdate field yang sudah ada.
+    For vehicle, will:
+    1. Extract vehicle_alias from user message (raw text like "CRF", "Avanza")
+    2. Search VPS DB for vehicle_id
+    3. If found, store vehicle_id and vehicle_alias from VPS DB
+    4. If not found, store vehicle_id=-1 and keep vehicle_alias for reference
+
+    Args:
+        messages: Conversation history
+        current_profile: Current customer profile dict
+        vehicle_matches: Optional list of vehicle dicts from previous clarification (helps LLM understand responses like "yang 6")
     """
-    logger.info(f"extract_customer_info called - current_profile: {current_profile}, message_count: {len(messages)}")
+    logger.info(f"extract_customer_info called - current_profile: {current_profile}, message_count: {len(messages)}, vehicle_matches: {len(vehicle_matches) if vehicle_matches else 0}")
+
+    # Build vehicle context for LLM if clarification was asked
+    vehicle_context = ""
+    if vehicle_matches and len(vehicle_matches) > 0:
+        vehicle_list = "\n".join([f"{i+1}. {v.get('name', '')}" for i, v in enumerate(vehicle_matches)])
+        vehicle_context = f"""
+
+KENDARAAN YANG SEDANG DITANYAKAN (dari pertanyaan sebelumnya):
+User sebelumnya ditanya tentang pilihan kendaraan. Opsi yang tersedia:
+{vehicle_list}
+
+Jika user menjawab dengan nomor (contoh: "yang 1", "nomor 2", "yang 6"), extract nama kendaraan yang sesuai dari daftar di atas!
+Contoh:
+- "yang 1" → extract "{vehicle_matches[0].get('name', '')}"
+- "yang 6" → jika ada, extract kendaraan ke-6
+- "Ioniq5" → extract "Ioniq5" (langsung gunakan nama yang user sebutkan)
+"""
 
     system_prompt = f"""Extract informasi customer dari pesan. Update info yang sudah ada.
 Jangan mengarang info jika tidak disebutkan.
@@ -129,18 +156,67 @@ Jangan mengarang info jika tidak disebutkan.
 Profile saat ini:
 - Nama: {current_profile.get('name', '-')}
 - Domisili: {current_profile.get('domicile', '-')}
-- Jenis Kendaraan: {current_profile.get('vehicle_type', '-')}
+- Kendaraan: {current_profile.get('vehicle_alias', '-')}
 - Jumlah Unit: {current_profile.get('unit_qty', 0)}
-- B2B: {current_profile.get('is_b2b', False)}
+- B2B: {current_profile.get('is_b2b', False)}{vehicle_context}
 
 Jika user mengoreksi info (contoh: "saya pindah ke Surabaya"), update field tersebut.
-Jika user belum menyebutkan, biarkan kosong."""
+Jika user belum menyebutkan, biarkan kosong.
+
+IMPORTANT untuk vehicle_alias:
+- Extract nama/alias kendaraan yang user sebutkan (e.g., "CRF", "Avanza", "XMAX", "Fortuner", "motor", "mobil", dll)
+- Jika user menjawab dengan NOMOR dari daftar kendaraan di atas, gunakan nama kendaraan yang sesuai!
+- HANYA extract jika user jelas menyebutkan kendaraan MILIK mereka
+- JANGAN extract kata-kata berikut: "orin", "gps", "tracker", "aplikasi", "sistem", "produk"
+- JANGAN extract jika user hanya tertarik atau bertanya tentang produk
+- Pastikan user membicarakan KENDARAAN mereka, bukan produk
+- Jika tidak jelas, biarkan vehicle_alias kosong"""
 
     extractor_llm = llm.with_structured_output(CustomerProfile)
     result = extractor_llm.invoke([SystemMessage(content=system_prompt)] + messages)
 
+    # Handle vehicle extraction
+    if result.vehicle_alias and result.vehicle_alias.strip():
+        # User mentioned a vehicle
+        vehicle_alias = result.vehicle_alias.strip()
+
+        # Search VPS DB for vehicle_id
+        from src.orin_ai_crm.core.agents.tools.vps_tools import search_vehicle_by_name, get_vehicle_by_id
+
+        vehicle_id, matches = await search_vehicle_by_name(vehicle_alias)
+
+        logger.info(f"search_vehicle_by_name returned: vehicle_id={vehicle_id}, matches_count={len(matches) if matches else 0}")
+
+        if vehicle_id is not None and vehicle_id > 0:
+            # Exact match found in VPS DB - get full name
+            vehicle_data = await get_vehicle_by_id(vehicle_id)
+            result.vehicle_id = vehicle_id
+            result.vehicle_alias = vehicle_data.get('name', vehicle_alias) if vehicle_data else vehicle_alias
+            logger.info(f"Vehicle '{vehicle_alias}' found in VPS DB: ID={vehicle_id}, alias='{result.vehicle_alias}'")
+        elif matches and len(matches) >= 1:
+            # Multiple or single partial match found - need clarification if more than 1
+            result.vehicle_id = -1
+            result.vehicle_alias = vehicle_alias
+            # NOTE: We can't add extra fields to Pydantic model (OpenAI structured output requires strict schema)
+            # The extra data will be handled in the calling function via a separate dict
+            logger.info(f"Found {len(matches)} match(es) for '{vehicle_alias}': {[m.get('name') for m in matches]} - needs_clarification={len(matches) > 1}")
+            # Return result + extra_metadata as a tuple for the calling function to handle
+            return result, {'vehicle_matches': matches, 'needs_vehicle_clarification': len(matches) > 1}
+        else:
+            # No matches found in VPS DB - store alias for reference
+            result.vehicle_id = -1
+            result.vehicle_alias = vehicle_alias  # Use alias as display name
+            logger.info(f"Vehicle '{vehicle_alias}' NOT found in VPS DB - storing alias only (ID=-1)")
+    else:
+        # No vehicle mentioned, keep existing values
+        if result.vehicle_id is None or result.vehicle_id == 0:
+            result.vehicle_id = current_profile.get('vehicle_id', -1)
+        if not result.vehicle_alias:
+            result.vehicle_alias = current_profile.get('vehicle_alias', '')
+        logger.info(f"No vehicle_alias extracted, keeping existing: ID={result.vehicle_id}, alias='{result.vehicle_alias}'")
+
     logger.info(f"extract_customer_info result: {result.model_dump()}")
-    return result
+    return result, {}  # Return (profile, extra_metadata) tuple
 
 
 async def generate_profiling_question(
@@ -170,7 +246,7 @@ CONVERSATION HISTORY:
 CURRENT CUSTOMER PROFILE:
 - Nama: {profile_data.get('name') or 'Belum diketahui'}
 - Domisili: {profile_data.get('domicile') or 'Belum diketahui'}
-- Kendaraan: {profile_data.get('vehicle_type') or 'Belum diketahui'}
+- Kendaraan: {profile_data.get('vehicle_alias') or 'Belum diketahui'}
 - Jumlah unit: {profile_data.get('unit_qty', 0)}
 
 YOUR TASK:
@@ -191,13 +267,13 @@ GUIDELINES PER FIELD:
 - Jelaskan bahwa ini untuk penawaran yang lebih pas
 - Natural dan tidak kaku
 """,
-        "vehicle_type": f"""- Gunakan nama & domisili customer: {profile_data.get('name') or 'Kak'} dari {profile_data.get('domicile') or 'kota kakak'}
-- Tanyakan jenis kendaraan yang akan dipasang GPS
-- Berikan opsi: Mobil pribadi, Motor, Alat berat, Armada operasional/kantor, Lainnya
+        "vehicle_id": f"""- Gunakan nama & domisili customer: {profile_data.get('name') or 'Kak'} dari {profile_data.get('domicile') or 'kota kakak'}
+- Tanyakan jenis dan nama kendaraan yang akan dipasang GPS (e.g., "Honda CRF", "Toyota Avanza", "XMAX", dll)
+- Jelaskan bahwa sebut nama kendaraan agar kami bisa berikan rekomendasi yang pas
 - Natural dan ramah
 """,
         "unit_qty": f"""- Gunakan nama customer: {profile_data.get('name') or 'Kak'}
-- Gunakan natural vehicle type: {get_natural_vehicle_type(profile_data.get('vehicle_type', ''))}
+- Gunakan nama kendaraan: {profile_data.get('vehicle_alias') or 'kendaraan kakak'}
 - Tanyakan berapa unit yang akan dipasang GPS
 - Singkat dan natural
 """
@@ -211,10 +287,65 @@ RULES:
 - Personalized berdasarkan info yang sudah diketahui
 - Gunakan emoji secara wajar
 - Natural seperti chat WhatsApp asli
-- Tidak perlu opsi jawaban (kecuali vehicle_type)
+- Tidak perlu opsi jawaban
 - Jangan ulang info yang sudah diketahui"""
 
     response = llm.invoke([SystemMessage(content=context_prompt)] + messages)
+    return response.content
+
+
+async def generate_vehicle_clarification_question(
+    messages: list,
+    profile: CustomerProfile,
+    vehicle_matches: list[dict]
+) -> str:
+    """
+    Generate a question to clarify which specific vehicle model when multiple matches found.
+
+    Args:
+        messages: Conversation history
+        profile: Current customer profile
+        vehicle_matches: List of vehicle match dicts from VPS DB
+
+    Returns:
+        Generated clarification question
+    """
+    customer_name = profile.name or 'Kak'
+    vehicle_alias = profile.vehicle_alias or ''
+
+    # Get vehicle matches from parameter (not from profile.model_extra)
+    matches = vehicle_matches
+
+    # Build list of vehicle names from matches
+    vehicle_aliass = [v.get('name', '') for v in matches if v.get('name')]
+    vehicle_list = ', '.join(vehicle_aliass[:5])  # Limit to first 5
+
+    context_prompt = f"""{HANA_PERSONA}
+
+CONVERSATION HISTORY:
+{format_conversation_history_profiling(messages[-3:])}
+
+CUSTOMER NAME: {customer_name}
+USER SAID: "kendaraan saya {vehicle_alias}"
+
+FOUND MULTIPLE MATCHES:
+{vehicle_list}
+
+YOUR TASK:
+Generate a natural question untuk clarify which specific vehicle model customer has.
+
+RULES:
+- Tanyakan dengan sopan dan natural
+- Jelaskan bahwa ada beberapa tipe {vehicle_alias} di database kami
+- Sebutkan opsi-opsi yang tersedia
+- Contoh: "Oh, {customer_name} dapat kami informasikan bahwa untuk {vehicle_alias} ada beberapa tipe: {vehicle_list}. Boleh tahu kakak pakai yang tipe yang mana?"
+- Jangan terlalu formal, seperti chat WhatsApp asli
+- Gunakan emoji secara wajar
+
+Response HANYA dengan pesan yang akan dikirim ke customer."""
+
+    response = llm.invoke([SystemMessage(content=context_prompt)] + messages)
+    logger.info(f"Vehicle clarification generated for '{vehicle_alias}': {response.content[:100]}...")
     return response.content
 
 
@@ -276,7 +407,7 @@ def format_conversation_history_profiling(messages: list) -> str:
     return "\n".join(formatted)
 
 
-def determine_next_question(profile: CustomerProfile, name_from_contact: bool = False) -> tuple[str, str]:
+def determine_next_question(profile: CustomerProfile, name_from_contact: bool = False, extra_metadata: dict = None) -> tuple[str, str]:
     """
     Tentukan field berikutnya yang perlu ditanya.
     Return (empty_question, field_name) - question akan di-generate oleh LLM di node level.
@@ -284,10 +415,17 @@ def determine_next_question(profile: CustomerProfile, name_from_contact: bool = 
     Args:
         profile: Current customer profile
         name_from_contact: If True, name was auto-filled from contact_name and should be confirmed with greeting
+        extra_metadata: Dict with extra metadata like 'needs_vehicle_clarification' and 'vehicle_matches'
     """
-    logger.info(f"determine_next_question called - profile: {profile.model_dump()}, name_from_contact: {name_from_contact}")
+    logger.info(f"determine_next_question called - profile: {profile.model_dump()}, name_from_contact: {name_from_contact}, extra_metadata: {extra_metadata}")
 
-    # Prioritas pertanyaan: name → domicile → vehicle_type → unit_qty
+    # Get extra metadata for vehicle clarification data
+    extra = extra_metadata or {}
+    needs_clarification = extra.get('needs_vehicle_clarification', False)
+    vehicle_matches = extra.get('vehicle_matches', [])
+
+    # Prioritas pertanyaan: name → domicile → vehicle → unit_qty
+    # Vehicle is considered "filled" if user provided vehicle_alias (even if vehicle_id=-1)
 
     if not profile.name:
         logger.info("Next question: NAME")
@@ -302,12 +440,20 @@ def determine_next_question(profile: CustomerProfile, name_from_contact: bool = 
         logger.info(f"Next question: DOMICILE (for {profile.name})")
         return "", "domicile"
 
-    if not profile.vehicle_type:
-        logger.info(f"Next question: VEHICLE_TYPE (for {profile.name} from {profile.domicile})")
-        return "", "vehicle_type"
+    # Check if vehicle clarification is needed (multiple matches found)
+    if needs_clarification and vehicle_matches:
+        logger.info(f"Next question: VEHICLE_CLARIFICATION for {profile.vehicle_alias} - {len(vehicle_matches)} matches")
+        # Pass matches as extra context
+        return "", "vehicle_clarification"
+
+    # Vehicle is optional - only ask if user hasn't provided any vehicle info at all
+    # Skip if vehicle_alias exists (user already mentioned their vehicle)
+    if not profile.vehicle_alias:
+        logger.info(f"Next question: VEHICLE (for {profile.name} from {profile.domicile})")
+        return "", "vehicle_id"
 
     if profile.unit_qty == 0:
-        logger.info(f"Next question: UNIT_QTY (for {profile.name}, vehicle: {profile.vehicle_type})")
+        logger.info(f"Next question: UNIT_QTY (for {profile.name}, vehicle: {profile.vehicle_alias or 'kendaraan'})")
         return "", "unit_qty"
 
     logger.info("Profiling COMPLETE - all fields filled")
@@ -358,10 +504,23 @@ async def node_greeting_and_profiling(state: AgentState):
     customer_id = customer.id
 
     # 2. Build current profile dari database
+    # For vehicle_alias, use vehicle_alias if available, otherwise fetch from VPS DB if vehicle_id > 0
+    vehicle_alias = ''
+    if customer and customer.vehicle_alias:
+        # Use vehicle_alias as display name
+        vehicle_alias = customer.vehicle_alias
+    elif customer and customer.vehicle_id and customer.vehicle_id > 0:
+        # Fetch from VPS DB
+        from src.orin_ai_crm.core.agents.tools.vps_tools import get_vehicle_by_id
+        vehicle_data = await get_vehicle_by_id(customer.vehicle_id)
+        if vehicle_data:
+            vehicle_alias = vehicle_data.get('name', '')
+
     current_profile = {
         'name': customer.name if customer and customer.name else '',
         'domicile': customer.domicile if customer and customer.domicile else '',
-        'vehicle_type': customer.vehicle_type if customer and customer.vehicle_type else '',
+        'vehicle_id': customer.vehicle_id if customer and customer.vehicle_id is not None else -1,
+        'vehicle_alias': vehicle_alias,
         'unit_qty': customer.unit_qty if customer and customer.unit_qty else 0,
         'is_b2b': customer.is_b2b if customer else False
     }
@@ -375,13 +534,23 @@ async def node_greeting_and_profiling(state: AgentState):
         name_from_contact = True
 
     # 4. Extract/update info dari pesan terakhir
-    extracted_data = extract_customer_info(messages, current_profile)
+    # Get vehicle_matches from previous clarification if exists (for context)
+    previous_vehicle_matches = state.get('customer_data', {}).get('vehicle_matches', [])
+    extracted_data, extra_metadata = await extract_customer_info(messages, current_profile, vehicle_matches=previous_vehicle_matches)
+
+    # Helper function to merge CustomerProfile with extra metadata
+    def build_customer_data(profile: CustomerProfile, extra: dict = None) -> dict:
+        """Build customer_data dict from profile, optionally merging extra metadata"""
+        data = profile.model_dump()
+        if extra:
+            data.update(extra)
+        return data
 
     # 5. Update database dengan data baru/berubah
     await update_customer_profile(customer_id, extracted_data)
 
     # 6. Tentukan field berikutnya yang perlu ditanya
-    _, next_field = determine_next_question(extracted_data, name_from_contact=name_from_contact)
+    _, next_field = determine_next_question(extracted_data, name_from_contact=name_from_contact, extra_metadata=extra_metadata)
 
     # 7. Tentukan response
     if next_field == "complete":
@@ -395,7 +564,7 @@ async def node_greeting_and_profiling(state: AgentState):
         await create_lead_routing(
             customer_id=customer_id,
             route_type=route_type,
-            notes=f"Profiling complete. Vehicle: {extracted_data.vehicle_type}, Qty: {qty}, B2B: {is_b2b}"
+            notes=f"Profiling complete. Vehicle: {extracted_data.vehicle_alias or 'Unknown'} (ID: {extracted_data.vehicle_id}), Qty: {qty}, B2B: {is_b2b}"
         )
 
         logger.info(f"EXIT: node_greeting_and_profiling -> step=profiling_complete, route={route_type}")
@@ -404,7 +573,7 @@ async def node_greeting_and_profiling(state: AgentState):
         return {
             "messages": [],
             "step": "profiling_complete",
-            "customer_data": extracted_data.model_dump(),
+            "customer_data": build_customer_data(extracted_data),
             "customer_id": customer_id
         }
 
@@ -424,7 +593,36 @@ async def node_greeting_and_profiling(state: AgentState):
         return {
             "messages": [AIMessage(content=greeting)],
             "step": "greeting",
-            "customer_data": extracted_data.model_dump(),
+            "customer_data": build_customer_data(extracted_data),
+            "customer_id": customer_id
+        }
+
+    # 8. Handle vehicle clarification - when multiple matches found
+    if next_field == "vehicle_clarification":
+        logger.info("Generating vehicle clarification question")
+
+        clarification_question = await generate_vehicle_clarification_question(
+            messages=messages,
+            profile=extracted_data,
+            vehicle_matches=extra_metadata.get('vehicle_matches', [])
+        )
+
+        # Clear the clarification flag after asking, so we don't ask again
+        # Build customer_data with extra metadata
+        customer_data_to_save = build_customer_data(extracted_data, extra_metadata)
+        # Update to mark that we asked for clarification
+        if 'vehicle_matches' in customer_data_to_save:
+            customer_data_to_save['asked_vehicle_clarification'] = True
+            customer_data_to_save['needs_vehicle_clarification'] = False
+
+        logger.info(f"Generated clarification question: {clarification_question[:100]}...")
+        logger.info(f"EXIT: node_greeting_and_profiling -> step=profiling")
+        logger.info("=" * 50)
+
+        return {
+            "messages": [AIMessage(content=clarification_question)],
+            "step": "profiling",
+            "customer_data": customer_data_to_save,
             "customer_id": customer_id
         }
 
@@ -445,7 +643,7 @@ async def node_greeting_and_profiling(state: AgentState):
     return {
         "messages": [AIMessage(content=question)],
         "step": "profiling",
-        "customer_data": extracted_data.model_dump(),
+        "customer_data": build_customer_data(extracted_data),
         "customer_id": customer_id
     }
 

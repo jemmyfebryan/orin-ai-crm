@@ -124,10 +124,18 @@ async def update_customer_profile(
             need_update = True
             updates.append(f"domicile={profile.domicile}")
 
-        if profile.vehicle_type and profile.vehicle_type != customer.vehicle_type:
-            customer.vehicle_type = profile.vehicle_type
+        # Update vehicle_alias - store what user said about their vehicle
+        if profile.vehicle_alias and profile.vehicle_alias != customer.vehicle_alias:
+            customer.vehicle_alias = profile.vehicle_alias
             need_update = True
-            updates.append(f"vehicle_type={profile.vehicle_type}")
+            updates.append(f"vehicle_alias={profile.vehicle_alias}")
+
+        # Update vehicle_id (allow 0 or positive values, -1 means not found)
+        # Only update if profile has a valid vehicle_id (not None)
+        if profile.vehicle_id is not None and profile.vehicle_id != customer.vehicle_id:
+            customer.vehicle_id = profile.vehicle_id
+            need_update = True
+            updates.append(f"vehicle_id={profile.vehicle_id}")
 
         if profile.unit_qty and profile.unit_qty != customer.unit_qty:
             customer.unit_qty = profile.unit_qty

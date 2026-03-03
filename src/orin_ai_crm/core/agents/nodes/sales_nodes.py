@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, SystemMessage
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState
-from src.orin_ai_crm.core.agents.nodes.profiling_nodes import get_natural_vehicle_type
 from src.orin_ai_crm.core.agents.tools import (
     get_pending_meeting,
     extract_meeting_info,
@@ -44,11 +43,11 @@ async def node_sales(state: AgentState):
     data = state['customer_data']
     customer_id = state.get('customer_id')
 
-    # Gunakan natural vehicle type untuk response
-    natural_vehicle = get_natural_vehicle_type(data.get('vehicle_type', ''))
+    # Gunakan vehicle_alias untuk response (fallback to vehicle_alias)
+    vehicle_alias = data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan')
     customer_name = data.get('name', 'Kak')
 
-    logger.info(f"Customer: {customer_name}, vehicle: {natural_vehicle}, qty: {data.get('unit_qty')}, b2b: {data.get('is_b2b')}")
+    logger.info(f"Customer: {customer_name}, vehicle: {vehicle_alias}, qty: {data.get('unit_qty')}, b2b: {data.get('is_b2b')}")
     logger.info(f"Flags - wants_meeting: {state.get('wants_meeting')}, existing_meeting_id: {state.get('existing_meeting_id')}")
 
     # 1. Get intent classification flags
@@ -222,7 +221,7 @@ User ini masuk kategori SALES (B2B atau butuh >= 5 unit).
 Data customer:
 - Nama: {customer_name}
 - Domisili: {data.get('domicile')}
-- Kendaraan: {natural_vehicle} (original: {data.get('vehicle_type')})
+- Kendaraan: {data.get('vehicle_alias') or vehicle_alias}
 - Jumlah unit: {data.get('unit_qty')}
 - B2B: {data.get('is_b2b')}
 

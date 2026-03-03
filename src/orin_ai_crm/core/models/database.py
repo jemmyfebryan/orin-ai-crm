@@ -25,7 +25,8 @@ class Customer(Base):
     contact_name = Column(String(100), nullable=True)  # Nama kontak dari WA
     name = Column(String(100), nullable=True)  # Nama asli customer
     domicile = Column(String(100), nullable=True)
-    vehicle_type = Column(String(50), nullable=True)
+    vehicle_id = Column(Integer, nullable=True, default=-1)  # ID from vehicles table in VPS DB
+    vehicle_alias = Column(String(100), nullable=True)  # Custom text from user (e.g., "CRF", "Avanza")
     unit_qty = Column(Integer, nullable=True)
     is_b2b = Column(Boolean, default=False)
     human_takeover = Column(Boolean, default=False)  # Flag untuk human takeover when AI cannot handle

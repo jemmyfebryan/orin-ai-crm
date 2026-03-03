@@ -285,19 +285,39 @@ async def node_intent_classification(state: AgentState):
 
     # High confidence → route based on intent
     if intent == "greeting":
-        logger.info("Intent: GREETING → Send personalized greeting message")
-        response = await generate_llm_response(
-            messages=messages,
-            customer_data=customer_data,
-            response_task="Berikan greeting yang ramah dan perkenalkan diri sebagai Hana dari ORIN GPS Tracker. Tanyakan bagaimana Hana bisa membantu hari ini."
-        )
-        return await _build_state_and_save(
-            state=state,
-            intent_result=intent_result,
-            messages=[AIMessage(content=response)],
-            route="UNASSIGNED",
-            step="greeting"
-        )
+        # Check if customer is new (no profile data)
+        is_new_customer = not any([
+            customer_data.get('name'),
+            customer_data.get('domicile'),
+            customer_data.get('vehicle_type'),
+            customer_data.get('unit_qty', 0) > 0
+        ])
+
+        if is_new_customer:
+            # For new customers, route to profiling node instead of sending generic greeting
+            # This allows the greeting_profiling node to handle contact_name logic
+            logger.info("Intent: GREETING (new customer) → Route to profiling for personalized greeting")
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                route="UNASSIGNED",
+                step="profiling"
+            )
+        else:
+            # For existing customers, send personalized greeting with their name
+            logger.info("Intent: GREETING (existing customer) → Send personalized greeting message")
+            response = await generate_llm_response(
+                messages=messages,
+                customer_data=customer_data,
+                response_task="Berikan greeting yang ramah dan perkenalkan diri sebagai Hana dari ORIN GPS Tracker. Tanyakan bagaimana Hana bisa membantu hari ini."
+            )
+            return await _build_state_and_save(
+                state=state,
+                intent_result=intent_result,
+                messages=[AIMessage(content=response)],
+                route="UNASSIGNED",
+                step="greeting"
+            )
 
     elif intent == "profiling":
         logger.info("Intent: PROFILING → Continue profiling")

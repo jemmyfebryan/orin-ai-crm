@@ -21,6 +21,14 @@ logger = get_logger(__name__)
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
+# Patterns that indicate contact_name is NOT a person's name
+NON_NAME_PATTERNS = [
+    "~", "-", "_", ".", "...", "#", "user", "guest", "unknown", "anonymous",
+    "pt", "cv", "ud", "pd", "fakultas", "universitas", "institut",
+    "toko", "store", "shop", "mart", "jaya", "maj", "trading", "corp",
+    "corporation", "company", "ltd", "inc", "tbk", "persero"
+]
+
 HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
 
@@ -52,6 +60,52 @@ def get_natural_vehicle_type(vehicle_type: str) -> str:
 
     vehicle_lower = vehicle_type.lower().strip()
     return VEHICLE_TYPE_MAPPING.get(vehicle_lower, vehicle_lower)
+
+
+def is_valid_person_name(contact_name: Optional[str]) -> bool:
+    """
+    Check if contact_name is a valid person's name (Indonesian or Western).
+
+    Returns True if contact_name looks like a real person's name.
+    Returns False if it looks like a company name, placeholder, or non-name string.
+
+    Examples:
+    - "Budi", "Siti", "Made", "John", "Sarah" -> True
+    - "PT Astra Jaya", "CV Maju", "~", "-" -> False
+    """
+    if not contact_name:
+        return False
+
+    name = contact_name.strip()
+
+    # Empty or very short
+    if len(name) < 2:
+        return False
+
+    # Check for non-name patterns
+    name_lower = name.lower()
+
+    # Direct matches with non-name patterns
+    if name_lower in NON_NAME_PATTERNS:
+        return False
+
+    # Contains company indicators
+    for pattern in NON_NAME_PATTERNS:
+        if pattern in name_lower:
+            return False
+
+    # Single character or special character only
+    if len(name) <= 2 and any(c in name for c in "~-_#"):
+        return False
+
+    # All numbers or mostly special characters
+    if any(c.isdigit() for c in name):
+        # Contains numbers, likely not a name
+        return False
+
+    # Use LLM for more sophisticated validation if needed
+    # For common Indonesian/Western names, this should work well
+    return True
 
 
 def get_user_identifier(state: AgentState) -> dict:
@@ -164,6 +218,50 @@ RULES:
     return response.content
 
 
+async def generate_greeting_with_name(
+    messages: list,
+    name: str
+) -> str:
+    """
+    Generate a greeting response when name is auto-filled from contact_name.
+    This should be a natural greeting that welcomes the user and continues the conversation.
+
+    Args:
+        messages: Conversation history
+        name: Customer's name (from contact_name)
+
+    Returns:
+        Generated greeting response string
+    """
+    context_prompt = f"""{HANA_PERSONA}
+
+CONVERSATION HISTORY:
+{format_conversation_history_profiling(messages[-3:])}
+
+CUSTOMER NAME: {name}
+
+YOUR TASK:
+Generate a natural, friendly greeting response for this customer. The customer's name was automatically
+detected from their WhatsApp contact name, so greet them by name and respond to their message naturally.
+
+IMPORTANT:
+- Use their name naturally in the greeting (e.g., "Iya halo {name}", "Halo kak {name}")
+- Respond to their actual message/question from the conversation history
+- Be friendly and helpful
+- This is NOT a profiling question - just a natural greeting and response
+- After the greeting, if needed, naturally ask what they need help with
+- Response should be natural like WhatsApp chat
+
+RULES:
+- Response HANYA dengan pesan yang akan dikirim (tanpa penjelasan tambahan)
+- Natural seperti chat WhatsApp asli
+- Gunakan emoji secara wajar
+"""
+
+    response = llm.invoke([SystemMessage(content=context_prompt)] + messages)
+    return response.content
+
+
 def format_conversation_history_profiling(messages: list) -> str:
     """Format conversation history untuk profiling context"""
     if not messages:
@@ -178,18 +276,27 @@ def format_conversation_history_profiling(messages: list) -> str:
     return "\n".join(formatted)
 
 
-def determine_next_question(profile: CustomerProfile) -> tuple[str, str]:
+def determine_next_question(profile: CustomerProfile, name_from_contact: bool = False) -> tuple[str, str]:
     """
     Tentukan field berikutnya yang perlu ditanya.
     Return (empty_question, field_name) - question akan di-generate oleh LLM di node level.
+
+    Args:
+        profile: Current customer profile
+        name_from_contact: If True, name was auto-filled from contact_name and should be confirmed with greeting
     """
-    logger.info(f"determine_next_question called - profile: {profile.model_dump()}")
+    logger.info(f"determine_next_question called - profile: {profile.model_dump()}, name_from_contact: {name_from_contact}")
 
     # Prioritas pertanyaan: name → domicile → vehicle_type → unit_qty
 
     if not profile.name:
         logger.info("Next question: NAME")
         return "", "name"
+
+    # If name was just filled from contact_name, return greeting instead of next question
+    if name_from_contact:
+        logger.info(f"Name just filled from contact_name: {profile.name} -> should greet first")
+        return "", "greeting_with_name"
 
     if not profile.domicile:
         logger.info(f"Next question: DOMICILE (for {profile.name})")
@@ -260,16 +367,23 @@ async def node_greeting_and_profiling(state: AgentState):
     }
     logger.info(f"Current customer profile from DB: {current_profile}")
 
-    # 3. Extract/update info dari pesan terakhir
+    # 3. Check if contact_name is a valid person name and customer doesn't have a name yet
+    name_from_contact = False
+    if not current_profile['name'] and contact_name and is_valid_person_name(contact_name):
+        logger.info(f"Valid contact_name detected: '{contact_name}' - using as customer name")
+        current_profile['name'] = contact_name.strip()
+        name_from_contact = True
+
+    # 4. Extract/update info dari pesan terakhir
     extracted_data = extract_customer_info(messages, current_profile)
 
-    # 4. Update database dengan data baru/berubah
+    # 5. Update database dengan data baru/berubah
     await update_customer_profile(customer_id, extracted_data)
 
-    # 5. Tentukan field berikutnya yang perlu ditanya
-    _, next_field = determine_next_question(extracted_data)
+    # 6. Tentukan field berikutnya yang perlu ditanya
+    _, next_field = determine_next_question(extracted_data, name_from_contact=name_from_contact)
 
-    # 6. Tentukan response
+    # 7. Tentukan response
     if next_field == "complete":
         # Profiling complete, buat lead routing record
         qty = extracted_data.unit_qty or 0
@@ -294,7 +408,27 @@ async def node_greeting_and_profiling(state: AgentState):
             "customer_id": customer_id
         }
 
-    # Masih tahap profiling, generate dan kirim pertanyaan berikutnya
+    # 8. Handle case where name was just filled from contact_name - send greeting
+    if next_field == "greeting_with_name":
+        logger.info(f"Name filled from contact_name: {extracted_data.name} - generating greeting response")
+
+        greeting = await generate_greeting_with_name(
+            messages=messages,
+            name=extracted_data.name
+        )
+
+        logger.info(f"Generated greeting: {greeting[:100]}...")
+        logger.info(f"EXIT: node_greeting_and_profiling -> step=greeting")
+        logger.info("=" * 50)
+
+        return {
+            "messages": [AIMessage(content=greeting)],
+            "step": "greeting",
+            "customer_data": extracted_data.model_dump(),
+            "customer_id": customer_id
+        }
+
+    # 9. Masih tahap profiling, generate dan kirim pertanyaan berikutnya
     logger.info(f"Profiling IN PROGRESS - Next field: {next_field}")
 
     # Generate personalized question using LLM

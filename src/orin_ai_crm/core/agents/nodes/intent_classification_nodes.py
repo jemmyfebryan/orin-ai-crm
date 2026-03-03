@@ -329,7 +329,21 @@ async def node_intent_classification(state: AgentState):
         )
 
     elif intent == "product_inquiry":
-        # Check if profiling complete
+        logger.info("Intent: PRODUCT_INQUIRY → Answer product question regardless of profiling status")
+        from src.orin_ai_crm.core.agents.tools.product_tools import answer_product_question
+
+        # Get last user message
+        last_user_msg = messages[-1].content if messages else ""
+
+        # Answer product question using product database
+        # We always try to answer the question first, regardless of profiling status
+        answer = await answer_product_question(
+            question=last_user_msg,
+            customer_vehicle=customer_data.get('vehicle_type'),
+            customer_qty=customer_data.get('unit_qty')
+        )
+
+        # Check if profiling is complete
         has_all_profile = all([
             customer_data.get('name'),
             customer_data.get('domicile'),
@@ -338,19 +352,7 @@ async def node_intent_classification(state: AgentState):
         ])
 
         if has_all_profile:
-            logger.info("Intent: PRODUCT_INQUIRY (profiling complete) → Route to product Q&A")
-            from src.orin_ai_crm.core.agents.tools.product_tools import answer_product_question
-
-            # Get last user message
-            last_user_msg = messages[-1].content if messages else ""
-
-            # Answer product question using product database
-            answer = await answer_product_question(
-                question=last_user_msg,
-                customer_vehicle=customer_data.get('vehicle_type'),
-                customer_qty=customer_data.get('unit_qty')
-            )
-
+            # Profiling complete - just return the answer
             return await _build_state_and_save(
                 state=state,
                 intent_result=intent_result,
@@ -359,18 +361,27 @@ async def node_intent_classification(state: AgentState):
                 step="product_qa"
             )
         else:
-            logger.info("Intent: PRODUCT_INQUIRY (profiling incomplete) → Continue profiling first")
+            # Profiling incomplete - append a gentle request for profiling data after answering
+            # But mark step as "profiling" so the next interaction can continue profiling
             response = await generate_llm_response(
                 messages=messages,
                 customer_data=customer_data,
-                response_task="User bertanya tentang produk tapi profiling belum lengkap. Response dengan ramah, jelaskan bahwa Hana akan bantu jelaskan produk, tapi boleh kenalan dulu (tanya data yang belum diketahui: nama/domisili/kendaraan/qty)."
+                response_task=f"""Jawaban pertanyaan user tentang produk:
+{answer}
+
+Sekarang tambahkan 1-2 kalimat di akhir untuk kenalan (profiling) dengan natural:
+- Jika sudah ada nama: panggil dengan nama
+- Jika belum ada nama: boleh tanya nama
+- Tanya 1 data profiling yang belum diketahui (pilih 1 saja dari: domisili/kendaraan/jumlah unit)
+- Jangan jadwalkan ini prioritas, jawaban produk tetap fokus utama
+- Natural seperti chat WhatsApp, bukan form filling"""
             )
             return await _build_state_and_save(
                 state=state,
                 intent_result=intent_result,
                 messages=[AIMessage(content=response)],
-                route="UNASSIGNED",
-                step="profiling"
+                route="PRODUCT_INFO",
+                step="profiling"  # Keep as profiling to continue gathering data
             )
 
     elif intent == "meeting_request":
@@ -524,6 +535,8 @@ async def node_intent_classification(state: AgentState):
             customer_data=customer_data,
             response_task="User mengirim pertanyaan umum. Response dengan ramah, terima kasih sudah menghubungi ORIN GPS Tracker, dan tanya apa yang bisa Hana bantu."
         )
+        logger.info(f"EXIT: node_intent_classification -> intent: {intent}, confidence: {confidence}")
+        logger.info("=" * 50)
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
@@ -531,6 +544,3 @@ async def node_intent_classification(state: AgentState):
             route="UNASSIGNED",
             step="general"
         )
-
-    logger.info(f"EXIT: node_intent_classification -> intent: {intent}, confidence: {confidence}")
-    logger.info("=" * 50)

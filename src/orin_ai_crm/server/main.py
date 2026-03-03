@@ -114,6 +114,7 @@ async def chat_endpoint(req: ChatRequest):
         }
 
         # 7. Jalankan AI Workflow (LangGraph)
+        # Quality check is now handled within the workflow graph
         final_state = await hana_bot.ainvoke(initial_state)
 
         # 8. Ambil balasan terakhir dari AI

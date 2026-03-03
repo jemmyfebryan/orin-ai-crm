@@ -15,6 +15,7 @@ from src.orin_ai_crm.core.agents.nodes.profiling_nodes import (
 from src.orin_ai_crm.core.agents.nodes.sales_nodes import node_sales
 from src.orin_ai_crm.core.agents.nodes.ecommerce_nodes import node_ecommerce
 from src.orin_ai_crm.core.agents.nodes.intent_classification_nodes import node_intent_classification
+from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import node_quality_check
 
 __all__ = [
     # Helper functions
@@ -29,6 +30,9 @@ __all__ = [
 
     # Intent Classification
     "node_intent_classification",
+
+    # Quality Check
+    "node_quality_check",
 
     # Router
     "router_logic",

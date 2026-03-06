@@ -11,7 +11,9 @@ from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal
 from src.orin_ai_crm.core.agents.tools import (
     get_or_create_customer,
     get_chat_history,
-    save_message_to_db
+    save_message_to_db,
+    initialize_default_products_if_empty,
+    reset_products_to_default
 )
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
 from langchain_core.messages import HumanMessage, AIMessage
@@ -21,6 +23,10 @@ async def lifespan(app: FastAPI):
     # Startup
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Initialize default products if table is empty
+    await initialize_default_products_if_empty()
+
     yield
     # Shutdown (cleanup jika diperlukan)
 
@@ -69,6 +75,13 @@ class ResetHistoryResponse(BaseModel):
     success: bool
     message: str
     deleted_count: int
+
+class ResetProductsResponse(BaseModel):
+    success: bool
+    message: str
+    deleted: int
+    created: int
+    errors: list[str]
 
 # --- ENDPOINT UTAMA ---
 @app.post("/chat", response_model=ChatResponse)
@@ -201,6 +214,36 @@ async def reset_history_endpoint(req: ResetHistoryRequest):
             success=False,
             message=f"Gagal reset history: {str(e)}",
             deleted_count=0
+        )
+
+# --- ENDPOINT RESET PRODUCTS (UNTUK TESTING/DEV) ---
+@app.post("/reset-products", response_model=ResetProductsResponse)
+async def reset_products_endpoint():
+    """
+    Reset products table to default values from JSON file.
+    Hati-hati: Ini akan MENGHAPUS SEMUA produk dan menggantinya dengan default dari JSON!
+    """
+    try:
+        result = await reset_products_to_default()
+
+        return ResetProductsResponse(
+            success=True,
+            message=f"Berhasil reset products: {result['created']} produk dibuat, {result['deleted']} produk dihapus",
+            deleted=result.get("deleted", 0),
+            created=result.get("created", 0),
+            errors=result.get("errors", [])
+        )
+
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ResetProductsResponse(
+            success=False,
+            message=f"Gagal reset products: {str(e)}",
+            deleted=0,
+            created=0,
+            errors=[str(e)]
         )
 
 # --- HEALTH CHECK ENDPOINT ---

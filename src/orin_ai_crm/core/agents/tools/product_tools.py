@@ -9,7 +9,7 @@ from datetime import timedelta, timezone
 from datetime import datetime
 from sqlalchemy import select
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
 from src.orin_ai_crm.core.models.schemas import ProductInfo
@@ -156,19 +156,42 @@ def format_products_for_llm(products: List[dict]) -> str:
         formatted += f"   Kategori: {p['category']}"
         if p.get('subcategory'):
             formatted += f" - {p['subcategory']}"
-        formatted += f"\n   Harga: Rp {p['price']:,}" if p.get('price') else ""
+        # Price is now a String, not Integer
+        if p.get('price'):
+            formatted += f"\n   Harga: {p['price']}"
         formatted += f"\n   Deskripsi: {p.get('description', '-')}\n"
 
         # Add features if available
         if p.get('features'):
             features = p['features']
-            if features.get('fitur_utama'):
-                formatted += f"   Fitur Utama: {features['fitur_utama']}\n"
+            if isinstance(features, dict):
+                # Handle list format for features
+                if features.get('fitur_utama'):
+                    fitur = features['fitur_utama']
+                    if isinstance(fitur, list):
+                        formatted += f"   Fitur Utama: {', '.join(fitur)}\n"
+                    else:
+                        formatted += f"   Fitur Utama: {fitur}\n"
+                # Add other feature fields
+                for key, value in features.items():
+                    if key != 'fitur_utama':
+                        formatted += f"   {key.replace('_', ' ').title()}: {value}\n"
+
+        # Add specifications if available
+        if p.get('specifications'):
+            specs = p['specifications']
+            if isinstance(specs, dict):
+                formatted += "   Spesifikasi:\n"
+                for key, value in specs.items():
+                    if isinstance(value, list):
+                        formatted += f"   • {key.replace('_', ' ').title()}: {', '.join(value)}\n"
+                    else:
+                        formatted += f"   • {key.replace('_', ' ').title()}: {value}\n"
 
         # Add ecommerce links if available
         if p.get('ecommerce_links'):
             links = p['ecommerce_links']
-            if links:
+            if isinstance(links, dict) and links:
                 formatted += "   Link Beli:\n"
                 for platform, url in links.items():
                     formatted += f"   • {platform.title()}: {url}\n"
@@ -426,4 +449,193 @@ Pilih produk yang sesuai dengan kebutuhan {vehicle_type} kakak ya! 🚗"""
 
     logger.info(f"E-commerce link generated for product_type: {product_type}")
     return link
+
+
+# ============================================================================
+# E-COMMERCE PRODUCT MANAGEMENT (with JSON default values)
+# ============================================================================
+
+
+def get_default_products_json_path() -> str:
+    """Get path to default_products.json file"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(current_dir, "..", "custom", "hana_agent", "default_products.json")
+
+
+def load_default_products_from_json() -> list:
+    """
+    Load default products from JSON file in hana_agent folder.
+    Returns list of product dicts matching Product schema.
+    """
+    json_path = get_default_products_json_path()
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            default_products = json.load(f)
+        logger.info(f"Loaded {len(default_products)} default products from {json_path}")
+        return default_products if isinstance(default_products, list) else []
+    except FileNotFoundError:
+        logger.error(f"Default products JSON file not found: {json_path}")
+        return []
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding default products JSON: {e}")
+        return []
+
+
+async def get_ecommerce_product(product_identifier: str) -> Optional[dict]:
+    """
+    Get a product from the products table by name or SKU.
+
+    Args:
+        product_identifier: Product name or SKU to search for
+
+    Returns:
+        Product dict if found, None otherwise
+    """
+    logger.info(f"get_ecommerce_product called - identifier: {product_identifier}")
+
+    async with AsyncSessionLocal() as db:
+        # Search by name or SKU (case-insensitive)
+        query = select(Product).where(
+            (Product.name.ilike(f"%{product_identifier}%")) |
+            (Product.sku.ilike(f"%{product_identifier}%"))
+        ).where(Product.is_active == True)
+
+        result = await db.execute(query)
+        product = result.scalars().first()
+
+        if not product:
+            logger.warning(f"Product not found: {product_identifier}")
+            return None
+
+        # Convert to dict
+        product_dict = {
+            "id": product.id,
+            "name": product.name,
+            "sku": product.sku,
+            "category": product.category,
+            "subcategory": product.subcategory,
+            "vehicle_type": product.vehicle_type,
+            "description": product.description,
+            "features": json.loads(product.features) if product.features else {},
+            "price": product.price,
+            "installation_type": product.installation_type,
+            "can_shutdown_engine": product.can_shutdown_engine,
+            "is_realtime_tracking": product.is_realtime_tracking,
+            "ecommerce_links": json.loads(product.ecommerce_links) if product.ecommerce_links else {},
+            "images": json.loads(product.images) if product.images else [],
+            "specifications": json.loads(product.specifications) if product.specifications else {},
+            "compatibility": json.loads(product.compatibility) if product.compatibility else {},
+            "is_active": product.is_active,
+            "sort_order": product.sort_order
+        }
+
+        logger.info(f"Product found: {product.name} ({product.sku})")
+        return product_dict
+
+
+async def reset_products_to_default() -> dict:
+    """
+    Reset all products in database to default values from JSON file.
+    This will DELETE all existing products and INSERT new ones from JSON.
+
+    Returns:
+        Dict with summary: {deleted: int, created: int, errors: list}
+    """
+    logger.info("reset_products_to_default called - Starting reset process")
+
+    # Load default products from JSON
+    default_products = load_default_products_from_json()
+
+    if not default_products:
+        logger.error("No default products found in JSON file")
+        return {"deleted": 0, "created": 0, "errors": ["JSON file not found or empty"]}
+
+    summary = {"deleted": 0, "created": 0, "errors": []}
+
+    async with AsyncSessionLocal() as db:
+        try:
+            # 1. Delete all existing products
+            from sqlalchemy import delete
+            delete_stmt = delete(Product)
+            result = await db.execute(delete_stmt)
+            summary["deleted"] = result.rowcount
+            logger.info(f"Deleted {summary['deleted']} existing products")
+
+            # 2. Insert new products from JSON
+            for product_data in default_products:
+                try:
+                    # Convert dict fields to JSON strings where needed
+                    features_json = json.dumps(product_data.get("features", {})) if product_data.get("features") else None
+                    ecommerce_links_json = json.dumps(product_data.get("ecommerce_links", {})) if product_data.get("ecommerce_links") else None
+                    images_json = json.dumps(product_data.get("images", [])) if product_data.get("images") else None
+                    specifications_json = json.dumps(product_data.get("specifications", {})) if product_data.get("specifications") else None
+                    compatibility_json = json.dumps(product_data.get("compatibility", {})) if product_data.get("compatibility") else None
+
+                    # Create new product
+                    new_product = Product(
+                        name=product_data.get("name"),
+                        sku=product_data.get("sku"),
+                        category=product_data.get("category"),
+                        subcategory=product_data.get("subcategory"),
+                        vehicle_type=product_data.get("vehicle_type"),
+                        description=product_data.get("description"),
+                        features=features_json,
+                        price=product_data.get("price"),
+                        installation_type=product_data.get("installation_type", "pasang_technisi"),
+                        can_shutdown_engine=product_data.get("can_shutdown_engine", False),
+                        is_realtime_tracking=product_data.get("is_realtime_tracking", True),
+                        ecommerce_links=ecommerce_links_json,
+                        images=images_json,
+                        specifications=specifications_json,
+                        compatibility=compatibility_json,
+                        is_active=product_data.get("is_active", True),
+                        sort_order=product_data.get("sort_order", 0)
+                    )
+                    db.add(new_product)
+                    summary["created"] += 1
+                    logger.info(f"Created product: {product_data.get('name')} ({product_data.get('sku')})")
+
+                except Exception as e:
+                    error_msg = f"Error creating product '{product_data.get('name', 'unknown')}': {str(e)}"
+                    logger.error(error_msg)
+                    summary["errors"].append(error_msg)
+
+            # Commit all changes
+            await db.commit()
+            logger.info(f"Products reset completed: {summary}")
+
+        except Exception as e:
+            await db.rollback()
+            error_msg = f"Error during product reset: {str(e)}"
+            logger.error(error_msg)
+            summary["errors"].append(error_msg)
+
+    return summary
+
+
+async def initialize_default_products_if_empty() -> bool:
+    """
+    Initialize default products from JSON if the products table is empty.
+    This is called during application startup.
+
+    Returns:
+        True if products were initialized, False if table already had data
+    """
+    logger.info("initialize_default_products_if_empty called - Checking products table")
+
+    async with AsyncSessionLocal() as db:
+        # Check if table is empty
+        query = select(Product)
+        result = await db.execute(query)
+        existing_count = len(result.scalars().all())
+
+        if existing_count > 0:
+            logger.info(f"Products table already has {existing_count} products, skipping initialization")
+            return False
+
+        logger.info("Products table is empty, initializing from JSON")
+        summary = await reset_products_to_default()
+        logger.info(f"Products initialization completed: {summary}")
+        return summary["created"] > 0
 

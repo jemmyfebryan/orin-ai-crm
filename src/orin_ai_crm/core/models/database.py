@@ -96,12 +96,12 @@ class Product(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False, index=True)  # Nama produk
     sku = Column(String(100), unique=True, index=True)  # SKU/Code produk
-    category = Column(String(50), nullable=False)  # TANAM, INSTAN
-    subcategory = Column(String(50), nullable=True)  # OBU F, OBU V, OBU D, T1, T
+    category = Column(String(50), nullable=False)  # TANAM, INSTAN, KAMERA, AKSESORIS
+    subcategory = Column(String(50), nullable=True)  # OBU F, OBU V, OBU D, T1, T, TAG, SENSOR, CAMERA
     vehicle_type = Column(String(50), nullable=True)  # mobil, motor, alat berat, truck
-    description = Column(Text, nullable=True)  # Deskripsi lengkap
+    description = Column(Text, nullable=True)  # Deskripsi singkat produk
     features = Column(Text, nullable=True)  # Fitur-fitur dalam JSON
-    price = Column(Integer, nullable=True)  # Harga dalam Rupiah
+    price = Column(String(100), nullable=True)  # Harga (format fleksibel: "25rb/bulan", "600rb/tahun", dll)
     installation_type = Column(String(50), nullable=False)  # pasang_technisi, colok_sendiri
     can_shutdown_engine = Column(Boolean, default=False)  # Bisa matikan mesin?
     is_realtime_tracking = Column(Boolean, default=True)  # Lacak real-time?

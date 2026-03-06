@@ -32,7 +32,13 @@ from src.orin_ai_crm.core.agents.tools.product_tools import (
     search_products,
     format_products_for_llm,
     answer_product_question,
-    recommend_products
+    recommend_products,
+    # Ecommerce product management tools
+    get_ecommerce_product,
+    reset_products_to_default,
+    initialize_default_products_if_empty,
+    load_default_products_from_json,
+    get_default_products_json_path
 )
 
 __all__ = [
@@ -66,4 +72,11 @@ __all__ = [
     "format_products_for_llm",
     "answer_product_question",
     "recommend_products",
+
+    # Ecommerce Product Management Tools
+    "get_ecommerce_product",
+    "reset_products_to_default",
+    "initialize_default_products_if_empty",
+    "load_default_products_from_json",
+    "get_default_products_json_path",
 ]

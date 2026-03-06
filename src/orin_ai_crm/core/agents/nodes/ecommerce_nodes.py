@@ -1,21 +1,18 @@
 """
-Ecommerce Nodes - E-commerce flow with product inquiry management
+Ecommerce Nodes - E-commerce flow with product inquiry management using database products
 """
 
 import os
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.agents.tools import (
     get_pending_inquiry,
     create_product_inquiry,
-    update_product_inquiry,
-    extract_product_type,
-    generate_ecommerce_link,
-    ProductInfo
+    answer_product_question_from_db
 )
 
 logger = get_logger(__name__)
@@ -25,20 +22,28 @@ WIB = timezone(timedelta(hours=7))
 HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
 
-ATURAN PRODUK GPS MOBIL:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak).
-
 ATURAN PERCAKAPAN:
 - Bertanya SATU per SATU seperti manusia asli, jangan langsung kirim form lengkap
 - Jika user memberikan info baru, update dan konfirmasi dengan sopan
 - Contoh: "Oh dari Jakarta ya kak, kakak bisa sebutin nama kakak agar Hana bisa panggil dengan sopan?"
 - Jangan meminta data lengkap dalam satu pesan
 - Jika user menyebut "lainnya" atau "kantor" untuk jenis kendaraan, gunakan kata yang lebih natural seperti "kendaraan" atau "kebutuhan kantor"
+
+INFORMASI PRODUK:
+Kamu memiliki akses ke database produk lengkap. Gunakan informasi tersebut untuk menjawab pertanyaan customer tentang:
+- Fitur produk (lacak, matikan mesin, sadap suara, monitoring BBM, dll)
+- Harga dan paket kuota
+- Perbedaan tipe produk (yang perlu teknisi vs bisa pasang sendiri)
+- Link e-commerce untuk pembelian
+- Spesifikasi teknis dan garansi
 """
 
 
 async def node_ecommerce(state: AgentState):
+    """
+    Ecommerce node that answers product questions and provides recommendations
+    using database products instead of hardcoded values.
+    """
     logger.info("=" * 50)
     logger.info("ENTER: node_ecommerce")
 
@@ -46,105 +51,89 @@ async def node_ecommerce(state: AgentState):
     data = state['customer_data']
     customer_id = state.get('customer_id')
 
-    # Gunakan vehicle_alias untuk response (fallback to vehicle_alias)
-    vehicle_alias = data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan')
     customer_name = data.get('name', 'Kak')
+    logger.info(f"Customer: {customer_name}")
 
-    logger.info(f"Customer: {customer_name}, vehicle: {vehicle_alias}, qty: {data.get('unit_qty')}")
+    # Get the last message from user
+    last_message = ""
+    for msg in reversed(messages):
+        if isinstance(msg, HumanMessage):
+            last_message = msg.content
+            break
 
-    # 1. Check existing inquiry
+    logger.info(f"Last message: {last_message[:100] if last_message else 'empty'}...")
+
+    # Check if there's an existing inquiry for follow-up context
     existing_inquiry = await get_pending_inquiry(customer_id)
     has_existing = existing_inquiry is not None
-    logger.info(f"Existing inquiry: {has_existing}, id={existing_inquiry.id if existing_inquiry else 'N/A'}")
 
-    # 2. Extract product type dari conversation
-    product_info: ProductInfo = extract_product_type(messages, data)
-    logger.info(f"Extracted product type: {product_info.product_type}, vehicle: {product_info.vehicle_alias or product_info.vehicle_alias}, qty: {product_info.unit_qty}")
+    if has_existing:
+        logger.info(f"Existing inquiry found: id={existing_inquiry.id}, status={existing_inquiry.status}")
 
-    # 3. Determine response based on context
-    if existing_inquiry:
-        # Already have inquiry, check if customer asking about product again
-        logger.info("Existing inquiry found - providing product info")
+    # Use the new database-powered Q&A function
+    try:
+        answer = await answer_product_question_from_db(
+            question=last_message,
+            customer_data=data
+        )
 
-        prompt = f"""{HANA_PERSONA}
+        logger.info(f"Answer generated from database products")
 
-Customer: {customer_name} sudah pernah tanya produk dan sudah Hana berikan rekomendasi.
-Inquiry lama:
-- Product Type: {existing_inquiry.product_type}
-- Vehicle: {existing_inquiry.vehicle_type}  # This is from ProductInquiry table, keeps vehicle_type column
-- Qty: {existing_inquiry.unit_qty}
-- Link: {existing_inquiry.ecommerce_link or 'Belum diberikan'}
+        # If this looks like a new inquiry (customer asking about products first time),
+        # create an inquiry record for tracking
+        if not has_existing and _is_product_inquiry(last_message):
+            logger.info("Creating new product inquiry record")
 
-Customer sekarang chat lagi.
+            inquiry = await create_product_inquiry(
+                customer_id=customer_id,
+                product_type="GENERAL",  # Will be updated based on actual interest
+                vehicle_type=data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan'),
+                unit_qty=data.get('unit_qty', 1)
+            )
 
-Tugas:
-1. Sapa dengan nama mereka
-2. Tanya apakah mereka ingin info tambahan atau ingin langsung order
-3. Jika mereka tanya lagi tentang produk, berikan info singkat dan reminder link sudah diberikan
-4. Ramah dan membantu
-5. JANGAN buat inquiry baru"""
+            logger.info(f"Product inquiry created: id={inquiry.id}")
 
-        response = llm.invoke([SystemMessage(content=prompt)] + messages)
-
-        logger.info(f"EXIT: node_ecommerce -> Existing inquiry follow-up")
+        logger.info(f"EXIT: node_ecommerce -> Answer provided")
         logger.info("=" * 50)
 
         return {
-            "messages": [AIMessage(content=response.content)],
+            "messages": [AIMessage(content=answer)],
             "route": "ECOMMERCE",
             "customer_id": customer_id
         }
 
-    # 4. No existing inquiry, create new one with product recommendation
-    logger.info("Creating new product inquiry")
+    except Exception as e:
+        logger.error(f"Error in node_ecommerce: {str(e)}", exc_info=True)
 
-    # Determine product type and generate link
-    product_type = product_info.product_type or "TANAM"  # Default to TANAM
-    vehicle = product_info.vehicle_alias or product_info.vehicle_alias or data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan')
-    qty = product_info.unit_qty or data.get('unit_qty', 1)
+        # Fallback response
+        fallback_message = f"""Maaf kak {customer_name}, terjadi kesalahan saat memproses pertanyaan kakak. 🙏
 
-    # Generate appropriate e-commerce link based on product type
-    ecommerce_link = generate_ecommerce_link(product_type, vehicle, qty)
-    logger.info(f"Generated e-commerce link: {ecommerce_link}")
+Mohon coba lagi atau hubungi tim CS kami ya kak! 😊"""
 
-    # Create product inquiry record
-    inquiry = await create_product_inquiry(
-        customer_id=customer_id,
-        product_type=product_type,
-        vehicle_type=vehicle,
-        unit_qty=qty
-    )
+        return {
+            "messages": [AIMessage(content=fallback_message)],
+            "route": "ECOMMERCE",
+            "customer_id": customer_id
+        }
 
-    # Update with ecommerce link
-    await update_product_inquiry(
-        inquiry_id=inquiry.id,
-        ecommerce_link=ecommerce_link,
-        status="link_sent"
-    )
 
-    # Generate response based on product type
-    if product_type == "TANAM":
-        product_desc = "OBU F & OBU V (Tipe TANAM - Tersembunyi, dipasang teknisi, bisa lacak + matikan mesin)"
-    elif product_type == "INSTAN":
-        product_desc = "OBU D, T1, atau T (Tipe INSTAN - Bisa pasang sendiri tinggal colok OBD, hanya lacak)"
-    else:
-        product_desc = f"{product_type}"
+def _is_product_inquiry(message: str) -> bool:
+    """
+    Check if the message is a product inquiry (asking about products, prices, etc.)
+    vs just a greeting or follow-up.
+    """
+    if not message:
+        return False
 
-    confirm_message = f"""Siap kak {customer_name}! 👍
+    message_lower = message.lower()
 
-Berdasarkan kebutuhan kakak ({qty} unit), Hana rekomendasikan:
+    # Keywords that indicate product inquiry
+    inquiry_keywords = [
+        'harga', 'price', 'produk', 'product', 'gps', 'tracker',
+        'pasang', 'install', 'beli', 'order', 'tanya', 'ask',
+        'fitur', 'feature', 'spesifikasi', 'spec',
+        'obu', 'mobil', 'motor', 'kendaraan', 'vehicle',
+        'matikan mesin', 'sadap', 'lacak', 'track'
+    ]
 
-📦 {product_desc}
-
-{ecommerce_link}
-
-Kakak bisa langsung order melalui link di atas ya. Kalau ada pertanyaan seputar produk atau butuh bantu pemesanan, bilang saja ke Hana! 😊"""
-
-    logger.info(f"EXIT: node_ecommerce -> New inquiry created with link")
-    logger.info("=" * 50)
-
-    return {
-        "messages": [AIMessage(content=confirm_message)],
-        "route": "ECOMMERCE",
-        "customer_id": customer_id
-    }
+    return any(keyword in message_lower for keyword in inquiry_keywords)

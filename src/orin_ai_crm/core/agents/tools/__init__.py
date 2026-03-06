@@ -23,7 +23,7 @@ from src.orin_ai_crm.core.agents.tools.product_tools import (
     create_product_inquiry,
     update_product_inquiry,
     extract_product_type,
-    generate_ecommerce_link,
+    # generate_ecommerce_link,
     ProductInfo,
     # Product query tools
     get_all_active_products,
@@ -38,7 +38,10 @@ from src.orin_ai_crm.core.agents.tools.product_tools import (
     reset_products_to_default,
     initialize_default_products_if_empty,
     load_default_products_from_json,
-    get_default_products_json_path
+    get_default_products_json_path,
+    # Product recommendation & Q&A tools (with database)
+    recommend_products_from_db,
+    answer_product_question_from_db
 )
 
 __all__ = [
@@ -61,7 +64,7 @@ __all__ = [
     "create_product_inquiry",
     "update_product_inquiry",
     "extract_product_type",
-    "generate_ecommerce_link",
+    # "generate_ecommerce_link",
     "ProductInfo",
 
     # Product Query Tools
@@ -79,4 +82,8 @@ __all__ = [
     "initialize_default_products_if_empty",
     "load_default_products_from_json",
     "get_default_products_json_path",
+
+    # Product Recommendation & Q&A Tools (with database)
+    "recommend_products_from_db",
+    "answer_product_question_from_db",
 ]

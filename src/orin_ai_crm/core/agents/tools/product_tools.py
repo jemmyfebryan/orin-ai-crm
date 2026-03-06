@@ -417,38 +417,38 @@ Rules:
     return result
 
 
-def generate_ecommerce_link(product_type: str, vehicle_type: str, unit_qty: int) -> str:
-    """
-    Generate e-commerce link berdasarkan product type.
-    Dalam real implementasi, ini bisa query database untuk dapat link spesifik.
-    """
-    logger.info(f"generate_ecommerce_link called - product_type: {product_type}, vehicle: {vehicle_type}, qty: {unit_qty}")
+# def generate_ecommerce_link(product_type: str, vehicle_type: str, unit_qty: int) -> str:
+#     """
+#     Generate e-commerce link berdasarkan product type.
+#     Dalam real implementasi, ini bisa query database untuk dapat link spesifik.
+#     """
+#     logger.info(f"generate_ecommerce_link called - product_type: {product_type}, vehicle: {vehicle_type}, qty: {unit_qty}")
 
-    # Placeholder - ganti dengan link asli
-    if product_type == "TANAM":
-        link = """Untuk pembelian GPS tipe TANAM (OBU F & OBU V - Dipasang teknisi, bisa matikan mesin), kakak bisa:
+#     # Placeholder - ganti dengan link asli
+#     if product_type == "TANAM":
+#         link = """Untuk pembelian GPS tipe TANAM (OBU F & OBU V - Dipasang teknisi, bisa matikan mesin), kakak bisa:
 
-🛒 Tokopedia: https://tokopedia.com/orin/gps-tanam
-🛒 Shopee: https://shopee.co.id/orin/gps-tanam
+# 🛒 Tokopedia: https://tokopedia.com/orin/gps-tanam
+# 🛒 Shopee: https://shopee.co.id/orin/gps-tanam
 
-Produk ini butuh instalasi teknisi. Tim kami akan bantu pasang ya kak! 🔧"""
-    elif product_type == "INSTAN":
-        link = """Untuk pembelian GPS tipe INSTAN (OBU D, T1, T - Tinggal colok OBD), kakak bisa:
+# Produk ini butuh instalasi teknisi. Tim kami akan bantu pasang ya kak! 🔧"""
+#     elif product_type == "INSTAN":
+#         link = """Untuk pembelian GPS tipe INSTAN (OBU D, T1, T - Tinggal colok OBD), kakak bisa:
 
-🛒 Tokopedia: https://tokopedia.com/orin/gps-instan
-🛒 Shopee: https://shopee.co.id/orin/gps-instan
+# 🛒 Tokopedia: https://tokopedia.com/orin/gps-instan
+# 🛒 Shopee: https://shopee.co.id/orin/gps-instan
 
-Produk ini tinggal colok ke port OBD kendaraan. Praktis! 🔌"""
-    else:
-        link = f"""Untuk pembelian GPS produk {product_type}, kakak bisa langsung ke:
+# Produk ini tinggal colok ke port OBD kendaraan. Praktis! 🔌"""
+#     else:
+#         link = f"""Untuk pembelian GPS produk {product_type}, kakak bisa langsung ke:
 
-🛒 Tokopedia: https://tokopedia.com/orin
-🛒 Shopee: https://shopee.co.id/orin
+# 🛒 Tokopedia: https://tokopedia.com/orin
+# 🛒 Shopee: https://shopee.co.id/orin
 
-Pilih produk yang sesuai dengan kebutuhan {vehicle_type} kakak ya! 🚗"""
+# Pilih produk yang sesuai dengan kebutuhan {vehicle_type} kakak ya! 🚗"""
 
-    logger.info(f"E-commerce link generated for product_type: {product_type}")
-    return link
+#     logger.info(f"E-commerce link generated for product_type: {product_type}")
+#     return link
 
 
 # ============================================================================
@@ -638,4 +638,155 @@ async def initialize_default_products_if_empty() -> bool:
         summary = await reset_products_to_default()
         logger.info(f"Products initialization completed: {summary}")
         return summary["created"] > 0
+
+
+# ============================================================================
+# PRODUCT RECOMMENDATION & QUESTION ANSWERING (with Database)
+# ============================================================================
+
+
+async def recommend_products_from_db(
+    category: Optional[str] = None,
+    vehicle_type: Optional[str] = None,
+    budget: Optional[str] = None,
+    features_needed: Optional[list] = None
+) -> tuple[List[dict], str]:
+    """
+    Recommend products based on customer needs using database products.
+    Returns (products, explanation).
+
+    Args:
+        category: TANAM, INSTAN, KAMERA, AKSESORIS
+        vehicle_type: mobil, motor, alat berat, truck
+        budget: Price constraint (e.g., "25rb/bulan", "<500rb")
+        features_needed: List of required features (e.g., ["matikan mesin", "sadap suara"])
+    """
+    logger.info(f"recommend_products_from_db called - category: {category}, vehicle: {vehicle_type}, budget: {budget}, features: {features_needed}")
+
+    async with AsyncSessionLocal() as db:
+        # Build query based on filters
+        query = select(Product).where(Product.is_active == True)
+
+        if category:
+            query = query.where(Product.category == category)
+
+        result = await db.execute(query.order_by(Product.sort_order.asc()))
+        products = result.scalars().all()
+
+        # Convert to list of dicts
+        product_list = []
+        for p in products:
+            product_dict = {
+                "id": p.id,
+                "name": p.name,
+                "sku": p.sku,
+                "category": p.category,
+                "subcategory": p.subcategory,
+                "vehicle_type": p.vehicle_type,
+                "description": p.description,
+                "features": json.loads(p.features) if p.features else {},
+                "price": p.price,
+                "installation_type": p.installation_type,
+                "can_shutdown_engine": p.can_shutdown_engine,
+                "is_realtime_tracking": p.is_realtime_tracking,
+                "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {},
+                "specifications": json.loads(p.specifications) if p.specifications else {},
+            }
+            product_list.append(product_dict)
+
+        # Use LLM to filter and recommend based on needs
+        if not product_list:
+            return [], "Maaf, tidak ada produk yang ditemukan."
+
+        products_context = format_products_for_llm(product_list)
+
+        prompt = f"""Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+
+{products_context}
+
+Kebutuhan Customer:
+- Category: {category or '-'}
+- Jenis Kendaraan: {vehicle_type or '-'}
+- Budget: {budget or '-'}
+- Fitur yang dibutuhkan: {features_needed or '-'}
+
+Tugas:
+1. Analisis produk-produk di atas yang cocok dengan kebutuhan customer
+2. Berikan rekomendasi 1-3 produk terbaik dengan alasan
+3. Jelaskan fitur utama dan link e-commerce untuk pembelian
+4. Buat respons natural seperti CS asli, gunakan emoji yang sesuai
+
+Jawaban harus langsung bisa dikirim ke customer."""
+
+        response = llm.invoke([
+            SystemMessage(content=prompt),
+            HumanMessage(content=f"Rekomendasikan produk untuk {vehicle_type or 'kendaraan'}")
+        ])
+
+        logger.info(f"Recommendation generated: {response.content[:100]}...")
+        return product_list, response.content
+
+
+async def answer_product_question_from_db(
+    question: str,
+    customer_data: Optional[dict] = None
+) -> str:
+    """
+    Answer product questions using LLM with context from database products.
+
+    Args:
+        question: Customer's question
+        customer_data: Customer profile data (vehicle, qty, etc.)
+
+    Returns:
+        AI-generated answer
+    """
+    logger.info(f"answer_product_question_from_db called - question: {question[:50]}...")
+
+    # Get all active products as context
+    all_products = await get_all_active_products()
+
+    if not all_products:
+        return "Maaf, saat ini data produk sedang tidak dapat diakses. Silakan coba lagi nanti atau hubungi CS kami."
+
+    products_context = format_products_for_llm(all_products)
+
+    # Build customer context
+    customer_info = ""
+    if customer_data:
+        customer_info = f"""
+Customer Profile:
+- Nama: {customer_data.get('name', 'Kak')}
+- Kendaraan: {customer_data.get('vehicle_alias', '-')}
+- Jumlah Unit: {customer_data.get('unit_qty', 0)}
+- B2B: {customer_data.get('is_b2b', False)}
+"""
+
+    system_prompt = f"""Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
+
+{products_context}
+
+{customer_info}
+Pertanyaan Customer: {question}
+
+Tugas:
+1. Jawab pertanyaan customer dengan sopan dan ramah
+2. Berikan informasi produk yang akurat berdasarkan database di atas
+3. Jika customer tanya tentang fitur, jelaskan dengan jelas
+4. Jika customer tanya tentang harga, sebutkan harganya dengan format yang sesuai
+5. Jika customer tanya tentang cara beli, berikan link e-commerce yang tersedia
+6. Jika customer butuh rekomendasi, tanyakan kebutuhan mereka (jenis kendaraan, budget, fitur yang diinginkan)
+7. JANGAN mengarang info yang tidak ada di database
+8. Gunakan emoji yang sesuai (🚗, 🏍️, ✅, dll)
+
+Jawaban harus natural seperti CS asli, bukan seperti robot."""
+
+    response = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=question)
+    ])
+
+    logger.info(f"Product answer generated: {response.content[:100]}...")
+    return response.content
 

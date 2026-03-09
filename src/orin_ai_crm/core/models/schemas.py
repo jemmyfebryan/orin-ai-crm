@@ -13,8 +13,9 @@ class AgentState(TypedDict):
     route: str
     customer_data: dict
     # Intent classification fields
-    classified_intent: Optional[str]  # Intent yang sudah diklasifikasi
-    intent_confidence: Optional[float]  # Confidence score 0-1
+    classified_intent: Optional[str]  # Selected intent yang sudah diklasifikasi (highest confidence)
+    intent_confidence: Optional[float]  # Confidence score 0-1 dari selected intent
+    intent_results: Optional[dict]  # Full intent results as JSON (all 6 intents with their states)
     intent_level: Optional[str]  # "HIGH" or "LOW" - detected by LLM
     # Meeting flags
     wants_meeting: Optional[bool]  # Set oleh intent_classification untuk meeting request
@@ -35,33 +36,56 @@ class CustomerProfile(BaseModel):
     is_b2b: bool = Field(default=False, description="True jika ini perusahaan/armada operasional, False jika pemakaian pribadi")
     is_onboarded: bool = Field(default=False, description="True jika agent sudah pernah mengirimkan form/mengonboard user ini")
 
-class IntentClassification(BaseModel):
-    """User Intent Classification"""
-    intent: Literal[
+class IntentResult(BaseModel):
+    """Single intent result with confidence and selection status"""
+    intent_result: Literal[
         "greeting",
-        # "profiling",
+        "profiling",
         "product_inquiry",
-        # "meeting_request",
         "complaint",
         "support",
-        # "reschedule",
-        # "order",
         "general_question"
     ] = Field(
-        description="Intent utama user"
+        description="Type of intent"
     )
-    confidence: float = Field(
-        description="Confidence score 0-1",
+    use_intent: bool = Field(
+        description="True if LLM selected this intent as applicable to the user's message"
+    )
+    intent_confidence: float = Field(
+        description="Confidence score 0-1 for this intent classification",
         ge=0.0,
         le=1.0
     )
+
+
+class IntentClassification(BaseModel):
+    """User Intent Classification - Contains all intents with their states"""
+    intents: list[IntentResult] = Field(
+        description="List of all 6 intents with their selection status and confidence"
+    )
     reasoning: str = Field(
-        description="Alasan klasifikasi intent"
+        description="Alasan klasifikasi intent secara keseluruhan"
     )
     product_keywords: list[str] = Field(
         default=[],
         description="Keywords terkait produk yang disebutkan"
     )
+
+    def get_selected_intent(self) -> tuple[str, float] | None:
+        """
+        Get the intent with highest confidence among those marked as use_intent=True.
+
+        Returns:
+            Tuple of (intent_name, confidence) or None if no intent is selected
+        """
+        selected_intents = [i for i in self.intents if i.use_intent]
+        if not selected_intents:
+            return None
+
+        # Sort by confidence descending and return the highest
+        selected_intents.sort(key=lambda x: x.intent_confidence, reverse=True)
+        highest = selected_intents[0]
+        return (highest.intent_result, highest.intent_confidence)
     
 
 class MeetingInfo(BaseModel):

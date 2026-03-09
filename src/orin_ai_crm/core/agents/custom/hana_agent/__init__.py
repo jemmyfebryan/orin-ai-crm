@@ -46,13 +46,13 @@ def intent_classification_router(state: AgentState) -> str:
     #     return "form_node"
 
     # If data is filled even partially, route directly to final node
-    if is_customer_data_filled:
-        # Route based on is_b2b flag
-        is_b2b = customer_data.get("is_b2b", False)
-        if is_b2b:
-            return "sales_node"
-        else:
-            return "ecommerce_node"
+    # if is_customer_data_filled:
+    #     # Route based on is_b2b flag
+    #     is_b2b = customer_data.get("is_b2b", False)
+    #     if is_b2b:
+    #         return "sales_node"
+    #     else:
+    #         return "ecommerce_node"
 
     # Show form for data collection (TEMPORARY MANDATORY)
     if step in ["profiling", "greeting"]:
@@ -60,7 +60,13 @@ def intent_classification_router(state: AgentState) -> str:
 
     # Profiling complete → sales
     if step == "profiling_complete":
-        return "sales_node"
+        is_b2b = customer_data.get("is_b2b", False)
+        if is_b2b:
+            return "sales_node"
+        else:
+            return "ecommerce_node"
+        
+    
 
     # Already handled routes → quality check
     if route in ["PRODUCT_INFO", "SALES", "SUPPORT", "ECOMMERCE", "UNASSIGNED"]:

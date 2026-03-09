@@ -61,6 +61,7 @@ ATURAN PERCAKAPAN:
 def classify_user_intent(messages: list, customer_data: dict) -> IntentClassification:
     """
     Classify user intent dari conversation history.
+    Returns all intents with their selection status and confidence scores.
     Ini membantu AI memutuskan alur percakapan apa yang harus diambil.
     """
     logger.info(f"classify_user_intent called - message_count: {len(messages)}, customer_data: {customer_data}")
@@ -81,46 +82,59 @@ CUSTOMER DATA:
 - Vehicle: {customer_data.get('vehicle_alias', '-')}
 - Unit Qty: {customer_data.get('unit_qty', 0)}
 
-INTENT TYPES:
-**greeting**: Salam, perkenalan, ucapan terima kasih
-Contoh: "Halo", "Selamat pagi", "Terima kasih"
+INTENT TYPES (6 types total):
+1. **greeting**: Salam, perkenalan, ucapan terima kasih
+   Contoh: "Halo", "Selamat pagi", "Terima kasih"
 
-**profiling**: Memberikan atau mengupdate data diri
-Contoh: "Saya Budi", "Domisili saya Jakarta", "Saya butuh 10 unit"
+2. **profiling**: Memberikan atau mengupdate data diri
+   Contoh: "Saya Budi", "Domisili saya Jakarta", "Saya butuh 10 unit"
 
-**product_inquiry**: Tanya tentang produk (fitur, harga, spesifikasi, dll)
-Contoh: "Produk apa saja?", "Berapa harganya?", "Apa bedanya TANAM vs INSTAN?"
+3. **product_inquiry**: Tanya tentang produk (fitur, harga, spesifikasi, dll)
+   Contoh: "Produk apa saja?", "Berapa harganya?", "Apa bedanya TANAM vs INSTAN?"
 
-**complaint**: Keluhan atau komplain
-Contoh: "Produk error", "Tidak bisa tracking", "Tim sales tidak datang"
+4. **complaint**: Keluhan atau komplain
+   Contoh: "Produk error", "Tidak bisa tracking", "Tim sales tidak datang"
 
-**support**: Butuh bantuan teknis atau support
-Contoh: "Cara installnya bagaimana?", "Aplikasi error", "Bagaimana cara pakai?"
+5. **support**: Butuh bantuan teknis atau support
+   Contoh: "Cara installnya bagaimana?", "Aplikasi error", "Bagaimana cara pakai?"
 
-**general_question**: Pertanyaan umum lainnya
-Contoh: "Lokasi office dimana?", "Berapa lama garansi?"
+6. **general_question**: Pertanyaan umum lainnya
+   Contoh: "Lokasi office dimana?", "Berapa lama garansi?"
 
 RULES:
 - Jika profiling belum complete, prioritaskan **profiling** intent
 - Jika user tanya produk setelah profiling complete, gunakan **product_inquiry**
-- Jika user sepakat meeting (tanggal+jam), gunakan **meeting_request**
-- Jika user minta ganti jadwal, gunakan **reschedule**
 - Confidence 0.8-1.0 untuk intent yang jelas
 - Confidence 0.5-0.7 untuk intent yang kurang jelas
-- Berikan reasoning yang singkat dan jelas
+
+IMPORTANT: You MUST return ALL 6 intents in the list:
+- Set use_intent=True for intent(s) that apply to this message
+- Set use_intent=False for intent(s) that don't apply
+- Set intent_confidence (0.0-1.0) for each intent based on how well it matches
+- Multiple intents can have use_intent=True (e.g., user could be profiling AND asking about products)
+- The highest confidence among use_intent=True intents will be selected
 
 Return format:
-- intent: salah satu intent type di atas
-- confidence: 0.0 - 1.0
+- intents: list of 6 IntentResult objects, one for each intent type
 - reasoning: penjelasan singkat
 - product_keywords: list kata kunci terkait produk (jika ada)"""
 
     classifier_llm = llm.with_structured_output(IntentClassification)
     result = classifier_llm.invoke([SystemMessage(content=system_prompt)])
 
-    logger.info(f"Intent classified: {result.intent} (confidence: {result.confidence})")
+    # Get the selected intent (highest confidence among use_intent=True)
+    selected = result.get_selected_intent()
+    if selected:
+        selected_intent, selected_confidence = selected
+        logger.info(f"Selected intent: {selected_intent} (confidence: {selected_confidence})")
+    else:
+        logger.warning("No intent was selected (all use_intent=False)")
+
     logger.info(f"Reasoning: {result.reasoning}")
     logger.info(f"Product keywords: {result.product_keywords}")
+    # Log all intent results for debugging
+    results_str = [f"{i.intent_result}:{i.intent_confidence}:{i.use_intent}" for i in result.intents]
+    logger.info(f"All intent results: {results_str}")
 
     return result
 
@@ -196,11 +210,16 @@ async def save_intent_classification(
     Table ini dinamis dan dapat mengakomodasi intent type baru di masa depan.
     """
     try:
+        # Get the selected intent for backward compatibility
+        selected = intent_result.get_selected_intent()
+        selected_intent = selected[0] if selected else "unknown"
+        selected_confidence = selected[1] if selected else 0.0
+
         async with AsyncSessionLocal() as db:
             classification = IntentClassificationModel(
                 customer_id=customer_id,
-                intent=intent_result.intent,
-                confidence=intent_result.confidence,
+                intent=selected_intent,  # Selected intent for backward compatibility
+                confidence=selected_confidence,  # Selected confidence for backward compatibility
                 reasoning=intent_result.reasoning,
                 product_keywords=intent_result.product_keywords,
                 route=route,
@@ -209,7 +228,7 @@ async def save_intent_classification(
             )
             db.add(classification)
             await db.commit()
-            logger.info(f"Intent classification SAVED - id: {classification.id}, customer_id: {customer_id}, intent: {intent_result.intent}, route: {route}, step: {step}")
+            logger.info(f"Intent classification SAVED - id: {classification.id}, customer_id: {customer_id}, intent: {selected_intent}, route: {route}, step: {step}")
     except Exception as e:
         logger.error(f"Failed to save intent classification: {str(e)}")
 
@@ -234,14 +253,34 @@ async def _build_state_and_save(
     final_messages = messages if messages is not None else state.get('messages', [])
     last_user_msg = final_messages[-1].content if final_messages else ""
 
+    # Get the selected intent (highest confidence among use_intent=True)
+    selected = intent_result.get_selected_intent()
+    selected_intent = selected[0] if selected else "unknown"
+    selected_confidence = selected[1] if selected else 0.0
+
+    # Convert full intent results to dict for state storage
+    intent_results_dict = {
+        "intents": [
+            {
+                "intent_result": i.intent_result,
+                "use_intent": i.use_intent,
+                "intent_confidence": i.intent_confidence
+            }
+            for i in intent_result.intents
+        ],
+        "reasoning": intent_result.reasoning,
+        "product_keywords": intent_result.product_keywords
+    }
+
     # Build base state
     result_state = {
         "messages": final_messages,
         "step": step,
         "route": route,
         "customer_data": customer_data,
-        "classified_intent": intent_result.intent,
-        "intent_confidence": intent_result.confidence,
+        "classified_intent": selected_intent,
+        "intent_confidence": selected_confidence,
+        "intent_results": intent_results_dict,  # Store full results for reference
         "next_route": state.get("next_route"),  # Preserve next route if exists
         "send_form": state.get("send_form"),
         **kwargs
@@ -341,19 +380,28 @@ async def node_intent_classification(state: AgentState):
 
     # Cek apakah user baru atau tidak
     is_onboarded = customer_data.get("is_onboarded")
-    is_customer_data_filled = customer_data.get("is_filled")
-    
+    _is_customer_data_filled = customer_data.get("is_filled")  # Reserved for future use
+
     # Jika user baru, maka ikutkan send form
     send_form = True if (not is_onboarded) else False
     state["send_form"] = send_form
     logger.info(f"Set send_form to: {send_form}")
-    
+
     # Classify intent
     intent_result = classify_user_intent(messages, customer_data)
 
-    # Tentukan next action berdasarkan intent
-    intent = intent_result.intent
-    confidence = intent_result.confidence
+    # Get the selected intent (highest confidence among use_intent=True)
+    selected = intent_result.get_selected_intent()
+    if not selected:
+        logger.warning("No intent selected (all use_intent=False), routing to human takeover")
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            route="HUMAN_TAKEOVER",
+            step="human_takeover",
+        )
+
+    intent, confidence = selected
 
     if confidence < 0.4:
         logger.info(f"Low confidence ({confidence}), routing to human takeover")

@@ -13,7 +13,8 @@ logger = get_logger(__name__)
 
 async def get_or_create_customer(
     identifier: dict,
-    contact_name: Optional[str] = None
+    contact_name: Optional[str] = None,
+    is_onboarded: bool = False,
 ) -> Customer:
     """
     Ambil customer berdasarkan phone_number ATAU lid_number.
@@ -77,7 +78,8 @@ async def get_or_create_customer(
         customer = Customer(
             phone_number=identifier.get('phone_number'),
             lid_number=identifier.get('lid_number'),
-            contact_name=contact_name
+            contact_name=contact_name,
+            is_onboarded=is_onboarded,
         )
         db.add(customer)
         await db.commit()

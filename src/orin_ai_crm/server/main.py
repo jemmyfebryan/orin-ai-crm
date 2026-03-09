@@ -1,12 +1,12 @@
-import os
 import uvicorn
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional
-from sqlalchemy import select, or_, delete
+from sqlalchemy import select, or_, delete, inspect
 
 # Import dari modular structure
+from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
 from src.orin_ai_crm.core.agents.tools import (
     get_or_create_customer,
@@ -17,6 +17,8 @@ from src.orin_ai_crm.core.agents.tools import (
 )
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
 from langchain_core.messages import HumanMessage, AIMessage
+
+logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,6 +40,8 @@ class ChatRequest(BaseModel):
     lid_number: Optional[str] = Field(None, description="WhatsApp LID number untuk migrasi")
     message: str = Field(..., description="Pesan dari user")
     contact_name: Optional[str] = Field(None, description="Nama kontak dari WhatsApp")
+    
+    is_new_chat: bool = Field(False, description="Apakah ada pesan user pertama kali di WhatsApp")
 
     @field_validator('contact_name')
     @classmethod
@@ -75,6 +79,7 @@ class ResetHistoryResponse(BaseModel):
     success: bool
     message: str
     deleted_count: int
+    customer_id: Optional[int] = None
 
 class ResetProductsResponse(BaseModel):
     success: bool
@@ -93,25 +98,62 @@ async def chat_endpoint(req: ChatRequest):
             "lid_number": req.lid_number
         }
 
+        # 3. Build history list untuk LangGraph
+        is_new_chat = req.is_new_chat
+
         # 2. Get or create customer (returns detached object)
-        customer = await get_or_create_customer(identifier, req.contact_name)
+        customer = await get_or_create_customer(
+            identifier=identifier,
+            contact_name=req.contact_name,
+            is_onboarded=(not is_new_chat),
+        )
         customer_id = customer.id
 
-        # 3. Tarik riwayat chat lama dari Database
-        history_rows = await get_chat_history(customer_id)
-
-        # 4. Build history list untuk LangGraph
+        # If not new chat, try to fetch data from DB
+        # If there is no chat history in DB but the request is not a new chat
         history = []
-        for row in history_rows:
-            if row.message_role == "user":
-                history.append(HumanMessage(content=row.content))
-            else:
-                history.append(AIMessage(content=row.content))
+        if not is_new_chat:
+            history_rows = await get_chat_history(customer_id)
+            for row in history_rows:
+                if row.message_role == "user":
+                    history.append(HumanMessage(content=row.content))
+                else:
+                    history.append(AIMessage(content=row.content))
 
-        # 5. Simpan pesan baru dari user ke Database
+        # 5. Load customer data from database
+        customer_data = {}
+        if customer.id:
+            customer_data["id"] = customer_id
+        if customer.name:
+            customer_data["name"] = customer.name
+        if customer.domicile:
+            customer_data["domicile"] = customer.domicile
+        if customer.vehicle_id:
+            customer_data["vehicle_id"] = customer.vehicle_id
+        if customer.vehicle_alias:
+            customer_data["vehicle_alias"] = customer.vehicle_alias
+        if customer.unit_qty:
+            customer_data["unit_qty"] = customer.unit_qty
+        if customer.is_onboarded:
+            customer_data["is_onboarded"] = customer.is_onboarded
+        customer_data["is_b2b"] = customer.is_b2b
+        
+        logger.info(f"Customer data: {customer_data}")
+
+        # Check if form was already submitted (we have complete data)
+        is_data_filled = (
+            customer_data.get("domicile") or
+            customer_data.get("vehicle_alias") or
+            customer_data.get("unit_qty", 0) > 0
+        )
+        if is_data_filled:
+            logger.info(f"Customer has complete data - form_submitted=True")
+        customer_data["is_filled"] = is_data_filled
+
+        # 7. Simpan pesan baru dari user ke Database
         await save_message_to_db(customer_id, "user", req.message)
 
-        # 6. Susun State untuk LangGraph
+        # 8. Susun State untuk LangGraph
         # Tambahkan pesan terbaru ke dalam history
         current_messages = history + [HumanMessage(content=req.message)]
 
@@ -121,20 +163,23 @@ async def chat_endpoint(req: ChatRequest):
             "lid_number": req.lid_number,
             "contact_name": req.contact_name,
             "customer_id": customer_id,
-            "step": "start", # Akan diupdate oleh node profiling
+            "step": "start",
             "route": "UNASSIGNED",
-            "customer_data": {}
+            "customer_data": customer_data,
+            "send_form": False,
+            # "awaiting_form": awaiting_form,
+            # "form_submitted": form_submitted
         }
 
-        # 7. Jalankan AI Workflow (LangGraph)
+        # 9. Jalankan AI Workflow (LangGraph)
         # Quality check is now handled within the workflow graph
         final_state = await hana_bot.ainvoke(initial_state)
 
-        # 8. Ambil balasan terakhir dari AI
+        # 10. Ambil balasan terakhir dari AI
         last_message = final_state["messages"][-1]
         ai_reply = last_message.content
 
-        # 9. Simpan balasan AI ke Database
+        # 11. Simpan balasan AI ke Database
         await save_message_to_db(customer_id, "ai", ai_reply)
 
         return ChatResponse(
@@ -160,7 +205,8 @@ async def chat_endpoint(req: ChatRequest):
 async def reset_history_endpoint(req: ResetHistoryRequest):
     """
     Reset history chat dan data customer untuk testing/development.
-    Hati-hati: Ini akan menghapus semua data customer dan chat history!
+    Ini akan menghapus semua chat history dan mereset data customer ke nilai default,
+    tetapi mempertahankan phone_number dan lid_number.
     """
     try:
         identifier = {
@@ -195,17 +241,51 @@ async def reset_history_endpoint(req: ResetHistoryRequest):
             chat_result = await db.execute(chat_delete)
             deleted_count += chat_result.rowcount
 
-            # 3. Hapus customer
-            cust_delete = delete(Customer).where(Customer.id == customer_id)
-            await db.execute(cust_delete)
-            deleted_count += 1
+            # 3. Reset customer data ke nilai default dari model (dynamic approach)
+            # Kolom yang di-preserve: phone_number, lid_number, created_at, id
+            preserved_columns = {"id", "phone_number", "lid_number", "created_at"}
+
+            # Get SQLAlchemy mapper untuk Customer
+            mapper = inspect(Customer)
+
+            for column_prop in mapper.attrs:
+                column_name = column_prop.key
+
+                # Skip preserved columns
+                if column_name in preserved_columns:
+                    continue
+
+                # Get the SQLAlchemy Column object
+                column = column_prop.columns[0]
+
+                # Get default value from column definition
+                default_value = column.default
+
+                if default_value is not None:
+                    # Handle callable defaults (like lambda functions for datetime)
+                    if callable(default_value.arg):
+                        # Skip callable defaults like datetime.now(WIB)
+                        # Use None if column is nullable
+                        setattr(customer, column_name, None if column.nullable else None)
+                    else:
+                        # Use the static default value
+                        setattr(customer, column_name, default_value.arg)
+                else:
+                    # No default specified, use None if nullable
+                    setattr(customer, column_name, None)
+
+            # Explicitly set is_onboarded to False
+            customer.is_onboarded = False
+
+            # updated_at akan auto-update oleh onupdate
 
             await db.commit()
 
         return ResetHistoryResponse(
             success=True,
             message=f"Berhasil reset history untuk customer_id: {customer_id}",
-            deleted_count=deleted_count
+            deleted_count=deleted_count,
+            customer_id=customer_id
         )
 
     except Exception as e:

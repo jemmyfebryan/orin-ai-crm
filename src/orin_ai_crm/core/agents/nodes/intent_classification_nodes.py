@@ -3,6 +3,7 @@ Intent Classification Node - Classify user intent at the start of conversation
 """
 
 import os
+import json
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage
@@ -30,6 +31,32 @@ ATURAN PERCAKAPAN:
 - Jika user memberikan info baru, acknowledgments dengan sopan
 - Singkat tapi ramah dan membantu"""
 
+# 1. **greeting**: Salam, perkenalan, ucapan terima kasih
+#    Contoh: "Halo", "Selamat pagi", "Terima kasih"
+
+# 2. **profiling**: Memberikan atau mengupdate data diri
+#    Contoh: "Saya Budi", "Domisili saya Jakarta", "Saya butuh 10 unit"
+
+# 3. **product_inquiry**: Tanya tentang produk (fitur, harga, spesifikasi, dll)
+#    Contoh: "Produk apa saja?", "Berapa harganya?", "Apa bedanya TANAM vs INSTAN?"
+
+# 4. **meeting_request**: Meminta atau setuju booking meeting
+#    Contoh: "Boleh booking meeting", "Meeting besok jam 2", "Saya mau konsultasi"
+
+# 5. **complaint**: Keluhan atau komplain
+#    Contoh: "Produk error", "Tidak bisa tracking", "Tim sales tidak datang"
+
+# 6. **support**: Butuh bantuan teknis atau support
+#    Contoh: "Cara installnya bagaimana?", "Aplikasi error", "Bagaimana cara pakai?"
+
+# 7. **reschedule**: Minta ganti jadwal meeting
+#    Contoh: "Ganti jadwal meeting", "Reschedule besok", "Tidak bisa datang"
+
+# 8. **order**: Ingin order atau beli produk
+#    Contoh: "Saya mau beli", "Order sekarang", "Cara pembayaran?"
+
+# 9. **general_question**: Pertanyaan umum lainnya
+#    Contoh: "Lokasi office dimana?", "Berapa lama garansi?"
 
 def classify_user_intent(messages: list, customer_data: dict) -> IntentClassification:
     """
@@ -42,13 +69,6 @@ def classify_user_intent(messages: list, customer_data: dict) -> IntentClassific
     recent_messages = messages[-5:] if len(messages) >= 5 else messages
     conversation = "\n".join([f"{msg.type}: {msg.content}" for msg in recent_messages])
 
-    # Check profiling status
-    has_name = bool(customer_data.get('name'))
-    has_domicile = bool(customer_data.get('domicile'))
-    has_vehicle = bool(customer_data.get('vehicle_alias'))  # User provided vehicle info
-    has_qty = customer_data.get('unit_qty', 0) > 0
-    profiling_complete = all([has_name, has_domicile, has_vehicle, has_qty])
-
     system_prompt = f"""Kamu adalah Intent Classifier untuk Hana AI Agent dari ORIN GPS Tracker.
 Tugasmu adalah mengklasifikasikan intent user dari percakapan.
 
@@ -60,35 +80,25 @@ CUSTOMER DATA:
 - Domicile: {customer_data.get('domicile', '-')}
 - Vehicle: {customer_data.get('vehicle_alias', '-')}
 - Unit Qty: {customer_data.get('unit_qty', 0)}
-- Profiling Complete: {profiling_complete}
 
 INTENT TYPES:
-1. **greeting**: Salam, perkenalan, ucapan terima kasih
-   Contoh: "Halo", "Selamat pagi", "Terima kasih"
+**greeting**: Salam, perkenalan, ucapan terima kasih
+Contoh: "Halo", "Selamat pagi", "Terima kasih"
 
-2. **profiling**: Memberikan atau mengupdate data diri
-   Contoh: "Saya Budi", "Domisili saya Jakarta", "Saya butuh 10 unit"
+**profiling**: Memberikan atau mengupdate data diri
+Contoh: "Saya Budi", "Domisili saya Jakarta", "Saya butuh 10 unit"
 
-3. **product_inquiry**: Tanya tentang produk (fitur, harga, spesifikasi, dll)
-   Contoh: "Produk apa saja?", "Berapa harganya?", "Apa bedanya TANAM vs INSTAN?"
+**product_inquiry**: Tanya tentang produk (fitur, harga, spesifikasi, dll)
+Contoh: "Produk apa saja?", "Berapa harganya?", "Apa bedanya TANAM vs INSTAN?"
 
-4. **meeting_request**: Meminta atau setuju booking meeting
-   Contoh: "Boleh booking meeting", "Meeting besok jam 2", "Saya mau konsultasi"
+**complaint**: Keluhan atau komplain
+Contoh: "Produk error", "Tidak bisa tracking", "Tim sales tidak datang"
 
-5. **complaint**: Keluhan atau komplain
-   Contoh: "Produk error", "Tidak bisa tracking", "Tim sales tidak datang"
+**support**: Butuh bantuan teknis atau support
+Contoh: "Cara installnya bagaimana?", "Aplikasi error", "Bagaimana cara pakai?"
 
-6. **support**: Butuh bantuan teknis atau support
-   Contoh: "Cara installnya bagaimana?", "Aplikasi error", "Bagaimana cara pakai?"
-
-7. **reschedule**: Minta ganti jadwal meeting
-   Contoh: "Ganti jadwal meeting", "Reschedule besok", "Tidak bisa datang"
-
-8. **order**: Ingin order atau beli produk
-   Contoh: "Saya mau beli", "Order sekarang", "Cara pembayaran?"
-
-9. **general_question**: Pertanyaan umum lainnya
-   Contoh: "Lokasi office dimana?", "Berapa lama garansi?"
+**general_question**: Pertanyaan umum lainnya
+Contoh: "Lokasi office dimana?", "Berapa lama garansi?"
 
 RULES:
 - Jika profiling belum complete, prioritaskan **profiling** intent
@@ -113,6 +123,65 @@ Return format:
     logger.info(f"Product keywords: {result.product_keywords}")
 
     return result
+
+
+async def classify_intent_level_with_llm(messages: list, customer_data: dict) -> dict:
+    """
+    Classify intent LEVEL using LLM (HIGH vs LOW).
+    No rule-based matching!
+
+    Returns: {
+        "level": "HIGH" or "LOW",
+        "reasoning": "explanation"
+    }
+    """
+    logger.info("classify_intent_level_with_llm called")
+
+    # Get last user message
+    last_message = ""
+    for msg in reversed(messages):
+        if hasattr(msg, 'type') and msg.type == 'human':
+            last_message = msg.content
+            break
+        elif hasattr(msg, 'content'):
+            last_message = msg.content
+            break
+
+    prompt = f"""Analyze this customer message and determine intent LEVEL.
+
+Message: "{last_message}"
+
+Customer Context: {json.dumps(customer_data, indent=2)}
+
+Classify INTENT LEVEL:
+- HIGH_INTENT: Customer is ready to transact, asking pricing, wants to buy, has urgency, specific product question, needs quick answer
+  - Keywords: harga, price, beli, order, mau pasang, butuh, segera, promo, diskon, siap
+  - Context: Asking specific product questions, ready to make decision
+
+- LOW_INTENT: Customer is browsing, just asking questions, unclear intent, early stage, "tanya-tanya", wants information only
+  - Keywords: tanya, info, cara kerja, pengen tahu, bisa jelasin, apa itu
+  - Context: Early research, comparing options, not ready to buy
+
+Consider:
+- Message content and tone
+- Urgency indicators
+- Specific vs general questions
+- Transaction readiness
+
+Return JSON:
+{{"level": "HIGH" or "LOW", "reasoning": "explanation"}}"""
+
+    response = await llm.ainvoke([SystemMessage(content=prompt)])
+
+    try:
+        result = json.loads(response.content.strip())
+        level = result.get("level", "LOW")
+        reasoning = result.get("reasoning", "")
+        logger.info(f"Intent level: {level}, reasoning: {reasoning}")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to parse intent level: {e}, defaulting to LOW")
+        return {"level": "LOW", "reasoning": "Parse error, default to LOW"}
 
 
 async def save_intent_classification(
@@ -173,6 +242,8 @@ async def _build_state_and_save(
         "customer_data": customer_data,
         "classified_intent": intent_result.intent,
         "intent_confidence": intent_result.confidence,
+        "next_route": state.get("next_route"),  # Preserve next route if exists
+        "send_form": state.get("send_form"),
         **kwargs
     }
 
@@ -259,8 +330,8 @@ def format_conversation_history(messages: list) -> str:
 async def node_intent_classification(state: AgentState):
     """
     Intent Classification Node - Langkah pertama dalam workflow.
-    Classify user intent dan return decision untuk next step.
-    Setiap intent classification akan disimpan ke table intent_classifications untuk dataset.
+    TEMPORARY: All customers go through form (mandatory data collection).
+    Interactive profiling is DISABLED.
     """
     logger.info("=" * 50)
     logger.info("ENTER: node_intent_classification")
@@ -268,6 +339,15 @@ async def node_intent_classification(state: AgentState):
     messages = state['messages']
     customer_data = state.get('customer_data', {})
 
+    # Cek apakah user baru atau tidak
+    is_onboarded = customer_data.get("is_onboarded")
+    is_customer_data_filled = customer_data.get("is_filled")
+    
+    # Jika user baru, maka ikutkan send form
+    send_form = True if (not is_onboarded) else False
+    state["send_form"] = send_form
+    logger.info(f"Set send_form to: {send_form}")
+    
     # Classify intent
     intent_result = classify_user_intent(messages, customer_data)
 
@@ -275,203 +355,127 @@ async def node_intent_classification(state: AgentState):
     intent = intent_result.intent
     confidence = intent_result.confidence
 
-    # Low confidence → lanjut ke default flow (profiling)
-    if confidence < 0.6:
-        logger.info(f"Low confidence ({confidence}), continuing to default flow")
-        logger.info(f"EXIT: node_intent_classification -> default flow")
-        logger.info("=" * 50)
+    if confidence < 0.4:
+        logger.info(f"Low confidence ({confidence}), routing to human takeover")
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            route="UNASSIGNED",
-            step="profiling"
+            route="HUMAN_TAKEOVER",
+            step="human_takeover",
         )
 
-    # High confidence → route based on intent
+
     if intent == "greeting":
-        # Check if customer is new (no profile data)
-        is_new_customer = not any([
-            customer_data.get('name'),
-            customer_data.get('domicile'),
-            customer_data.get('vehicle_alias'),
-            customer_data.get('unit_qty', 0) > 0
-        ])
-
-        if is_new_customer:
-            # For new customers, route to profiling node instead of sending generic greeting
-            # This allows the greeting_profiling node to handle contact_name logic
-            logger.info("Intent: GREETING (new customer) → Route to profiling for personalized greeting")
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                route="UNASSIGNED",
-                step="profiling"
-            )
-        else:
-            # For existing customers, send personalized greeting with their name
-            logger.info("Intent: GREETING (existing customer) → Send personalized greeting message")
-            response = await generate_llm_response(
-                messages=messages,
-                customer_data=customer_data,
-                response_task="Berikan greeting yang ramah dan perkenalkan diri sebagai Hana dari ORIN GPS Tracker. Tanyakan bagaimana Hana bisa membantu hari ini."
-            )
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                messages=[AIMessage(content=response)],
-                route="UNASSIGNED",
-                step="greeting"
-            )
-
-    elif intent == "profiling":
-        logger.info("Intent: PROFILING → Continue profiling")
+        logger.info(f"Intent: GREETING")
         return await _build_state_and_save(
             state=state,
             intent_result=intent_result,
-            route="UNASSIGNED",
-            step="profiling"
+            route="GREETING",
+            step="greeting",
+        )
+
+    elif intent == "profiling":
+        logger.info("Intent: PROFILING")
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            route="PROFILING",
+            step="profiling",
         )
 
     elif intent == "product_inquiry":
-        logger.info("Intent: PRODUCT_INQUIRY → Answer product question regardless of profiling status")
-        from src.orin_ai_crm.core.agents.tools.product_tools import answer_product_question
-
-        # Get last user message
-        last_user_msg = messages[-1].content if messages else ""
-
-        # Answer product question using product database
-        # We always try to answer the question first, regardless of profiling status
-        answer = await answer_product_question(
-            question=last_user_msg,
-            customer_vehicle=customer_data.get('vehicle_alias') or customer_data.get('vehicle_alias'),
-            customer_qty=customer_data.get('unit_qty')
+        logger.info(f"Intent: PRODUCT_INQUIRY")
+        return await _build_state_and_save(
+            state=state,
+            intent_result=intent_result,
+            route="PRODUCT_INQUIRY",
+            step="show_form",
         )
 
-        # Check if profiling is complete
-        has_all_profile = all([
-            customer_data.get('name'),
-            customer_data.get('domicile'),
-            customer_data.get('vehicle_alias'),  # Has provided vehicle info
-            customer_data.get('unit_qty', 0) > 0
-        ])
+    # elif intent == "meeting_request":
+    #     logger.info("Intent: MEETING_REQUEST → Check if profiling complete")
+    #     # Logic similar to product_inquiry
+    #     has_all_profile = all([
+    #         customer_data.get('name'),
+    #         customer_data.get('domicile'),
+    #         customer_data.get('vehicle_alias'),  # Has provided vehicle info
+    #         customer_data.get('unit_qty', 0) > 0
+    #     ])
 
-        if has_all_profile:
-            # Profiling complete - just return the answer
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                messages=[AIMessage(content=answer)],
-                route="PRODUCT_INFO",
-                step="product_qa"
-            )
-        else:
-            # Profiling incomplete - append a gentle request for profiling data after answering
-            # But mark step as "profiling" so the next interaction can continue profiling
-            response = await generate_llm_response(
-                messages=messages,
-                customer_data=customer_data,
-                response_task=f"""Jawaban pertanyaan user tentang produk:
-{answer}
+    #     if has_all_profile:
+    #         logger.info("Intent: MEETING_REQUEST (profiling complete) → Route to sales")
+    #         # Pass to sales node with meeting intent
+    #         return await _build_state_and_save(
+    #             state=state,
+    #             intent_result=intent_result,
+    #             route="SALES",
+    #             step="profiling_complete",
+    #             wants_meeting=True
+    #         )
+    #     else:
+    #         logger.info("Intent: MEETING_REQUEST (profiling incomplete) → Continue profiling")
+    #         response = await generate_llm_response(
+    #             messages=messages,
+    #             customer_data=customer_data,
+    #             response_task="User ingin booking meeting tapi profiling belum lengkap. Response dengan antusias bahwa Hana akan bantu aturkan meeting, tapi kenalan dulu ya (tanya data yang belum diketahui: nama/domisili/kendaraan/qty)."
+    #         )
+    #         return await _build_state_and_save(
+    #             state=state,
+    #             intent_result=intent_result,
+    #             messages=[AIMessage(content=response)],
+    #             route="UNASSIGNED",
+    #             step="profiling"
+    #         )
 
-Sekarang tambahkan 1-2 kalimat di akhir untuk kenalan (profiling) dengan natural:
-- Jika sudah ada nama: panggil dengan nama
-- Jika belum ada nama: boleh tanya nama
-- Tanya 1 data profiling yang belum diketahui (pilih 1 saja dari: domisili/kendaraan/jumlah unit)
-- Jangan jadwalkan ini prioritas, jawaban produk tetap fokus utama
-- Natural seperti chat WhatsApp, bukan form filling"""
-            )
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                messages=[AIMessage(content=response)],
-                route="PRODUCT_INFO",
-                step="profiling"  # Keep as profiling to continue gathering data
-            )
+    # elif intent == "reschedule":
+    #     logger.info("Intent: RESCHEDULE → Check for existing meeting")
+    #     from src.orin_ai_crm.core.agents.tools.meeting_tools import get_pending_meeting
 
-    elif intent == "meeting_request":
-        logger.info("Intent: MEETING_REQUEST → Check if profiling complete")
-        # Logic similar to product_inquiry
-        has_all_profile = all([
-            customer_data.get('name'),
-            customer_data.get('domicile'),
-            customer_data.get('vehicle_alias'),  # Has provided vehicle info
-            customer_data.get('unit_qty', 0) > 0
-        ])
+    #     customer_id = state.get('customer_id')
 
-        if has_all_profile:
-            logger.info("Intent: MEETING_REQUEST (profiling complete) → Route to sales")
-            # Pass to sales node with meeting intent
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                route="SALES",
-                step="profiling_complete",
-                wants_meeting=True
-            )
-        else:
-            logger.info("Intent: MEETING_REQUEST (profiling incomplete) → Continue profiling")
-            response = await generate_llm_response(
-                messages=messages,
-                customer_data=customer_data,
-                response_task="User ingin booking meeting tapi profiling belum lengkap. Response dengan antusias bahwa Hana akan bantu aturkan meeting, tapi kenalan dulu ya (tanya data yang belum diketahui: nama/domisili/kendaraan/qty)."
-            )
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                messages=[AIMessage(content=response)],
-                route="UNASSIGNED",
-                step="profiling"
-            )
+    #     if customer_id:
+    #         existing_meeting = await get_pending_meeting(customer_id)
 
-    elif intent == "reschedule":
-        logger.info("Intent: RESCHEDULE → Check for existing meeting")
-        from src.orin_ai_crm.core.agents.tools.meeting_tools import get_pending_meeting
-
-        customer_id = state.get('customer_id')
-
-        if customer_id:
-            existing_meeting = await get_pending_meeting(customer_id)
-
-            if existing_meeting:
-                logger.info(f"Existing meeting found: {existing_meeting.id} → Handle reschedule")
-                # Pass to sales node with reschedule flag
-                return await _build_state_and_save(
-                    state=state,
-                    intent_result=intent_result,
-                    route="SALES",
-                    step="handle_reschedule",
-                    customer_id=customer_id,
-                    existing_meeting_id=existing_meeting.id
-                )
-            else:
-                logger.info("No existing meeting → Ask if they want to book new meeting")
-                response = await generate_llm_response(
-                    messages=messages,
-                    customer_data=customer_data,
-                    response_task="User ingin reschedule meeting tapi belum ada meeting yang di-book sebelumnya. Response dengan ramah, jelaskan bahwa belum ada jadwal meeting, dan tanya apakah mau booking meeting baru."
-                )
-                return await _build_state_and_save(
-                    state=state,
-                    intent_result=intent_result,
-                    messages=[AIMessage(content=response)],
-                    route="UNASSIGNED",
-                    step="no_meeting_found",
-                    customer_id=customer_id
-                )
-        else:
-            logger.info("No customer_id → Ask for identification first")
-            response = await generate_llm_response(
-                messages=messages,
-                customer_data=customer_data,
-                response_task="User ingin reschedule meeting tapi tidak ada customer_id. Response minta user share nomor WhatsApp atau ID supaya Hana bisa cek jadwal meeting."
-            )
-            return await _build_state_and_save(
-                state=state,
-                intent_result=intent_result,
-                messages=[AIMessage(content=response)],
-                route="UNASSIGNED",
-                step="need_identifier"
-            )
+    #         if existing_meeting:
+    #             logger.info(f"Existing meeting found: {existing_meeting.id} → Handle reschedule")
+    #             # Pass to sales node with reschedule flag
+    #             return await _build_state_and_save(
+    #                 state=state,
+    #                 intent_result=intent_result,
+    #                 route="SALES",
+    #                 step="handle_reschedule",
+    #                 customer_id=customer_id,
+    #                 existing_meeting_id=existing_meeting.id
+    #             )
+    #         else:
+    #             logger.info("No existing meeting → Ask if they want to book new meeting")
+    #             response = await generate_llm_response(
+    #                 messages=messages,
+    #                 customer_data=customer_data,
+    #                 response_task="User ingin reschedule meeting tapi belum ada meeting yang di-book sebelumnya. Response dengan ramah, jelaskan bahwa belum ada jadwal meeting, dan tanya apakah mau booking meeting baru."
+    #             )
+    #             return await _build_state_and_save(
+    #                 state=state,
+    #                 intent_result=intent_result,
+    #                 messages=[AIMessage(content=response)],
+    #                 route="UNASSIGNED",
+    #                 step="no_meeting_found",
+    #                 customer_id=customer_id
+    #             )
+    #     else:
+    #         logger.info("No customer_id → Ask for identification first")
+    #         response = await generate_llm_response(
+    #             messages=messages,
+    #             customer_data=customer_data,
+    #             response_task="User ingin reschedule meeting tapi tidak ada customer_id. Response minta user share nomor WhatsApp atau ID supaya Hana bisa cek jadwal meeting."
+    #         )
+    #         return await _build_state_and_save(
+    #             state=state,
+    #             intent_result=intent_result,
+    #             messages=[AIMessage(content=response)],
+    #             route="UNASSIGNED",
+    #             step="need_identifier"
+    #         )
 
     elif intent == "complaint":
         logger.info("Intent: COMPLAINT → Route to support")
@@ -488,49 +492,49 @@ Sekarang tambahkan 1-2 kalimat di akhir untuk kenalan (profiling) dengan natural
             step="complaint"
         )
 
-    elif intent == "support":
-        logger.info("Intent: SUPPORT → Provide technical support")
-        from src.orin_ai_crm.core.agents.tools.product_tools import answer_product_question
+    # elif intent == "support":
+    #     logger.info("Intent: SUPPORT → Provide technical support")
+    #     from src.orin_ai_crm.core.agents.tools.product_tools import answer_product_question
 
-        last_user_msg = messages[-1].content if messages else ""
+    #     last_user_msg = messages[-1].content if messages else ""
 
-        # Answer support question
-        answer = await answer_product_question(
-            question=last_user_msg,
-            customer_vehicle=customer_data.get('vehicle_alias') or customer_data.get('vehicle_alias'),
-            customer_qty=customer_data.get('unit_qty')
-        )
+    #     # Answer support question
+    #     answer = await answer_product_question(
+    #         question=last_user_msg,
+    #         customer_vehicle=customer_data.get('vehicle_alias') or customer_data.get('vehicle_alias'),
+    #         customer_qty=customer_data.get('unit_qty')
+    #     )
 
-        return await _build_state_and_save(
-            state=state,
-            intent_result=intent_result,
-            messages=[AIMessage(content=answer)],
-            route="SUPPORT",
-            step="support"
-        )
+    #     return await _build_state_and_save(
+    #         state=state,
+    #         intent_result=intent_result,
+    #         messages=[AIMessage(content=answer)],
+    #         route="SUPPORT",
+    #         step="support"
+    #     )
 
-    elif intent == "order":
-        logger.info("Intent: ORDER → Guide to purchase")
-        response = await generate_llm_response(
-            messages=messages,
-            customer_data=customer_data,
-            response_task="""User ingin order/beli produk. Bantu proses pembelian dengan:
-1. Tanya tipe produk yang diinginkan (TANAM vs INSTAN)
-2. Jelaskan singkat bedanya:
-   - TANAM: dipasang teknisi, bisa matikan mesin
-   - INSTAN: colok sendiri ke OBD
-3. Sediakan link e-commerce:
-   - Tokopedia: https://tokopedia.com/orin
-   - Shopee: https://shopee.co.id/orin
-4. Tawarkan konsultasi dulu dengan tim sales jika perlu"""
-        )
-        return await _build_state_and_save(
-            state=state,
-            intent_result=intent_result,
-            messages=[AIMessage(content=response)],
-            route="ECOMMERCE",
-            step="order_guidance"
-        )
+#     elif intent == "order":
+#         logger.info("Intent: ORDER → Guide to purchase")
+#         response = await generate_llm_response(
+#             messages=messages,
+#             customer_data=customer_data,
+#             response_task="""User ingin order/beli produk. Bantu proses pembelian dengan:
+# 1. Tanya tipe produk yang diinginkan (TANAM vs INSTAN)
+# 2. Jelaskan singkat bedanya:
+#    - TANAM: dipasang teknisi, bisa matikan mesin
+#    - INSTAN: colok sendiri ke OBD
+# 3. Sediakan link e-commerce:
+#    - Tokopedia: https://tokopedia.com/orin
+#    - Shopee: https://shopee.co.id/orin
+# 4. Tawarkan konsultasi dulu dengan tim sales jika perlu"""
+#         )
+#         return await _build_state_and_save(
+#             state=state,
+#             intent_result=intent_result,
+#             messages=[AIMessage(content=response)],
+#             route="ECOMMERCE",
+#             step="order_guidance"
+#         )
 
     else:  # general_question
         logger.info("Intent: GENERAL → Answer general question")

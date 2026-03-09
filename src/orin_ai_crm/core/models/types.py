@@ -7,4 +7,4 @@ class CustomerProfile(BaseModel):
     lid_number: str = ""  # Nomor LID WA customer
     source: str = ""  # Customer berasal dari mana
     journey: Literal["profiling", "educating", "handover"] = "profiling"
-    category: Literal["unknwon", "personal", "business", "other"] = "unknown"
+    category: Literal["unknown", "personal", "business", "other"] = "unknown"

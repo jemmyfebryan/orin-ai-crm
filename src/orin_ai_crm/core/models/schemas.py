@@ -15,9 +15,16 @@ class AgentState(TypedDict):
     # Intent classification fields
     classified_intent: Optional[str]  # Intent yang sudah diklasifikasi
     intent_confidence: Optional[float]  # Confidence score 0-1
+    intent_level: Optional[str]  # "HIGH" or "LOW" - detected by LLM
     # Meeting flags
     wants_meeting: Optional[bool]  # Set oleh intent_classification untuk meeting request
     existing_meeting_id: Optional[int]  # Set oleh intent_classification untuk reschedule
+    # Form handling fields
+    # awaiting_form: bool  # True if waiting for customer to fill form
+    # form_submitted: bool  # True if customer has submitted form
+    send_form: bool
+    form_data: dict  # Parsed data from form response
+    next_route: Optional[str]  # Determined route after form (ecommerce_node or sales_node)
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")
@@ -26,11 +33,21 @@ class CustomerProfile(BaseModel):
     vehicle_alias: Optional[str] = Field(default="", description="Teks asli dari user tentang kendaraan (e.g., 'CRF', 'Avanza', 'XMAX', 'motor', 'mobil'). Disimpan ke DB untuk referensi dan display.")
     unit_qty: int = Field(default=0, description="Jumlah unit yang ingin dipasang, 0 jika belum menyebutkan angka")
     is_b2b: bool = Field(default=False, description="True jika ini perusahaan/armada operasional, False jika pemakaian pribadi")
-    
+    is_onboarded: bool = Field(default=False, description="True jika agent sudah pernah mengirimkan form/mengonboard user ini")
 
 class IntentClassification(BaseModel):
     """User Intent Classification"""
-    intent: Literal["greeting", "profiling", "product_inquiry", "meeting_request", "complaint", "support", "reschedule", "order", "general_question"] = Field(
+    intent: Literal[
+        "greeting",
+        # "profiling",
+        "product_inquiry",
+        # "meeting_request",
+        "complaint",
+        "support",
+        # "reschedule",
+        # "order",
+        "general_question"
+    ] = Field(
         description="Intent utama user"
     )
     confidence: float = Field(

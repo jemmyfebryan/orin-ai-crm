@@ -537,10 +537,21 @@ async def node_greeting_and_profiling(state: AgentState):
     previous_vehicle_matches = state.get('customer_data', {}).get('vehicle_matches', [])
     extracted_data, extra_metadata = await extract_customer_info(messages, current_profile, vehicle_matches=previous_vehicle_matches)
 
-    # Helper function to merge CustomerProfile with extra metadata
-    def build_customer_data(profile: CustomerProfile, extra: dict = None) -> dict:
-        """Build customer_data dict from profile, optionally merging extra metadata"""
-        data = profile.model_dump()
+    # Helper function to merge CustomerProfile with existing customer_data and extra metadata
+    def build_customer_data(profile: CustomerProfile, existing: dict = None, extra: dict = None) -> dict:
+        """
+        Build customer_data dict by:
+        1. Starting with existing customer_data (if provided)
+        2. Updating with fields from profile (only overwrites fields that exist in CustomerProfile)
+        3. Merging extra metadata
+
+        This preserves any additional fields in existing customer_data that aren't in CustomerProfile schema.
+        """
+        # Start with existing customer_data or empty dict
+        data = existing.copy() if existing else {}
+        # Update with profile fields (only overwrites fields defined in CustomerProfile)
+        data.update(profile.model_dump())
+        # Merge extra metadata (with lower priority than profile fields)
         if extra:
             data.update(extra)
         return data
@@ -572,7 +583,7 @@ async def node_greeting_and_profiling(state: AgentState):
         return {
             "messages": [],
             "step": "profiling_complete",
-            "customer_data": build_customer_data(extracted_data),
+            "customer_data": build_customer_data(extracted_data, state.get('customer_data', {})),
             "customer_id": customer_id
         }
 
@@ -592,7 +603,7 @@ async def node_greeting_and_profiling(state: AgentState):
         return {
             "messages": [AIMessage(content=greeting)],
             "step": "greeting",
-            "customer_data": build_customer_data(extracted_data),
+            "customer_data": build_customer_data(extracted_data, state.get('customer_data', {})),
             "customer_id": customer_id
         }
 
@@ -607,8 +618,8 @@ async def node_greeting_and_profiling(state: AgentState):
         )
 
         # Clear the clarification flag after asking, so we don't ask again
-        # Build customer_data with extra metadata
-        customer_data_to_save = build_customer_data(extracted_data, extra_metadata)
+        # Build customer_data with extra metadata, preserving existing state
+        customer_data_to_save = build_customer_data(extracted_data, state.get('customer_data', {}), extra_metadata)
         # Update to mark that we asked for clarification
         if 'vehicle_matches' in customer_data_to_save:
             customer_data_to_save['asked_vehicle_clarification'] = True
@@ -642,7 +653,7 @@ async def node_greeting_and_profiling(state: AgentState):
     return {
         "messages": [AIMessage(content=question)],
         "step": "profiling",
-        "customer_data": build_customer_data(extracted_data),
+        "customer_data": build_customer_data(extracted_data, state.get('customer_data', {})),
         "customer_id": customer_id
     }
 

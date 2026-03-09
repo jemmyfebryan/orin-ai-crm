@@ -29,6 +29,7 @@ class Customer(Base):
     vehicle_alias = Column(String(100), nullable=True)  # Custom text from user (e.g., "CRF", "Avanza")
     unit_qty = Column(Integer, nullable=True)
     is_b2b = Column(Boolean, default=False)
+    is_onboarded = Column(Boolean, default=False)
     human_takeover = Column(Boolean, default=False)  # Flag untuk human takeover when AI cannot handle
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))

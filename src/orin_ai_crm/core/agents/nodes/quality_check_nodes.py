@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
-from sqlalchemy import update
+from sqlalchemy import update, select
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
@@ -54,7 +54,8 @@ class AnswerQualityEvaluation(BaseModel):
 def evaluate_answer_quality(
     user_message: str,
     ai_answer: str,
-    customer_name: Optional[str] = None
+    customer_name: Optional[str] = None,
+    conversation_history: Optional[list] = None
 ) -> AnswerQualityEvaluation:
     """
     Evaluates whether the AI answer satisfactorily addresses the user's question.
@@ -63,6 +64,7 @@ def evaluate_answer_quality(
         user_message: The user's original question/message
         ai_answer: The AI's proposed answer
         customer_name: Optional customer name for context
+        conversation_history: Optional list of recent messages for context (last 5 bubbles)
 
     Returns:
         AnswerQualityEvaluation with score and reasoning
@@ -71,6 +73,20 @@ def evaluate_answer_quality(
 
     customer_context = f"Customer: {customer_name}" if customer_name else "Customer: Kak"
 
+    # Build conversation context from history
+    conversation_context = ""
+    if conversation_history and len(conversation_history) > 0:
+        conversation_context = "\n\nCONVERSATION HISTORY (last 5 messages for context):\n"
+        for msg in conversation_history[-5:]:
+            if hasattr(msg, 'type'):
+                role = "User" if msg.type == 'human' else "AI"
+            elif hasattr(msg, '__class__') and 'Human' in msg.__class__.__name__:
+                role = "User"
+            else:
+                role = "AI"
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            conversation_context += f"{role}: {content}\n"
+
     system_prompt = f"""{HANA_PERSONA}
 
 TASK:
@@ -78,11 +94,12 @@ Kamu adalah Quality Evaluator untuk jawaban AI dari ORIN GPS Tracker.
 Tugasmu adalah mengevaluasi apakah jawaban AI memuaskan dan menjawab pertanyaan user dengan benar.
 
 {customer_context}
+{conversation_context}
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {user_message}
 
-AI ANSWER:
+AI ANSWER TO EVALUATE:
 {ai_answer}
 
 EVALUATION CRITERIA:
@@ -90,6 +107,7 @@ EVALUATION CRITERIA:
 2. **Completeness**: Apakah jawaban lengkap atau ada informasi penting yang hilang?
 3. **Accuracy**: Apakah jawaban akurat dan dapat dipercaya?
 4. **Helpfulness**: Apakah jawaban membantu user atau hanya menunda?
+5. **Context Awareness**: Gunakan conversation history untuk memahami konteks. Jawaban mungkin terlihat tidak relevan jika di luar konteks, tapi sebenarnya tepat jika melihat history.
 
 RULES:
 - Isi is_satisfactory dengan True jika jawaban baik (confidence >= 0.6)
@@ -102,29 +120,41 @@ RULES:
 - Berikan reasoning yang jelas
 - List missing_info jika ada informasi penting yang hilang
 
+**PENTING - FORM FLOW DETECTION:**
+Cek conversation history untuk mendeteksi form flow:
+- Jika AI sebelumnya meminta data (ada kata "mohon isi", "tolong isi", "domisili", "kebutuhan", "jumlah unit")
+- Dan user menjawab dengan jawaban SINGKAT (nama kota, angka, kata kunci seperti "jakarta", "surabaya", "1", "5", "pribadi", "perusahaan")
+- Maka user SEDANG MENGISI FORM!
+
+Dalam kasus form flow:
+- Jawaban AI hanya perlu: Acknowledge data diterima + optional next step
+- Tidak perlu jawaban panjang/detail karena ini hanya acknowledgment
+- CONTOH JAWABAN YANG SANGAT BAIK untuk form flow:
+  * "Data sudah diterima, terima kasih 😊"
+  * "Siap kak, noted ya!"
+  * "Oke kak, domisili: Jakarta. Ada yang bisa dibantu?"
+- JANGAN anggap jawaban ini buruk hanya karena singkat!
+
 CONTOH JAWABAN BURUK (is_satisfactory=False, confidence<0.6):
-- Jawaban generik seperti "Terima kasih telah menghubungi kami"
 - Jawaban yang mengatakan "saya tidak bisa membantu" tanpa alternatif
 - Jawaban yang tidak relevan dengan pertanyaan
 - Jawaban yang meminta user untuk mengulang pertanyaan tanpa alasan yang jelas
+- Jawaban yang terpotong/tidak lengkap (kecuali karena batasan teknis)
 
 CONTOH JAWABAN BAIK (is_satisfactory=True, confidence>=0.6):
 - Jawaban yang langsung menjawab pertanyaan dengan informasi yang jelas
 - Jawaban yang memberikan solusi atau alternatif jika tidak bisa membantu langsung
 - Jawaban yang relevan, lengkap, dan membantu
-- Jawaban yang menjelaskan dengan baik dan ramah"""
+- Jawaban yang menjelaskan dengan baik dan ramah
+- **Form acknowledgment**: User isi form data, AI acknowledge dengan sopan → ini SANGAT BAIK, confidence 0.8-1.0"""
 
     evaluator_llm = llm.with_structured_output(AnswerQualityEvaluation)
     result = evaluator_llm.invoke([SystemMessage(content=system_prompt)])
-
-    logger.info(f"Quality evaluation - satisfactory: {result.is_satisfactory}, score: {result.confidence_score}")
-    logger.info(f"Reasoning: {result.reasoning}")
 
     return result
 
 
 async def generate_human_takeover_message(
-    user_message: str,
     customer_name: Optional[str] = None
 ) -> str:
     """
@@ -148,11 +178,8 @@ Generate pesan handover yang natural dan ramah untuk menjelaskan bahwa agent man
 
 CUSTOMER: {customer_context}
 
-USER QUESTION:
-{user_message}
-
 CONTEXT:
-AI (Hana) tidak bisa menjawab pertanyaan ini dengan memuaskan. Sekarang CS manusia dari ORIN GPS Tracker akan mengambil alih untuk membantu.
+AI tidak bisa menjawab pertanyaan ini dengan memuaskan. Sekarang CS manusia dari ORIN GPS Tracker akan mengambil alih untuk membantu.
 
 RULES:
 - Pesan harus sopan dan ramah
@@ -171,10 +198,45 @@ Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
     response = llm.invoke([SystemMessage(content=system_prompt)])
 
-    logger.info(f"Generated handover message: {response.content[:100]}...")
-
     return response.content
 
+async def add_send_form_message(
+    last_message: str
+):
+    system_prompt = f"""{HANA_PERSONA}
+
+Task:
+Ubah pesan yang ingin dikirim AI ke user dengan menambahkan form untuk user isi
+
+Pesan AI:
+{last_message}
+
+Fields yang diperlukan:
+- name: Nama (skip jika sudah ada)
+- domicile: Domisili/kota (untuk pengiriman & penawaran yang tepat)
+- purpose: Kebutuhan kendaraan (pribadi, perusahaan, operasional kantor, fleet, delivery, dll)
+- vehicle_type: Jenis kendaraan (mobil, motor, truk, dll)
+- unit_qty: Jumlah unit (untuk penawaran yang tepat)
+
+CATATAN PENTING:
+- Jangan tanya field yang sudah terisi di customer_data
+- Jelaskan bahwa data ini diperlukan untuk penawaran
+- Gunakan bahasa ramah tapi tegas
+- Kebutuhan adalah tujuan penggunaan (pribadi/kantor/operasional)
+- Di akhir, jelaskan bahwa form harus diisi untuk lanjut
+
+Contoh:
+"Supaya Hana bisa kasih penawaran yang lebih pas, mohon isi data singkat berikut:
+Nama : ...
+Domisili : ...
+Kebutuhan (pribadi, kantor, lainnya): ...
+Jenis Kendaraan (mobil, motor, lainnya): ...
+Jumlah unit : ..."""
+    response = llm.invoke([SystemMessage(content=system_prompt)])
+    
+    logger.info(f"Generated send_form_message: {response.content[:100]}...")
+    
+    return response.content
 
 async def set_human_takeover_flag(customer_id: int):
     """
@@ -223,7 +285,10 @@ async def node_quality_check(state: AgentState):
     # Get the AI's last message (the answer to evaluate)
     if not messages:
         logger.warning("No messages in state - returning empty state")
-        return state
+        return {
+            "step": "final_message",
+            "route": "FINAL_MESSAGE"
+        }
 
     last_message = messages[-1]
     ai_answer = last_message.content if hasattr(last_message, 'content') else ""
@@ -251,7 +316,10 @@ async def node_quality_check(state: AgentState):
         logger.info("=" * 50)
 
         # Return state as-is (pass through the original answer)
-        return state
+        return {
+            "step": "final_message",
+            "route": "FINAL_MESSAGE"
+        }
 
     # Get user's last message for quality evaluation
     # Find the last human message (before the AI's response)
@@ -275,35 +343,103 @@ async def node_quality_check(state: AgentState):
         logger.info("Missing user_message or ai_answer - passing through without evaluation")
         logger.info(f"EXIT: node_quality_check -> pass through")
         logger.info("=" * 50)
-        return state
+        return {
+            "step": "final_message",
+            "route": "FINAL_MESSAGE"
+        }
 
-    # Evaluate answer quality
+    # Evaluate answer quality with conversation history (last 5 messages)
     evaluation = evaluate_answer_quality(
         user_message=user_message,
         ai_answer=ai_answer,
-        customer_name=customer_name
+        customer_name=customer_name,
+        conversation_history=messages  # Pass full message history for context
     )
 
     # Check if answer is satisfactory
-    if evaluation.is_satisfactory and evaluation.confidence_score >= 0.6:
+    if evaluation.is_satisfactory and evaluation.confidence_score >= 0.5:
         logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score}) - proceeding with original answer")
         logger.info(f"EXIT: node_quality_check -> use original answer")
         logger.info("=" * 50)
 
         # Return state as-is (keep the original answer)
-        return state
+        return {
+            "step": "final_message",
+            "route": "FINAL_MESSAGE"
+        }
+    else:
+        # Answer is not satisfactory - trigger human takeover
+        logger.info(f"Answer is NOT satisfactory (score: {evaluation.confidence_score}) - triggering human takeover")
+        logger.info(f"Reasoning: {evaluation.reasoning}")
+        
+        # Trigger human takeover
+        return {
+            "step": "human_takeover",
+            "route": "HUMAN_TAKEOVER"
+        }
+        
+def quality_router(state: AgentState) -> str:
+    route = state.get("route")
+    if route == "FINAL_MESSAGE":
+        return "final_message"
+    if route == "HUMAN_TAKEOVER":
+        return "human_takeover"
+    # Fallback to human
+    logger.info(f"Quality Router error with route: {route}")
+    return "human_takeover"
 
-    # Answer is not satisfactory - trigger human takeover
-    logger.info(f"Answer is NOT satisfactory (score: {evaluation.confidence_score}) - triggering human takeover")
-    logger.info(f"Reasoning: {evaluation.reasoning}")
+async def node_final_message(state: AgentState):
+    # Soon will be used to convert final message to multiple bubble of chat
+    # Now will be modify the message to include the form to fill if send_form = True
+    logger.info("=" * 50)
+    logger.info("ENTER: node_final_message")
+    
+    customer_data = state.get("customer_data", {})
+    logger.info(f"Customer Data: {customer_data}")
+    customer_id = customer_data.get("id")
+    messages = state.get("messages")
+    send_form = state.get("send_form")
+    last_message = messages[-1]
+    
+    logger.info(f"send_form: {send_form}")
+    
+    if send_form:
+        send_form_message = await add_send_form_message(
+            last_message=last_message
+        )
+        
+        # Set is_onboarded = True
+        try:
+            async with AsyncSessionLocal() as db:
+                # Update human_takeover flag
+                stmt = update(Customer).where(Customer.id == customer_id).values(is_onboarded=True)
+                await db.execute(stmt)
+                await db.commit()
 
+                logger.info(f"Is Onboarded SET to TRUE for customer_id: {customer_id}")
+        except Exception as e:
+            logger.error(f"Failed to set is_onboarded: {str(e)}")
+            
+        return {
+            "messages": [AIMessage(content=send_form_message)]
+        }
+    
+    return {}
+
+async def node_human_takeover(state: AgentState):
+    messages = state.get('messages', [])
+    customer_id = state.get('customer_id')
+    customer_data = state.get('customer_data', {})
+    step = state.get('step', '')
+    
+    customer_name = customer_data.get('name') or state.get('contact_name')
+    
     # Set human_takeover flag in database
     if customer_id:
         await set_human_takeover_flag(customer_id)
 
     # Generate handover message
     handover_message = await generate_human_takeover_message(
-        user_message=user_message,
         customer_name=customer_name
     )
 
@@ -313,9 +449,5 @@ async def node_quality_check(state: AgentState):
 
     # Return state with the handover message
     return {
-        "messages": [AIMessage(content=handover_message)],
-        "step": "human_takeover",
-        "route": "HUMAN",
-        "customer_data": customer_data,
-        "customer_id": customer_id
+        "messages": [AIMessage(content=handover_message)]
     }

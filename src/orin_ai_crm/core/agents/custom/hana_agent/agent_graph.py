@@ -6,15 +6,19 @@ the agent loop (Thought → Action → Observation) automatically.
 
 Architecture:
 1. agent_entry_handler: Ensures customer_id exists
-2. react_agent: LangChain's create_agent with 27 tools
-3. quality_check_node: Evaluates AI answer quality
-4. final_message_node: Adds form if needed and prepares final response
-5. human_takeover_node: Triggers human agent takeover
+2. agent_node: Main profiling agent with profiling and customer tools
+3. route_profiling_router: Decides next route based on profiling completeness
+4. sales_node: Sales agent with meeting tools (for B2B or >5 units)
+5. ecommerce_node: Ecommerce agent with product tools (for B2C or <=5 units)
+6. quality_check_node: Evaluates AI answer quality
+7. final_message_node: Adds form if needed and prepares final response
+8. human_takeover_node: Triggers human agent takeover
 
 Key Benefits:
 - Uses LangChain's modern create_agent API
 - LLM can call multiple tools simultaneously for multi-intent messages
-- 27 granular tools for maximum flexibility
+- 30+ granular tools for maximum flexibility
+- Specialized agents for sales vs ecommerce flows
 - More flexible than rigid intent classification
 - Better handles complex user requests
 - Maintains conversation context and flow
@@ -25,12 +29,20 @@ import json
 from typing import List, Dict
 
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, AIMessage
 from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.tools.agent_tools import AGENT_TOOLS
+from src.orin_ai_crm.core.agents.tools.profiling_agent_tools import (
+    check_profiling_completeness,
+)
+from src.orin_ai_crm.core.agents.tools.customer_agent_tools import (
+    get_customer_profile,
+)
+from src.orin_ai_crm.core.agents.tools.meeting_agent_tools import SALES_MEETING_TOOLS
+from src.orin_ai_crm.core.agents.tools.product_agent_tools import PRODUCT_ECOMMERCE_TOOLS
 from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_quality_check,
     quality_router,
@@ -89,7 +101,7 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - extract_customer_info_from_message: Extract info from message using LLM
    - check_profiling_completeness: Check if profiling is complete
    - determine_next_profiling_field: Determine what to ask next
-   
+
 3. PRODUCT (5 tools):
    - query_products_with_llm: Universal tool about products
    - get_all_active_products: Get all products from database
@@ -100,6 +112,72 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
 Alur Percakapan:
 1. Mulai dengan get_customer_profile untuk identify customer
 2. Pakai tool check_profiling_completeness untuk mengecek apakah profil user sudah lengkap atau belum
+
+INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
+"""
+
+SALES_AGENT_SYSTEM_PROMPT = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+
+Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
+
+ATURAN PRODUK GPS:
+- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
+- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
+
+SALES MODE:
+Customer ini adalah PEMBELI KECIL (B2C atau order kecil <=5 unit).
+Fokus tugas kamu:
+1. Tawarkan meeting dengan tim sales untuk pembahasan lebih lanjut
+2. Gunakan meeting tools untuk booking/jadwal meeting
+3. Jangan langsung push ke e-commerce untuk pembelian
+4. Berikan info produk secara umum, tapi arahkan ke meeting untuk deal yang lebih baik
+
+KEMAMPUAN TOOL (Sales & Meeting):
+- get_pending_meeting: Cek meeting yang sudah ada
+- extract_meeting_details: Extract info meeting dari pesan
+- book_or_update_meeting_db: Booking/update meeting di database
+- generate_meeting_negotiation_message: Generate pesan negosiasi meeting
+- generate_meeting_confirmation: Generate pesan konfirmasi meeting
+- generate_existing_meeting_reminder: Generate reminder meeting yang sudah ada
+
+Alur Percakapan:
+1. Sapa customer dengan ramah
+2. Tawarkan meeting untuk diskusi lebih lanjut
+3. Jika customer setuju, booking meeting menggunakan tools
+4. Berikan konfirmasi meeting setelah berhasil dibooking
+
+INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
+"""
+
+ECOMMERCE_AGENT_SYSTEM_PROMPT = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+
+Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
+
+ATURAN PRODUK GPS:
+- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
+- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
+
+ECOMMERCE MODE:
+Customer ini adalah PROSPEK BESAR (B2B atau order besar >5 unit).
+Fokus tugas kamu:
+1. Jawab pertanyaan tentang produk dengan detail
+2. Berikan rekomendasi produk yang sesuai
+3. Berikan link e-commerce untuk pembelian langsung
+4. Bantu customer dengan informasi produk, harga, fitur, dll
+
+KEMAMPUAN TOOL (Product & E-Commerce):
+- query_products_with_llm: Universal tool untuk tanya produk apapun
+- get_all_active_products: Get semua produk aktif dari database
+- get_product_details: Get detail produk spesifik
+- get_ecommerce_links: Get link pembelian e-commerce (Tokopedia, Shopee, dll)
+- create_product_inquiry: Create record product inquiry
+
+Alur Percakapan:
+1. Sapa customer dengan ramah
+2. Jawab pertanyaan produk dengan jelas dan akurat
+3. Berikan rekomendasi produk yang sesuai dengan kebutuhan
+4. Berikan link e-commerce untuk pembelian
+5. Bantu customer dengan informasi yang dibutuhkan
 
 INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
 """
@@ -194,24 +272,6 @@ async def agent_entry_handler(state: AgentState) -> Dict:
     contact_name = state.get('contact_name')
     customer_name = customer_data.get('name') or contact_name or 'Kak'
 
-#     system_prompt = f"""Customer Profile:
-# - Nama: {customer_name}
-# - Domisili: {customer_data.get('domicile', 'Belum diketahui')}
-# - Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
-# - Jumlah Unit: {customer_data.get('unit_qty', 0)}
-# - B2B: {customer_data.get('is_b2b', False)}
-# - Customer ID: {customer_id or 'Belum ada'}
-
-# Customer Identifier:
-# - Phone Number: {state.get('phone_number') or 'N/A'}
-# - LID Number: {state.get('lid_number') or 'N/A'}
-
-# {HANA_AGENT_SYSTEM_PROMPT}
-# """
-
-    # Store system prompt in state for the agent to use
-    # state['system_prompt'] = system_prompt
-
     logger.info("EXIT: agent_entry_handler")
     logger.info(f"current state: {state}")
     return state
@@ -224,6 +284,7 @@ async def agent_entry_handler(state: AgentState) -> Dict:
 async def agent_node(state: AgentState) -> Dict:
     """
     Agent node that creates and executes agent with dynamic system prompt.
+    This is the PROFILING agent - handles customer profiling.
     """
     from langchain.agents import create_agent
 
@@ -242,10 +303,10 @@ async def agent_node(state: AgentState) -> Dict:
 
     # Invoke the agent with current state
     result = await agent.ainvoke(state)
-    
+
     # Detecting Route changes from tools
     new_messages: List = result.get("messages", [])
-    
+
     state_updates = {}
 
     # Scan messages for tool results
@@ -270,17 +331,137 @@ async def agent_node(state: AgentState) -> Dict:
     return result
 
 
+async def sales_node(state: AgentState) -> Dict:
+    """
+    Sales node - handles B2B and large order sales flow with meetings.
+    """
+    from langchain.agents import create_agent
+
+    logger.info("ENTER: sales_node")
+
+    # Create sales agent with sales tools
+    agent = create_agent(
+        model=llm,
+        tools=SALES_MEETING_TOOLS,
+        system_prompt=SALES_AGENT_SYSTEM_PROMPT,
+        state_schema=AgentState
+    )
+
+    # Invoke the agent with current state
+    result = await agent.ainvoke(state)
+
+    logger.info("EXIT: sales_node")
+
+    return result
+
+
+async def ecommerce_node(state: AgentState) -> Dict:
+    """
+    Ecommerce node - handles B2C and small order product inquiries.
+    """
+    from langchain.agents import create_agent
+
+    logger.info("ENTER: ecommerce_node")
+
+    # Create ecommerce agent with product tools
+    agent = create_agent(
+        model=llm,
+        tools=PRODUCT_ECOMMERCE_TOOLS,
+        system_prompt=ECOMMERCE_AGENT_SYSTEM_PROMPT,
+        state_schema=AgentState
+    )
+
+    # Invoke the agent with current state
+    result = await agent.ainvoke(state)
+
+    logger.info("EXIT: ecommerce_node")
+
+    return result
+
+
+async def route_profiling_router(state: AgentState) -> str:
+    """
+    Router function that decides the next route after profiling agent.
+    Uses check_profiling_completeness to determine if profiling is complete.
+    If complete, uses get_customer_profile to get unit_qty and is_b2b.
+    Routes:
+    - If unit_qty > 5 OR is_b2b == True: ecommerce_node (for B2B/large orders)
+    - Else: sales_node (for B2C/small orders)
+    - If profiling not complete: node_final_message
+    """
+    logger.info("ENTER: route_profiling_router")
+
+    customer_data = state.get('customer_data', {})
+    customer_id = state.get('customer_id')
+
+    logger.info(f"customer_data: {customer_data}")
+    logger.info(f"customer_id: {customer_id}")
+
+    # Get customer profile data
+    name = customer_data.get('name', '')
+    domicile = customer_data.get('domicile', '')
+    vehicle_alias = customer_data.get('vehicle_alias', '')
+    unit_qty = customer_data.get('unit_qty', 0)
+    is_b2b = customer_data.get('is_b2b', False)
+
+    # Check profiling completeness
+    profiling_result = await check_profiling_completeness.ainvoke({
+        'name': name,
+        'domicile': domicile,
+        'vehicle_alias': vehicle_alias,
+        'unit_qty': unit_qty,
+        'is_b2b': is_b2b
+    })
+
+    logger.info(f"check_profiling_completeness result: {profiling_result}")
+
+    is_complete = profiling_result.get('is_complete', False)
+
+    if not is_complete:
+        logger.info("Profiling is NOT complete - routing to final_message")
+        logger.info("EXIT: route_profiling_router -> final_message")
+        return "final_message"
+
+    # Profiling is complete - get fresh customer profile from database
+    if customer_id:
+        profile_result = await get_customer_profile.ainvoke({'state': state})
+        logger.info(f"get_customer_profile result: {profile_result}")
+
+        # Get unit_qty and is_b2b from database
+        unit_qty = profile_result.get('unit_qty', 0)
+        is_b2b = profile_result.get('is_b2b', False)
+
+        logger.info(f"unit_qty: {unit_qty}, is_b2b: {is_b2b}")
+
+        # Route based on unit_qty and is_b2b
+        if unit_qty > 5 or is_b2b:
+            logger.info("Routing to sales_node (B2C or <=5 units)")
+            logger.info("EXIT: route_profiling_router -> sales_node")
+            return "sales_node"
+        else:
+            logger.info("Routing to ecommerce_node (B2B or >5 units)")
+            logger.info("EXIT: route_profiling_router -> ecommerce_node")
+            return "ecommerce_node"
+
+    # Fallback - should not reach here
+    logger.warning("Could not determine route - defaulting to final_message")
+    logger.info("EXIT: route_profiling_router -> final_message (fallback)")
+    return "final_message"
+
+
 def build_hana_agent_graph():
     """
     Build and compile the Hana AI agent graph using LangChain's create_agent.
 
     Graph Structure:
-    1. Entry → agent_entry_handler → agent_node
-    2. agent_node → (handles tool calling and execution automatically)
-    3. agent_node → quality_check (when agent is done)
-    4. quality_check → final_message OR human_takeover
-    5. final_message → END
-    6. human_takeover → END
+    1. Entry → agent_entry_handler → agent_node (profiling agent)
+    2. agent_node → route_profiling_router (decides next route)
+    3. route_profiling_router → sales_node OR ecommerce_node OR final_message
+    4. sales_node → quality_check
+    5. ecommerce_node → quality_check
+    6. final_message → END
+    7. quality_check → final_message OR human_takeover
+    8. human_takeover → END
 
     The create_agent handles:
     - Agent decision making (which tools to call)
@@ -301,6 +482,8 @@ def build_hana_agent_graph():
     # Add nodes
     workflow.add_node("agent_entry", agent_entry_handler)
     workflow.add_node("agent", agent_node)
+    workflow.add_node("sales_node", sales_node)
+    workflow.add_node("ecommerce_node", ecommerce_node)
     workflow.add_node("quality_check", node_quality_check)
     workflow.add_node("final_message", node_final_message)
     workflow.add_node("human_takeover", node_human_takeover)
@@ -308,11 +491,25 @@ def build_hana_agent_graph():
     # Set entry point
     workflow.set_entry_point("agent_entry")
 
-    # Entry handler → Agent
+    # Entry handler → Agent (profiling)
     workflow.add_edge("agent_entry", "agent")
 
-    # Agent → quality check (when agent is done with all tool calls)
-    workflow.add_edge("agent", "quality_check")
+    # Agent → route_profiling_router (decides next route after profiling)
+    workflow.add_conditional_edges(
+        "agent",
+        route_profiling_router,
+        {
+            "sales_node": "sales_node",
+            "ecommerce_node": "ecommerce_node",
+            "final_message": "final_message"
+        }
+    )
+
+    # Sales node → quality check
+    workflow.add_edge("sales_node", "quality_check")
+
+    # Ecommerce node → quality check
+    workflow.add_edge("ecommerce_node", "quality_check")
 
     # Quality check → final message OR human takeover
     workflow.add_conditional_edges(
@@ -331,7 +528,9 @@ def build_hana_agent_graph():
     # Compile the graph
     hana_agent = workflow.compile()
 
-    logger.info(f"Hana Agent Graph compiled successfully with {len(AGENT_TOOLS)} tools!")
+    logger.info(f"Hana Agent Graph compiled successfully with {len(AGENT_TOOLS)} profiling tools!")
+    logger.info(f"Sales agent has {len(SALES_MEETING_TOOLS)} tools")
+    logger.info(f"Ecommerce agent has {len(PRODUCT_ECOMMERCE_TOOLS)} tools")
     logger.info("Using LangChain's create_agent for agent loop handling")
     return hana_agent
 

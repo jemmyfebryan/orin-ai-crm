@@ -40,17 +40,23 @@ from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
 # TOOL LIST FOR AGENT
 # ============================================================================
 
-# All tools combined - customize which tools to include here
+# Profiling Agent Tools (used by main agent_node for customer profiling)
+# Only includes customer management and profiling tools
 AGENT_TOOLS = (
     CUSTOMER_MANAGEMENT_TOOLS
     + PROFILING_TOOLS
-    + PRODUCT_ECOMMERCE_TOOLS
-    # SALES_MEETING_TOOLS +
-    # SUPPORT_TOOLS
 )
+
+# Sales Agent Tools (used by sales_node for B2B/large orders)
+SALES_AGENT_TOOLS = SALES_MEETING_TOOLS
+
+# Ecommerce Agent Tools (used by ecommerce_node for B2C/small orders)
+ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS
 
 __all__ = [
     'AGENT_TOOLS',
+    'SALES_AGENT_TOOLS',
+    'ECOMMERCE_AGENT_TOOLS',
     'CUSTOMER_MANAGEMENT_TOOLS',
     'PROFILING_TOOLS',
     'SALES_MEETING_TOOLS',

@@ -1,14 +1,25 @@
 """
 AI Agent Tools Package
 
+This package contains modular tools organized by category for the Hana AI agent.
+
 IMPORTANT: Import from specific submodules to avoid confusion between:
 - Actual functions (in customer_tools.py, meeting_tools.py, product_tools.py)
-- LangChain StructuredTool objects (in agent_tools.py - for use with agents only)
+- LangChain StructuredTool objects (in *_agent_tools.py - for use with agents only)
 
 USAGE:
 - For legacy nodes (profiling_nodes, sales_nodes, etc.): Use original function names
 - For server/main.py: Import from specific modules (customer_tools, product_tools, etc.)
 - For agent graph: Use AGENT_TOOLS from agent_tools module
+
+MODULE STRUCTURE:
+- customer_agent_tools.py: Customer management tools (@tool decorated)
+- profiling_agent_tools.py: Profiling tools (@tool decorated)
+- meeting_agent_tools.py: Sales & meeting tools (@tool decorated)
+- support_agent_tools.py: Support & complaint tools (@tool decorated)
+- agent_tools.py: Main module that imports and combines all agent tools
+- product_tools.py: Actual product functions (not @tool decorated)
+- vps_tools.py: VPS database query functions
 """
 
 # ============================================================================
@@ -24,7 +35,7 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
     PROFILING_TOOLS,
     SALES_MEETING_TOOLS,
     PRODUCT_ECOMMERCE_TOOLS,
-    _SUPPORT_TOOLS,
+    SUPPORT_TOOLS,
 )
 
 # ============================================================================
@@ -84,7 +95,7 @@ __all__ = [
     'PROFILING_TOOLS',
     'SALES_MEETING_TOOLS',
     'PRODUCT_ECOMMERCE_TOOLS',
-    '_SUPPORT_TOOLS',
+    'SUPPORT_TOOLS',
 
     # ============================================================================
     # ACTUAL CALLABLE FUNCTIONS (original names for backward compatibility)

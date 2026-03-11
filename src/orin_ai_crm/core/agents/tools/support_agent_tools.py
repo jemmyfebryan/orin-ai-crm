@@ -1,0 +1,173 @@
+"""
+Support & Complaint Agent Tools
+
+LangChain StructuredTool objects for support and complaint operations.
+These tools are used by the LangGraph agent for support-related operations.
+"""
+
+import os
+import json
+from datetime import timedelta, timezone
+from langchain_openai import ChatOpenAI
+from langchain_core.tools import tool
+from langchain_core.messages import SystemMessage
+
+from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
+from sqlalchemy import select
+
+logger = get_logger(__name__)
+llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+WIB = timezone(timedelta(hours=7))
+
+HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif.
+Jangan terlalu kaku, gunakan bahasa natural seperti chat WhatsApp asli.
+
+ATURAN PRODUK GPS MOBIL:
+- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
+- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)."""
+
+
+@tool
+async def classify_issue_type(message: str) -> dict:
+    """
+    Classify customer issue type (complaint vs support question).
+
+    Use this tool when:
+    - Customer has a problem or question
+    - Need to determine if it's a complaint or support inquiry
+
+    Returns:
+        dict with: issue_type (str: "complaint", "support", "general"), severity (str)
+    """
+    logger.info(f"TOOL: classify_issue_type")
+
+    prompt = f"""Classify the customer message type.
+
+Message: "{message}"
+
+Classify as:
+1. "complaint" - Customer is complaining, unhappy, reporting issues
+2. "support" - Customer needs technical help, asks how to do something
+3. "general" - General question, greeting, thanks
+
+Also assess severity:
+- "high" - Urgent, angry, critical issue
+- "medium" - Needs attention but not urgent
+- "low" - Simple question, inquiry
+
+Return JSON: {{"issue_type": "...", "severity": "...", "reasoning": "..."}}"""
+
+    response = await llm.ainvoke([SystemMessage(content=prompt)])
+
+    try:
+        result = json.loads(response.content)
+        return result
+    except:
+        return {
+            'issue_type': 'general',
+            'severity': 'low',
+            'reasoning': 'Could not classify, defaulting to general'
+        }
+
+
+@tool
+async def generate_empathetic_response(
+    message: str,
+    customer_name: str,
+    issue_type: str
+) -> dict:
+    """
+    Generate empathetic response for customer issues.
+
+    Use this tool when:
+    - Customer has a complaint or problem
+    - Customer needs support
+    - Need to show empathy and offer help
+
+    Args:
+        message: Customer's message
+        customer_name: Customer's name
+        issue_type: "complaint", "support", or "general"
+
+    Returns:
+        dict with: response (str) - Empathetic message
+    """
+    logger.info(f"TOOL: generate_empathetic_response - type: {issue_type}")
+
+    if issue_type == "complaint":
+        task = "Customer has a complaint. Apologize sincerely, acknowledge their frustration, ask for details to help, and assure them you'll resolve it."
+    elif issue_type == "support":
+        task = "Customer needs technical support. Offer help patiently, ask for specifics if needed, and provide guidance."
+    else:
+        task = "Customer sent a general message. Respond warmly and ask how you can help."
+
+    prompt = f"""{HANA_PERSONA}
+
+Customer: {customer_name}
+Message: "{message}"
+
+TASK:
+{task}
+
+RULES:
+- Tunjukkan empati yang tulus
+- Gunakan emoji yang sesuai
+- Natural seperti chat WhatsApp asli
+- Jika perlu, tanya detail masalahnya
+- Berikan assurance bahwa tim akan membantu
+- Response HANYA dengan pesan yang akan dikirim"""
+
+    response = await llm.ainvoke([SystemMessage(content=prompt)])
+
+    return {
+        'response': response.content
+    }
+
+
+@tool
+async def set_human_takeover_flag(customer_id: int) -> dict:
+    """
+    Set human_takeover flag to true for a customer.
+
+    Use this tool when:
+    - Issue is too complex for AI to handle
+    - Customer explicitly asks for human agent
+    - Quality check fails repeatedly
+
+    Returns:
+        dict with: success (bool), message (str)
+    """
+    logger.info(f"TOOL: set_human_takeover_flag - customer: {customer_id}")
+
+    async with AsyncSessionLocal() as db:
+        query = select(Customer).where(Customer.id == customer_id)
+        result = await db.execute(query)
+        customer = result.scalars().first()
+
+        if not customer:
+            return {
+                'success': False,
+                'message': f'Customer {customer_id} not found'
+            }
+
+        customer.human_takeover = True
+        await db.commit()
+
+        logger.info(f"Human takeover flag SET for customer {customer_id}")
+
+        return {
+            'success': True,
+            'message': 'Human takeover flag set'
+        }
+
+
+# List of support tools for easy import
+SUPPORT_TOOLS = [
+    classify_issue_type,
+    generate_empathetic_response,
+    set_human_takeover_flag,
+]
+
+__all__ = ['SUPPORT_TOOLS']

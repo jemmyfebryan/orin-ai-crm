@@ -325,6 +325,8 @@ async def agent_node(state: AgentState) -> Dict:
 
     if state_updates:
         logger.info(f"Final tool state_updates: {state_updates}")
+        for k, v in state_updates.items():
+            result[k] = v
 
     logger.info("EXIT: agent_node")
 
@@ -390,6 +392,15 @@ async def route_profiling_router(state: AgentState) -> str:
     - If profiling not complete: node_final_message
     """
     logger.info("ENTER: route_profiling_router")
+    
+    if state.get("route") != "DEFAULT":
+        logger.info(f"Route is not default: {state.get("route")}, leads to custom node")
+        if state.get("route") == "ECOMMERCE":
+            return "ecommerce_node"
+        elif state.get("route") == "SALES":
+            return "sales_node"
+        else:
+            pass
 
     customer_data = state.get('customer_data', {})
     customer_id = state.get('customer_id')

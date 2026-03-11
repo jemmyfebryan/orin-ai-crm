@@ -212,18 +212,17 @@ Pesan AI:
 {last_message}
 
 Fields yang diperlukan:
-- name: Nama (skip jika sudah ada)
-- domicile: Domisili/kota (untuk pengiriman & penawaran yang tepat)
+- name: Nama
+- domicile: Domisili/kota
 - purpose: Kebutuhan kendaraan (pribadi, perusahaan, operasional kantor, fleet, delivery, dll)
 - vehicle_type: Jenis kendaraan (mobil, motor, truk, dll)
-- unit_qty: Jumlah unit (untuk penawaran yang tepat)
+- unit_qty: Jumlah unit
 
 CATATAN PENTING:
 - Jangan tanya field yang sudah terisi di customer_data
 - Jelaskan bahwa data ini diperlukan untuk penawaran
 - Gunakan bahasa ramah tapi tegas
 - Kebutuhan adalah tujuan penggunaan (pribadi/kantor/operasional)
-- Di akhir, jelaskan bahwa form harus diisi untuk lanjut
 
 Contoh:
 "Supaya Hana bisa kasih penawaran yang lebih pas, mohon isi data singkat berikut:

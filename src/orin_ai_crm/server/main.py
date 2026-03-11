@@ -21,7 +21,7 @@ from src.orin_ai_crm.core.agents.tools.db_tools import (
 )
 
 # OLD: Intent Classification Architecture (Legacy)
-from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
+# from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
 
 # NEW: Agentic/Tool-Calling Architecture (30+ granular tools)
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_agent
@@ -333,6 +333,7 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
             "customer_id": customer_id,
             "customer_data": customer_data,
             "send_form": send_form,
+            "route": "DEFAULT"
         }
 
         # 8. Jalankan Agentic AI Workflow (dengan 30+ tools)

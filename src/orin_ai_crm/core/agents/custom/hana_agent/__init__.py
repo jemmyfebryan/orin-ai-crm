@@ -66,7 +66,7 @@ def intent_classification_router(state: AgentState) -> str:
         else:
             return "ecommerce_node"
         
-    
+    # Let the profiling become tools, where we have a mandatory llm_with_tools
 
     # Already handled routes → quality check
     if route in ["PRODUCT_INFO", "SALES", "SUPPORT", "ECOMMERCE", "UNASSIGNED"]:

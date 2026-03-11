@@ -25,7 +25,6 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
     SALES_MEETING_TOOLS,
     PRODUCT_ECOMMERCE_TOOLS,
     _SUPPORT_TOOLS,
-    CONVERSATION_TOOLS,
 )
 
 # ============================================================================
@@ -33,7 +32,7 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
 # ============================================================================
 
 # Customer Tools (actual functions)
-from src.orin_ai_crm.core.agents.tools.customer_tools import (
+from src.orin_ai_crm.core.agents.tools.hana_legacy.customer_tools import (
     get_or_create_customer,
     update_customer_profile,
     get_chat_history,
@@ -41,7 +40,7 @@ from src.orin_ai_crm.core.agents.tools.customer_tools import (
 )
 
 # Meeting Tools (actual functions)
-from src.orin_ai_crm.core.agents.tools.meeting_tools import (
+from src.orin_ai_crm.core.agents.tools.hana_legacy.meeting_tools import (
     get_pending_meeting,
     create_meeting,
     update_meeting,
@@ -86,7 +85,6 @@ __all__ = [
     'SALES_MEETING_TOOLS',
     'PRODUCT_ECOMMERCE_TOOLS',
     '_SUPPORT_TOOLS',
-    'CONVERSATION_TOOLS',
 
     # ============================================================================
     # ACTUAL CALLABLE FUNCTIONS (original names for backward compatibility)

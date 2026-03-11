@@ -10,7 +10,7 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
 
 # Explicit imports from specific modules to avoid naming conflicts with tools
-from src.orin_ai_crm.core.agents.tools.customer_tools import (
+from src.orin_ai_crm.core.agents.tools.hana_legacy.customer_tools import (
     get_or_create_customer,
     get_chat_history,
     save_message_to_db,
@@ -537,20 +537,19 @@ async def health_check():
         "version": "2.0 - Agentic Architecture",
         "endpoints": {
             "chat": "/chat (Legacy - Intent Classification)",
-            "chat-agent": "/chat-agent (NEW - Agentic with 30+ tools)",
+            "chat-agent": "/chat-agent (NEW - Agentic with 27 tools using LangGraph create_react_agent)",
             "reset-history": "/reset-history",
             "reset-products": "/reset-products",
             "health": "/health"
         },
         "agent_tools": {
-            "total": 30,
+            "total": 27,
             "categories": [
                 "Customer Management (3)",
                 "Profiling (7)",
                 "Sales & Meeting (6)",
                 "Product & E-commerce (8)",
-                "Support & Complaints (3)",
-                "Conversation (2)"
+                "Support & Complaints (3)"
             ]
         }
     }

@@ -8,7 +8,7 @@ IMPORTANT: The LLM CAN and SHOULD call MULTIPLE tools in parallel to handle
 multi-intent messages. This is the power of the agentic approach!
 
 Tool Categories:
-1. CUSTOMER MANAGEMENT (3 tools)
+1. CUSTOMER MANAGEMENT (2 tools)
 2. PROFILING (7 tools)
 3. SALES & MEETING (7 tools)
 4. PRODUCT & E-COMMERCE (8 tools)
@@ -34,7 +34,7 @@ from sqlalchemy import select
 # Import product tools function with alias to avoid naming conflict with our tool
 from src.orin_ai_crm.core.agents.tools.product_tools import (
     get_all_active_products as get_all_active_products_from_db,
-    format_products_for_llm as format_products_for_llm_impl
+    format_products_for_llm
 )
 
 logger = get_logger(__name__)
@@ -141,16 +141,22 @@ async def get_or_create_customer(
         'contact_name': customer.contact_name or ''
     }
 
-
 @tool
 async def get_customer_profile(customer_id: int) -> dict:
     """
     Get complete customer profile from database.
 
+    IMPORTANT: ALWAYS use the customer_id value provided in the system prompt!
+    The system prompt explicitly tells you what customer_id to use.
+    NEVER use 0 or make up a value - always use the exact customer_id from the prompt.
+
     Use this tool when:
     - You need to check what customer data we already have
     - Starting a conversation to see existing profile
     - Checking if profiling is complete
+
+    Args:
+        customer_id: The customer ID (provided in system prompt - use that exact value!)
 
     Returns:
         dict with all customer profile fields
@@ -202,6 +208,10 @@ async def update_customer_data(
     """
     Update specific fields in customer profile.
 
+    IMPORTANT: ALWAYS use the customer_id value provided in the system prompt!
+    The system prompt explicitly tells you what customer_id to use.
+    NEVER use 0 or make up a value - always use the exact customer_id from the prompt.
+
     Use this tool when:
     - Customer provides new or updated information
     - After extracting customer info from messages
@@ -210,7 +220,7 @@ async def update_customer_data(
     Only provided fields will be updated. Others remain unchanged.
 
     Args:
-        customer_id: Customer database ID
+        customer_id: The customer ID (provided in system prompt - use that exact value!)
         name: New name value
         domicile: New domicile value
         vehicle_alias: New vehicle alias
@@ -1580,19 +1590,12 @@ async def get_all_products():
     result = await get_all_active_products_from_db()
     return result
 
-
-def format_products_for_llm(products: list) -> str:
-    """Format products for LLM context"""
-    return format_products_for_llm_impl(products)
-
-
 # ============================================================================
 # TOOL LIST FOR AGENT
 # ============================================================================
 
 # Group tools by category for better organization
 CUSTOMER_MANAGEMENT_TOOLS = [
-    get_or_create_customer,
     get_customer_profile,
     update_customer_data,
 ]
@@ -1602,8 +1605,8 @@ PROFILING_TOOLS = [
     check_profiling_completeness,
     determine_next_profiling_field,
     generate_profiling_question,
-    search_vehicle_in_vps,
-    create_lead_routing,
+    # search_vehicle_in_vps,
+    # create_lead_routing,
     generate_greeting_message,
 ]
 
@@ -1635,11 +1638,11 @@ _SUPPORT_TOOLS = [
 
 # All tools combined
 AGENT_TOOLS = (
-    CUSTOMER_MANAGEMENT_TOOLS +
-    PROFILING_TOOLS +
-    SALES_MEETING_TOOLS +
-    PRODUCT_ECOMMERCE_TOOLS +
-    _SUPPORT_TOOLS
+    CUSTOMER_MANAGEMENT_TOOLS
+    + PROFILING_TOOLS
+    # SALES_MEETING_TOOLS +
+    # PRODUCT_ECOMMERCE_TOOLS +
+    # _SUPPORT_TOOLS
 )
 
 __all__ = [

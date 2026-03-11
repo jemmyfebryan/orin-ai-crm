@@ -13,10 +13,10 @@ class AgentState(TypedDict):
     route: str
     customer_data: dict
     # Intent classification fields
-    classified_intent: Optional[str]  # Selected intent yang sudah diklasifikasi (highest confidence)
-    intent_confidence: Optional[float]  # Confidence score 0-1 dari selected intent
-    intent_results: Optional[dict]  # Full intent results as JSON (all 6 intents with their states)
-    intent_level: Optional[str]  # "HIGH" or "LOW" - detected by LLM
+    # classified_intent: Optional[str]  # Selected intent yang sudah diklasifikasi (highest confidence)
+    # intent_confidence: Optional[float]  # Confidence score 0-1 dari selected intent
+    # intent_results: Optional[dict]  # Full intent results as JSON (all 6 intents with their states)
+    # intent_level: Optional[str]  # "HIGH" or "LOW" - detected by LLM
     # Meeting flags
     wants_meeting: Optional[bool]  # Set oleh intent_classification untuk meeting request
     existing_meeting_id: Optional[int]  # Set oleh intent_classification untuk reschedule

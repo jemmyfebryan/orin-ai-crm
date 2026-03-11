@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState
-from src.orin_ai_crm.core.agents.tools import (
+from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     get_pending_inquiry,
     create_product_inquiry,
     answer_product_question_from_db
@@ -64,18 +64,20 @@ async def node_ecommerce(state: AgentState):
     logger.info(f"Last message: {last_message[:100] if last_message else 'empty'}...")
 
     # Check if there's an existing inquiry for follow-up context
-    existing_inquiry = await get_pending_inquiry(customer_id)
+    inquiry_result = await get_pending_inquiry.ainvoke({'customer_id': customer_id})
+    existing_inquiry = inquiry_result.get('inquiry') if inquiry_result.get('found') else None
     has_existing = existing_inquiry is not None
 
     if has_existing:
-        logger.info(f"Existing inquiry found: id={existing_inquiry.id}, status={existing_inquiry.status}")
+        logger.info(f"Existing inquiry found: id={existing_inquiry['id']}, status={existing_inquiry['status']}")
 
     # Use the new database-powered Q&A function
     try:
-        answer = await answer_product_question_from_db(
-            question=last_message,
-            customer_data=data
-        )
+        answer_result = await answer_product_question_from_db.ainvoke({
+            'question': last_message,
+            'customer_data': data
+        })
+        answer = answer_result['answer']
 
         logger.info(f"Answer generated from database products")
 
@@ -84,14 +86,14 @@ async def node_ecommerce(state: AgentState):
         if not has_existing and _is_product_inquiry(last_message):
             logger.info("Creating new product inquiry record")
 
-            inquiry = await create_product_inquiry(
-                customer_id=customer_id,
-                product_type="GENERAL",  # Will be updated based on actual interest
-                vehicle_type=data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan'),
-                unit_qty=data.get('unit_qty', 1)
-            )
+            inquiry_result = await create_product_inquiry.ainvoke({
+                'customer_id': customer_id,
+                'product_type': "GENERAL",  # Will be updated based on actual interest
+                'vehicle_type': data.get('vehicle_alias') or data.get('vehicle_alias', 'kendaraan'),
+                'unit_qty': data.get('unit_qty', 1)
+            })
 
-            logger.info(f"Product inquiry created: id={inquiry.id}")
+            logger.info(f"Product inquiry created: id={inquiry_result['inquiry_id']}")
 
         logger.info(f"EXIT: node_ecommerce -> Answer provided")
         logger.info("=" * 50)

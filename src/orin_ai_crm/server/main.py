@@ -10,9 +10,9 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
 
 # Explicit imports from specific modules to avoid naming conflicts with tools
-from src.orin_ai_crm.core.agents.tools.product_tools import (
-    initialize_default_products_if_empty,
+from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     reset_products_to_default,
+    initialize_default_products_if_empty,
 )
 from src.orin_ai_crm.core.agents.tools.db_tools import (
     get_or_create_customer,
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
 
     # Initialize default products if table is empty
-    await initialize_default_products_if_empty()
+    await initialize_default_products_if_empty.ainvoke({})
 
     yield
     # Shutdown (cleanup jika diperlukan)
@@ -499,7 +499,7 @@ async def reset_products_endpoint():
     Hati-hati: Ini akan MENGHAPUS SEMUA produk dan menggantinya dengan default dari JSON!
     """
     try:
-        result = await reset_products_to_default()
+        result = await reset_products_to_default.ainvoke({})
 
         return ResetProductsResponse(
             success=True,

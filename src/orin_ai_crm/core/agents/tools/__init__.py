@@ -3,31 +3,28 @@ AI Agent Tools Package
 
 This package contains modular tools organized by category for the Hana AI agent.
 
-IMPORTANT: Import from specific submodules to avoid confusion between:
-- Actual functions (in customer_tools.py, meeting_tools.py, product_tools.py)
-- LangChain StructuredTool objects (in *_agent_tools.py - for use with agents only)
+IMPORTANT: All tools are @tool decorated (LangChain StructuredTool objects).
+For non-agent contexts, use .ainvoke() or .invoke() to call these tools.
 
 USAGE:
-- For legacy nodes (profiling_nodes, sales_nodes, etc.): Use original function names
-- For server/main.py: Import from specific modules (customer_tools, product_tools, etc.)
-- For agent graph: Use AGENT_TOOLS from agent_tools module
+- For agent graph: Use AGENT_TOOLS or specific tool categories
+- For server/nodes (non-agent): Import tools and call with .ainvoke()/.invoke()
 
 MODULE STRUCTURE:
 - customer_agent_tools.py: Customer management tools (@tool decorated)
 - profiling_agent_tools.py: Profiling tools (@tool decorated)
 - meeting_agent_tools.py: Sales & meeting tools (@tool decorated)
 - support_agent_tools.py: Support & complaint tools (@tool decorated)
+- product_agent_tools.py: Product & e-commerce tools (@tool decorated)
 - agent_tools.py: Main module that imports and combines all agent tools
-- product_tools.py: Actual product functions (not @tool decorated)
-- vps_tools.py: VPS database query functions
 """
 
 # ============================================================================
-# AGENTIC TOOLS (for LangGraph agent only - these are StructuredTool objects)
+# AGENTIC TOOLS (StructuredTool objects for LangGraph agent)
 # ============================================================================
 
 from src.orin_ai_crm.core.agents.tools.agent_tools import (
-    # All tools combined (30+ StructuredTool objects for LangGraph)
+    # All tools combined
     AGENT_TOOLS,
 
     # Tool categories (lists of StructuredTool objects)
@@ -39,7 +36,7 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
 )
 
 # ============================================================================
-# ACTUAL CALLABLE FUNCTIONS (for use in server, legacy nodes, etc.)
+# HELPER FUNCTIONS FROM LEGACY MODULES (Non-tool functions)
 # ============================================================================
 
 # Customer Tools (actual functions)
@@ -60,35 +57,13 @@ from src.orin_ai_crm.core.agents.tools.hana_legacy.meeting_tools import (
     MeetingInfo,
 )
 
-# Product Tools (actual functions) - KEEP ORIGINAL NAMES for backward compatibility
-from src.orin_ai_crm.core.agents.tools.product_tools import (
-    get_pending_inquiry,
-    create_product_inquiry,
-    update_product_inquiry,
-    extract_product_type,
-    ProductInfo,
-    # Product query tools - KEEP ORIGINAL NAMES
-    get_all_active_products,
-    get_products_by_category,
-    get_products_by_vehicle_type,
-    search_products,
-    format_products_for_llm,
-    answer_product_question,
-    recommend_products,
-    # Ecommerce product management tools
-    get_ecommerce_product,
-    reset_products_to_default,
-    initialize_default_products_if_empty,
-    load_default_products_from_json,
-    get_default_products_json_path,
-    # Product recommendation & Q&A tools (with database)
-    recommend_products_from_db,
-    answer_product_question_from_db
-)
+# ============================================================================
+# EXPORTS
+# ============================================================================
 
 __all__ = [
     # ============================================================================
-    # AGENTIC TOOLS (StructuredTool objects for LangGraph agent)
+    # AGENTIC TOOLS (@tool decorated StructuredTool objects)
     # ============================================================================
     'AGENT_TOOLS',
     'CUSTOMER_MANAGEMENT_TOOLS',
@@ -98,7 +73,7 @@ __all__ = [
     'SUPPORT_TOOLS',
 
     # ============================================================================
-    # ACTUAL CALLABLE FUNCTIONS (original names for backward compatibility)
+    # HELPER FUNCTIONS (Legacy non-tool functions)
     # ============================================================================
 
     # Customer Tools
@@ -114,25 +89,4 @@ __all__ = [
     'extract_meeting_info',
     'book_or_update_meeting',
     'MeetingInfo',
-
-    # Product Tools (original names - for legacy nodes)
-    'get_pending_inquiry',
-    'create_product_inquiry',
-    'update_product_inquiry',
-    'extract_product_type',
-    'ProductInfo',
-    'get_all_active_products',  # Original name from product_tools.py
-    'get_products_by_category',
-    'get_products_by_vehicle_type',
-    'search_products',
-    'format_products_for_llm',
-    'answer_product_question',
-    'recommend_products',
-    'get_ecommerce_product',
-    'reset_products_to_default',
-    'initialize_default_products_if_empty',
-    'load_default_products_from_json',
-    'get_default_products_json_path',
-    'recommend_products_from_db',
-    'answer_product_question_from_db',
 ]

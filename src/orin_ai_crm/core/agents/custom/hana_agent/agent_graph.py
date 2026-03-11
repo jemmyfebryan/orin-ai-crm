@@ -57,7 +57,6 @@ llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), tempe
 #    - generate_existing_meeting_reminder: Generate reminder for existing meeting
 
 # 4. PRODUCT & E-COMMERCE (8 tools):
-#    - get_all_active_products: Get all products from database
 #    - search_products: Search products by keyword/category/vehicle
 #    - get_product_details: Get detailed product info
 #    - answer_product_question: Answer product questions
@@ -79,7 +78,7 @@ ATURAN PRODUK GPS:
 - Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
 - Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
 
-KEMAMPUAN TOOL (6 tools tersedia):
+KEMAMPUAN TOOL:
 Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi menjadi:
 
 1. CUSTOMER MANAGEMENT (2 tools):
@@ -90,6 +89,13 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - extract_customer_info_from_message: Extract info from message using LLM
    - check_profiling_completeness: Check if profiling is complete
    - determine_next_profiling_field: Determine what to ask next
+   
+3. PRODUCT (5 tools):
+   - query_products_with_llm: Universal tool about products
+   - get_all_active_products: Get all products from database
+   - get_product_details: Get detailed product info
+   - get_ecommerce_links: Get e-commerce purchase links
+   - create_product_inquiry: Create product inquiry record
 
 Alur Percakapan:
 1. Mulai dengan get_customer_profile untuk identify customer

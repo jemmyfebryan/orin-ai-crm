@@ -11,9 +11,11 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.schemas import AgentState, CustomerProfile
-from src.orin_ai_crm.core.agents.tools import (
+from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     get_all_active_products,
     format_products_for_llm,
+)
+from src.orin_ai_crm.core.agents.tools.hana_legacy.customer_tools import (
     update_customer_profile
 )
 
@@ -96,7 +98,8 @@ async def generate_short_answer_with_llm(question: str, customer_data: dict) -> 
     logger.info(f"generate_short_answer_with_llm called - question: {question[:50]}...")
 
     # Get all products from database (source of truth)
-    all_products = await get_all_active_products()
+    result = await get_all_active_products.ainvoke({})
+    all_products = result.get('products', [])
     products_context = format_products_for_llm(all_products)
 
     customer_name = customer_data.get('name', 'Kak')

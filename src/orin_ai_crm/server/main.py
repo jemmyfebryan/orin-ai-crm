@@ -10,19 +10,12 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
 
 # Explicit imports from specific modules to avoid naming conflicts with tools
-# from src.orin_ai_crm.core.agents.tools.hana_legacy.customer_tools import (
-#     get_or_create_customer,
-#     get_chat_history,
-#     save_message_to_db,
-# )
 from src.orin_ai_crm.core.agents.tools.product_tools import (
     initialize_default_products_if_empty,
     reset_products_to_default,
 )
-from src.orin_ai_crm.core.agents.tools.agent_tools import (
-    get_or_create_customer,
-)
 from src.orin_ai_crm.core.agents.tools.db_tools import (
+    get_or_create_customer,
     get_chat_history,
     save_message_to_db,
 )
@@ -279,59 +272,51 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
     → Agent will call: get_or_create_customer + extract_customer_info_from_message + search_products + answer_product_question
     """
     try:
-        # 1. Build identifier dict
-        identifier = {
-            "phone_number": req.phone_number,
-            "lid_number": req.lid_number
-        }
-
-        # 2. Build history list untuk LangGraph
+        # 1. Build history list untuk LangGraph
         is_new_chat = req.is_new_chat
+        logger.info(f"is_new_chat: {is_new_chat}")
 
-        # 3. Get or create customer (returns detached object)
+        # 2. Get or create customer (returns dict from agent_tools)
         customer = await get_or_create_customer(
-            identifier=identifier,
-            contact_name=req.contact_name,
-            is_onboarded=(not is_new_chat),
+            phone_number=req.phone_number,
+            lid_number=req.lid_number,
+            contact_name=req.contact_name
         )
-        customer_id = customer.id
+        customer_id = customer['customer_id']
+        logger.info(f"customer_id resolved: {customer_id}")
 
         # 4. Fetch chat history if not new chat
         history = []
         if not is_new_chat:
+            logger.info(f"Fetching chat history for customer_id: {customer_id}")
             history_rows = await get_chat_history(customer_id, limit=10)
             for row in history_rows:
                 if row.message_role == "user":
                     history.append(HumanMessage(content=row.content))
                 else:
                     history.append(AIMessage(content=row.content))
-                    
-        logger.info(f"Chat History: {history}")
-
-        # 5. Load customer data from database
-        customer_data = {}
-        if customer.id:
-            customer_data["id"] = customer_id
-        if customer.name:
-            customer_data["name"] = customer.name
-        if customer.domicile:
-            customer_data["domicile"] = customer.domicile
-        if customer.vehicle_id:
-            customer_data["vehicle_id"] = customer.vehicle_id
-        if customer.vehicle_alias:
-            customer_data["vehicle_alias"] = customer.vehicle_alias
-        if customer.unit_qty:
-            customer_data["unit_qty"] = customer.unit_qty
-        if customer.is_onboarded:
-            customer_data["is_onboarded"] = customer.is_onboarded
-        customer_data["is_b2b"] = customer.is_b2b if customer.is_b2b else False
+        else:
+            logger.info(f"Skipping chat history fetch (is_new_chat=True)")
+            
+        # 5. Load customer data from dict returned by agent_tools
+        customer_data = {
+            'id': customer_id,
+            'name': customer.get('name', ''),
+            'domicile': customer.get('domicile', ''),
+            'vehicle_id': customer.get('vehicle_id', -1),
+            'vehicle_alias': customer.get('vehicle_alias', ''),
+            'unit_qty': customer.get('unit_qty', 0),
+            'is_b2b': customer.get('is_b2b', False),
+            'is_onboarded': customer.get('is_onboarded', False),
+        }
 
         logger.info(f"Customer data: {customer_data}")
 
         # Determine if we should send the form
         # If customer is not onboarded (is_new_chat=True), send_form=True
-        send_form = not customer.is_onboarded if customer.is_onboarded is not None else is_new_chat
-        logger.info(f"send_form determined as: {send_form} (is_onboarded={customer.is_onboarded}, is_new_chat={is_new_chat})")
+        is_onboarded = customer.get('is_onboarded', False)
+        send_form = not is_onboarded if is_onboarded is not None else is_new_chat
+        logger.info(f"send_form determined as: {send_form} (is_onboarded={is_onboarded}, is_new_chat={is_new_chat})")
 
         # 6. Simpan pesan baru dari user ke Database
         await save_message_to_db(customer_id, "user", req.message)

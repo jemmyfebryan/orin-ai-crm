@@ -56,93 +56,6 @@ ATURAN PRODUK GPS MOBIL:
 # ============================================================================
 
 @tool
-async def get_or_create_customer(
-    phone_number: Optional[str] = None,
-    lid_number: Optional[str] = None,
-    contact_name: Optional[str] = None
-) -> dict:
-    """
-    Get existing customer or create a new one from database.
-
-    Use this tool when:
-    - Starting a new conversation (need to identify the customer)
-    - Customer provides their phone number or ID
-    - You need customer_id for other operations
-
-    Returns:
-        dict with: customer_id, name, domicile, vehicle_id, vehicle_alias, unit_qty, is_b2b, is_onboarded
-
-    Example:
-        Input: phone_number="628123456789", contact_name="Budi"
-        Output: {customer_id: 123, name: "Budi", domicile: "Jakarta", ...}
-    """
-    logger.info(f"TOOL: get_or_create_customer - phone: {phone_number}, lid: {lid_number}, contact: {contact_name}")
-
-    identifier = {
-        'phone_number': phone_number,
-        'lid_number': lid_number
-    }
-
-    async with AsyncSessionLocal() as db:
-        # Search by phone_number first (priority)
-        customer = None
-        if phone_number:
-            query = select(Customer).where(Customer.phone_number == phone_number)
-            result = await db.execute(query)
-            customer = result.scalars().first()
-
-        # If not found, search by lid_number
-        if not customer and lid_number:
-            query = select(Customer).where(Customer.lid_number == lid_number)
-            result = await db.execute(query)
-            customer = result.scalars().first()
-
-        if customer:
-            # Update missing identifiers
-            need_update = False
-            if phone_number and not customer.phone_number:
-                customer.phone_number = phone_number
-                need_update = True
-            if lid_number and not customer.lid_number:
-                customer.lid_number = lid_number
-                need_update = True
-            if contact_name and contact_name != customer.contact_name:
-                customer.contact_name = contact_name
-                need_update = True
-
-            if need_update:
-                await db.commit()
-                await db.refresh(customer)
-
-            db.expunge(customer)
-            logger.info(f"Customer FOUND: id={customer.id}")
-        else:
-            # Create new customer
-            customer = Customer(
-                phone_number=phone_number,
-                lid_number=lid_number,
-                contact_name=contact_name,
-                is_onboarded=False
-            )
-            db.add(customer)
-            await db.commit()
-            await db.refresh(customer)
-            db.expunge(customer)
-            logger.info(f"New customer CREATED: id={customer.id}")
-
-    return {
-        'customer_id': customer.id,
-        'name': customer.name or '',
-        'domicile': customer.domicile or '',
-        'vehicle_id': customer.vehicle_id if customer.vehicle_id else -1,
-        'vehicle_alias': customer.vehicle_alias or '',
-        'unit_qty': customer.unit_qty if customer.unit_qty else 0,
-        'is_b2b': customer.is_b2b if customer.is_b2b else False,
-        'is_onboarded': customer.is_onboarded if customer.is_onboarded else False,
-        'contact_name': customer.contact_name or ''
-    }
-
-@tool
 async def get_customer_profile(
     state: Annotated[dict, InjectedState],
 ) -> dict:
@@ -203,17 +116,12 @@ async def update_customer_data(
     name: Optional[str] = None,
     domicile: Optional[str] = None,
     vehicle_alias: Optional[str] = None,
-    vehicle_id: Optional[int] = None,
     unit_qty: Optional[int] = None,
     is_b2b: Optional[bool] = None
 ) -> dict:
     """
     Update specific fields in customer profile.
-
-    IMPORTANT: ALWAYS use the customer_id value provided in the system prompt!
-    The system prompt explicitly tells you what customer_id to use.
-    NEVER use 0 or make up a value - always use the exact customer_id from the prompt.
-
+    
     Use this tool when:
     - Customer provides new or updated information
     - After extracting customer info from messages
@@ -223,19 +131,18 @@ async def update_customer_data(
 
     Args:
         customer_id: The customer ID (provided in system prompt - use that exact value!)
-        name: New name value
-        domicile: New domicile value
-        vehicle_alias: New vehicle alias
-        vehicle_id: New vehicle ID
-        unit_qty: New unit quantity
-        is_b2b: New B2B flag
+        name: Nama customer
+        domicile: Domisili customer
+        vehicle_alias: Jenis/Tipe kendaraan customer
+        unit_qty: Jumlah unit yang ingin dipesan
+        is_b2b: Apakah customer berasal dari business/company
 
     Returns:
         dict with: success (bool), message, updated_fields
     """
     try:
         logger.info(f"TOOL: update_customer_data - customer_id: {customer_id}")
-        logger.info(f"TOOL: update_customer_data - params: name={name}, domicile={domicile}, vehicle_alias={vehicle_alias}, vehicle_id={vehicle_id}, unit_qty={unit_qty}, is_b2b={is_b2b}")
+        logger.info(f"TOOL: update_customer_data - params: name={name}, domicile={domicile}, vehicle_alias={vehicle_alias}, unit_qty={unit_qty}, is_b2b={is_b2b}")
 
         async with AsyncSessionLocal() as db:
             query = select(Customer).where(Customer.id == customer_id)
@@ -260,9 +167,9 @@ async def update_customer_data(
                 customer.vehicle_alias = vehicle_alias
                 updated_fields.append('vehicle_alias')
 
-            if vehicle_id is not None and vehicle_id != customer.vehicle_id:
-                customer.vehicle_id = vehicle_id
-                updated_fields.append('vehicle_id')
+            # if vehicle_id is not None and vehicle_id != customer.vehicle_id:
+            #     customer.vehicle_id = vehicle_id
+            #     updated_fields.append('vehicle_id')
 
             if unit_qty and unit_qty != customer.unit_qty:
                 customer.unit_qty = unit_qty
@@ -445,6 +352,7 @@ def check_profiling_completeness(profile: dict) -> dict:
 @tool
 def determine_next_profiling(profile: dict) -> dict:
     """
+    Before use this tool, you need to use check_profiling_completeness tool first
     Determine which field to ask for next in profiling flow.
 
     Use this tool when:

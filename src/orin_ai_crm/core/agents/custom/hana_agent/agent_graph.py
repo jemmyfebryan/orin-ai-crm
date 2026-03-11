@@ -45,6 +45,8 @@ llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), tempe
 
 
 #    - search_vehicle_in_vps: Search vehicle in VPS database
+#    - create_lead_routing: Create lead routing when profiling complete
+# System prompt for the agent
 
 # 3. SALES & MEETING (6 tools):
 #    - get_pending_meeting: Get existing meeting
@@ -77,27 +79,17 @@ ATURAN PRODUK GPS:
 - Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
 - Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
 
-KEMAMPUAN TOOL (27 tools tersedia):
+KEMAMPUAN TOOL (6 tools tersedia):
 Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi menjadi:
 
 1. CUSTOMER MANAGEMENT (2 tools):
    - get_customer_profile: Get customer profile data
    - update_customer_data: Update specific customer fields
 
-2. PROFILING (7 tools):
+2. PROFILING (4 tools):
    - extract_customer_info_from_message: Extract info from message using LLM
    - check_profiling_completeness: Check if profiling is complete
    - determine_next_profiling_field: Determine what to ask next
-   - create_lead_routing: Create lead routing when profiling complete
-System prompt for the agent
-
-PENTING - PENGGUNAAN TOOL:
-- Kamu BISA dan BOLEH memanggil LEBIH DARI SATU tool secara bersamaan!
-- Contoh multi-intent: "Saya Budi dari Surabaya, mau tanya GPS untuk motor"
-  → Panggil: get_or_create_customer, extract_customer_info_from_message, search_products, answer_product_question
-
-- Contoh multi-intent: "Meeting saya bisa diganti besok jam 2? Sekalian tanya harga GPS"
-  → Panggil: get_pending_meeting, extract_meeting_details, book_or_update_meeting_db, answer_product_question
 
 Alur Percakapan:
 1. Mulai dengan get_customer_profile untuk identify customer
@@ -146,7 +138,7 @@ async def agent_entry_handler(state: AgentState) -> Dict:
     """
     Entry point handler - ensures customer_id exists and builds system prompt.
     """
-    from src.orin_ai_crm.core.agents.tools.agent_tools import get_or_create_customer
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_or_create_customer
 
     logger.info("ENTER: agent_entry_handler")
 
@@ -230,7 +222,7 @@ async def agent_node(state: AgentState) -> Dict:
     from langchain.agents import create_agent
 
     # Get system prompt from state (built by agent_entry_handler)
-    system_prompt = state.get('system_prompt', HANA_AGENT_SYSTEM_PROMPT)
+    system_prompt = HANA_AGENT_SYSTEM_PROMPT
 
     logger.info("ENTER: agent_node")
 
@@ -246,13 +238,13 @@ async def agent_node(state: AgentState) -> Dict:
     result = await agent.ainvoke(state)
     
     # Detecting Route changes from tools
-    new_messages = result.get("messages", [])
+    new_messages: List[ToolMessage] = result.get("messages", [])
     
     state_updates = {}
 
     # Scan messages backward to find the tool result
     for msg in new_messages:
-        if hasattr(msg, 'tool_calls'):
+        if hasattr(msg, 'tool_calls') and isinstance(msg, ToolMessage):
             try:
                 # Tool outputs are usually JSON strings
                 data: Dict = json.loads(msg.content)
@@ -261,7 +253,7 @@ async def agent_node(state: AgentState) -> Dict:
                     state_updates.update(data_update_state)
                     logger.info(f"Tool: {msg.name} update states: {data_update_state}")
             except (json.JSONDecodeError, TypeError) as e:
-                logger.error(f"Failed to parse tool output: {e}")
+                logger.error(f"Failed to parse tool output: {e}, msg.content: {msg.content}")
     
     if state_updates:
         logger.info(f"Final tool state_updates: {state_updates}")

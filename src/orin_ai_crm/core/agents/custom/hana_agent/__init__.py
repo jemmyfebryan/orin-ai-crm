@@ -18,6 +18,12 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     quality_router,
 )
 
+# NEW: Import the agentic/tool-calling architecture
+from src.orin_ai_crm.core.agents.custom.hana_agent.agent_graph import (
+    hana_agent,
+    build_hana_agent_graph
+)
+
 def intent_classification_router(state: AgentState) -> str:
     """
     Route after intent classification.
@@ -150,5 +156,33 @@ workflow.add_edge("ecommerce_node", "quality_check")
 workflow.add_edge("final_message", END)
 workflow.add_edge("human_takeover", END)
 
-# Compile bot siap pakai
+# Compile bot siap pakai (OLD - Intent Classification Architecture)
 hana_bot = workflow.compile()
+
+
+# ============================================================================
+# AGENTIC/TOOL-CALLING ARCHITECTURE (NEW - Recommended)
+# ============================================================================
+
+# The new agentic architecture is imported from agent_graph.py
+# It allows the LLM to handle multiple intents by calling tools in parallel
+
+__all__ = [
+    # NEW: Agentic/Tool-Calling Architecture (Recommended)
+    "hana_agent",
+    "build_hana_agent_graph",
+
+    # OLD: Intent Classification Architecture (Legacy - for fallback)
+    "hana_bot",
+    "workflow",
+    "intent_classification_router",
+
+    # Nodes (can be used independently if needed)
+    "node_intent_classification",
+    "node_greeting_and_profiling",
+    "node_sales",
+    "node_ecommerce",
+    "node_quality_check",
+    "node_final_message",
+    "node_human_takeover",
+]

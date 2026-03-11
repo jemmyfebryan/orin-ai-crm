@@ -8,14 +8,24 @@ from sqlalchemy import select, or_, delete, inspect
 # Import dari modular structure
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
-from src.orin_ai_crm.core.agents.tools import (
+
+# Explicit imports from specific modules to avoid naming conflicts with tools
+from src.orin_ai_crm.core.agents.tools.customer_tools import (
     get_or_create_customer,
     get_chat_history,
     save_message_to_db,
-    initialize_default_products_if_empty,
-    reset_products_to_default
 )
+from src.orin_ai_crm.core.agents.tools.product_tools import (
+    initialize_default_products_if_empty,
+    reset_products_to_default,
+)
+
+# OLD: Intent Classification Architecture (Legacy)
 from src.orin_ai_crm.core.agents.custom.hana_agent import hana_bot
+
+# NEW: Agentic/Tool-Calling Architecture (30+ granular tools)
+from src.orin_ai_crm.core.agents.custom.hana_agent import hana_agent
+
 from langchain_core.messages import HumanMessage, AIMessage
 
 logger = get_logger(__name__)
@@ -88,9 +98,13 @@ class ResetProductsResponse(BaseModel):
     created: int
     errors: list[str]
 
-# --- ENDPOINT UTAMA ---
+# --- ENDPOINT UTAMA (OLD - Intent Classification Architecture) ---
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
+    """
+    Legacy endpoint using intent classification architecture.
+    Use /chat-agent for the new agentic architecture with 30+ tools.
+    """
     try:
         # 1. Build identifier dict
         identifier = {
@@ -136,8 +150,8 @@ async def chat_endpoint(req: ChatRequest):
             customer_data["unit_qty"] = customer.unit_qty
         if customer.is_onboarded:
             customer_data["is_onboarded"] = customer.is_onboarded
-        customer_data["is_b2b"] = customer.is_b2b
-        
+        customer_data["is_b2b"] = customer.is_b2b if customer.is_b2b else False
+
         logger.info(f"Customer data: {customer_data}")
 
         # Check if form was already submitted (we have complete data)
@@ -149,6 +163,11 @@ async def chat_endpoint(req: ChatRequest):
         if is_data_filled:
             logger.info(f"Customer has complete data - form_submitted=True")
         customer_data["is_filled"] = is_data_filled
+
+        # Determine if we should send the form
+        # If customer is not onboarded (is_new_chat=True), send_form=True
+        send_form = not customer.is_onboarded if customer.is_onboarded is not None else is_new_chat
+        logger.info(f"send_form determined as: {send_form} (is_onboarded={customer.is_onboarded}, is_new_chat={is_new_chat})")
 
         # 7. Simpan pesan baru dari user ke Database
         await save_message_to_db(customer_id, "user", req.message)
@@ -166,7 +185,7 @@ async def chat_endpoint(req: ChatRequest):
             "step": "start",
             "route": "UNASSIGNED",
             "customer_data": customer_data,
-            "send_form": False,
+            "send_form": send_form,
             # "awaiting_form": awaiting_form,
             # "form_submitted": form_submitted
         }
@@ -174,7 +193,7 @@ async def chat_endpoint(req: ChatRequest):
         # 9. Jalankan AI Workflow (LangGraph)
         # Quality check is now handled within the workflow graph
         final_state = await hana_bot.ainvoke(initial_state)
-        
+
         # logger.info(f"FINAL STATE:\n{final_state}")
 
         # 10. Ambil balasan terakhir dari AI
@@ -201,6 +220,186 @@ async def chat_endpoint(req: ChatRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Terjadi kesalahan pada server AI.")
+
+
+# --- NEW ENDPOINT: AGENTIC/TOOL-CALLING ARCHITECTURE (30+ granular tools) ---
+class ChatAgentRequest(BaseModel):
+    phone_number: Optional[str] = Field(None, description="Nomor WhatsApp user (format: 628xxx)")
+    lid_number: Optional[str] = Field(None, description="WhatsApp LID number untuk migrasi")
+    message: str = Field(..., description="Pesan dari user")
+    contact_name: Optional[str] = Field(None, description="Nama kontak dari WhatsApp")
+
+    is_new_chat: bool = Field(False, description="Apakah ada pesan user pertama kali di WhatsApp")
+
+    @field_validator('contact_name')
+    @classmethod
+    def validate_at_least_one_identifier(cls, v: Optional[str], info) -> Optional[str]:
+        """Pastikan minimal salah satu identifier (phone_number atau lid_number) ada"""
+        phone = info.data.get('phone_number')
+        lid = info.data.get('lid_number')
+        if not phone and not lid:
+            raise ValueError('Minimal salah satu dari phone_number atau lid_number harus diisi')
+        return v
+
+class ChatAgentResponse(BaseModel):
+    customer_id: Optional[int]
+    phone_number: Optional[str]
+    lid_number: Optional[str]
+    reply: str
+    tool_calls: Optional[list[str]] = None
+    messages_count: int
+
+@app.post("/chat-agent", response_model=ChatAgentResponse)
+async def chat_agent_endpoint(req: ChatAgentRequest):
+    """
+    NEW: Agentic endpoint using tool-calling architecture with 30+ granular tools.
+
+    This endpoint allows the AI to:
+    - Call multiple tools simultaneously for multi-intent messages
+    - Handle complex customer requests more flexibly
+    - Compose tools together (e.g., profile + answer products + book meeting in one turn)
+
+    Tool Categories:
+    - Customer Management (3 tools): get_or_create_customer, get_customer_profile, update_customer_data
+    - Profiling (7 tools): extract info, check completeness, determine next field, generate questions, etc.
+    - Sales & Meeting (6 tools): get meetings, extract details, book/update meetings, confirmations
+    - Product & E-commerce (8 tools): get products, search, answer questions, get links, recommend
+    - Support & Complaints (3 tools): classify issues, generate empathetic responses, trigger human takeover
+    - Conversation (2 tools): thank you, conversation starters
+
+    Example multi-intent message:
+    "Saya Budi dari Surabaya, mau tanya GPS motor"
+    → Agent will call: get_or_create_customer + extract_customer_info_from_message + search_products + answer_product_question
+    """
+    try:
+        # 1. Build identifier dict
+        identifier = {
+            "phone_number": req.phone_number,
+            "lid_number": req.lid_number
+        }
+
+        # 2. Build history list untuk LangGraph
+        is_new_chat = req.is_new_chat
+
+        # 3. Get or create customer (returns detached object)
+        customer = await get_or_create_customer(
+            identifier=identifier,
+            contact_name=req.contact_name,
+            is_onboarded=(not is_new_chat),
+        )
+        customer_id = customer.id
+
+        # 4. Fetch chat history if not new chat
+        history = []
+        if not is_new_chat:
+            history_rows = await get_chat_history(customer_id)
+            for row in history_rows:
+                if row.message_role == "user":
+                    history.append(HumanMessage(content=row.content))
+                else:
+                    history.append(AIMessage(content=row.content))
+
+        # 5. Load customer data from database
+        customer_data = {}
+        if customer.id:
+            customer_data["id"] = customer_id
+        if customer.name:
+            customer_data["name"] = customer.name
+        if customer.domicile:
+            customer_data["domicile"] = customer.domicile
+        if customer.vehicle_id:
+            customer_data["vehicle_id"] = customer.vehicle_id
+        if customer.vehicle_alias:
+            customer_data["vehicle_alias"] = customer.vehicle_alias
+        if customer.unit_qty:
+            customer_data["unit_qty"] = customer.unit_qty
+        if customer.is_onboarded:
+            customer_data["is_onboarded"] = customer.is_onboarded
+        customer_data["is_b2b"] = customer.is_b2b if customer.is_b2b else False
+
+        logger.info(f"Customer data: {customer_data}")
+
+        # Determine if we should send the form
+        # If customer is not onboarded (is_new_chat=True), send_form=True
+        send_form = not customer.is_onboarded if customer.is_onboarded is not None else is_new_chat
+        logger.info(f"send_form determined as: {send_form} (is_onboarded={customer.is_onboarded}, is_new_chat={is_new_chat})")
+
+        # 6. Simpan pesan baru dari user ke Database
+        await save_message_to_db(customer_id, "user", req.message)
+
+        # 7. Susun State untuk Agentic Agent
+        # Tambahkan pesan terbaru ke dalam history
+        current_messages = history + [HumanMessage(content=req.message)]
+
+        initial_state = {
+            "messages": current_messages,
+            "phone_number": req.phone_number,
+            "lid_number": req.lid_number,
+            "contact_name": req.contact_name,
+            "customer_id": customer_id,
+            "customer_data": customer_data,
+            "send_form": send_form,
+        }
+
+        # 8. Jalankan Agentic AI Workflow (dengan 30+ tools)
+        final_state = await hana_agent.ainvoke(initial_state)
+
+        logger.info(f"FINAL STATE (Agent): messages_count={len(final_state['messages'])}")
+
+        # 9. Extract AI reply from final state
+        # The final message should be from node_final_message which synthesizes everything
+        messages = final_state["messages"]
+        ai_reply = ""
+        tool_calls_used = []
+
+        # Find all tool calls made during the conversation
+        for msg in messages:
+            if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if tc['name'] not in tool_calls_used:
+                        tool_calls_used.append(tc['name'])
+
+        # Get the last message content (should be from node_final_message or final agent response)
+        last_message = messages[-1]
+        if hasattr(last_message, 'content') and last_message.content:
+            ai_reply = last_message.content
+        else:
+            # Fallback: find last AIMessage with content
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content:
+                    # Skip tool result messages
+                    if not hasattr(msg, 'name') or msg.name != 'ToolMessage':
+                        ai_reply = msg.content
+                        break
+
+        # If still no content, this is an error
+        if not ai_reply:
+            logger.error("No AI reply found in final state!")
+            ai_reply = "Maaf, terjadi kesalahan sistem. Silakan coba lagi."
+
+        # 10. Simpan balasan AI ke Database
+        await save_message_to_db(customer_id, "ai", ai_reply)
+
+        logger.info(f"Tool calls used: {tool_calls_used}")
+        logger.info(f"AI reply (first 200 chars): {ai_reply[:200]}")
+
+        return ChatAgentResponse(
+            customer_id=customer_id,
+            phone_number=req.phone_number,
+            lid_number=req.lid_number,
+            reply=ai_reply,
+            tool_calls=tool_calls_used if tool_calls_used else None,
+            messages_count=len(messages)
+        )
+
+    except ValueError as ve:
+        # Validation error
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error in chat-agent endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Terjadi kesalahan pada server AI: {str(e)}")
 
 # --- ENDPOINT RESET HISTORY (UNTUK TESTING/DEV) ---
 @app.post("/reset-history", response_model=ResetHistoryResponse)
@@ -332,7 +531,29 @@ async def reset_products_endpoint():
 @app.get("/health")
 async def health_check():
     """Endpoint untuk health check"""
-    return {"status": "healthy", "service": "HANA AI WhatsApp Chatbot"}
+    return {
+        "status": "healthy",
+        "service": "HANA AI WhatsApp Chatbot",
+        "version": "2.0 - Agentic Architecture",
+        "endpoints": {
+            "chat": "/chat (Legacy - Intent Classification)",
+            "chat-agent": "/chat-agent (NEW - Agentic with 30+ tools)",
+            "reset-history": "/reset-history",
+            "reset-products": "/reset-products",
+            "health": "/health"
+        },
+        "agent_tools": {
+            "total": 30,
+            "categories": [
+                "Customer Management (3)",
+                "Profiling (7)",
+                "Sales & Meeting (6)",
+                "Product & E-commerce (8)",
+                "Support & Complaints (3)",
+                "Conversation (2)"
+            ]
+        }
+    }
 
 # --- RUN SERVER ---
 if __name__ == "__main__":

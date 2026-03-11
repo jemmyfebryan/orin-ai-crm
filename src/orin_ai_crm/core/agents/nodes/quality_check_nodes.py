@@ -274,6 +274,11 @@ async def node_quality_check(state: AgentState):
     Returns:
         Updated state with final answer (either original or handover message)
     """
+    # NOTE: Temporary disable quality check
+    return {
+        "step": "final_message",
+        "route": "FINAL_MESSAGE"
+    }
     logger.info("=" * 50)
     logger.info("ENTER: node_quality_check")
 

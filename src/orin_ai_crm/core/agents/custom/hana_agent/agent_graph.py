@@ -88,7 +88,6 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - check_profiling_completeness: Check if profiling is complete
    - determine_next_profiling_field: Determine what to ask next
    - generate_profiling_question: Generate natural profiling question
-   - generate_greeting_message: Generate personalized greeting
 
 PENTING - PENGGUNAAN TOOL:
 - Kamu BISA dan BOLEH memanggil LEBIH DARI SATU tool secara bersamaan!
@@ -230,11 +229,12 @@ async def agent_node(state: AgentState) -> dict:
 
     logger.info("ENTER: agent_node")
 
-    # Create agent with dynamic system prompt
+    # Create agent with dynamic system prompt and our AgentState schema
     agent = create_agent(
         model=llm,
         tools=AGENT_TOOLS,
-        system_prompt=system_prompt
+        system_prompt=system_prompt,
+        state_schema=AgentState  # Pass our custom AgentState
     )
 
     # Invoke the agent with current state

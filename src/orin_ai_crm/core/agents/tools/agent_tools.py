@@ -20,8 +20,9 @@ Total: 30+ granular tools
 
 import os
 import json
-from typing import Optional
+from typing import Optional, Annotated
 from datetime import timedelta, timezone
+from langgraph.prebuilt import InjectedState
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -142,25 +143,26 @@ async def get_or_create_customer(
     }
 
 @tool
-async def get_customer_profile(customer_id: int) -> dict:
+async def get_customer_profile(
+    state: Annotated[dict, InjectedState],
+) -> dict:
     """
     Get complete customer profile from database.
-
-    IMPORTANT: ALWAYS use the customer_id value provided in the system prompt!
-    The system prompt explicitly tells you what customer_id to use.
-    NEVER use 0 or make up a value - always use the exact customer_id from the prompt.
-
+    
     Use this tool when:
     - You need to check what customer data we already have
     - Starting a conversation to see existing profile
     - Checking if profiling is complete
 
     Args:
-        customer_id: The customer ID (provided in system prompt - use that exact value!)
+        customer_id: From state.customer_id
 
     Returns:
         dict with all customer profile fields
     """
+    customer_id = state.get("customer_id", None)
+    if not customer_id:
+        return "Failed to fetch customer id from state"
     logger.info(f"TOOL: get_customer_profile - customer_id: {customer_id}")
 
     async with AsyncSessionLocal() as db:
@@ -1607,7 +1609,7 @@ PROFILING_TOOLS = [
     generate_profiling_question,
     # search_vehicle_in_vps,
     # create_lead_routing,
-    generate_greeting_message,
+    # generate_greeting_message,
 ]
 
 SALES_MEETING_TOOLS = [

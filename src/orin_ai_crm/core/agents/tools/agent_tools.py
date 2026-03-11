@@ -269,7 +269,13 @@ Return JSON with fields that were found (only include fields mentioned in the me
 
 
 @tool
-def check_profiling_completeness(profile: dict) -> dict:
+async def check_profiling_completeness(
+    name: str = "",
+    domicile: str = "",
+    vehicle_alias: str = "",
+    unit_qty: int = 0,
+    is_b2b: bool = False
+) -> dict:
     """
     Check if customer profiling is complete and determine route.
 
@@ -284,22 +290,33 @@ def check_profiling_completeness(profile: dict) -> dict:
     - vehicle_alias (vehicle type)
 
     Args:
-        profile: Customer profile dict with keys: name, domicile, vehicle_alias, unit_qty, is_b2b
+        name: Customer name
+        domicile: Customer location
+        vehicle_alias: Vehicle type
+        unit_qty: Number of units
+        is_b2b: Business customer flag
 
     Returns:
         dict with: is_complete (bool), missing_fields (list), recommended_route (str)
     """
+    profile = {
+        'name': name,
+        'domicile': domicile,
+        'vehicle_alias': vehicle_alias,
+        'unit_qty': unit_qty,
+        'is_b2b': is_b2b
+    }
+    logger.info(f"TOOL: check_profiling_completeness CALLED - profile: {profile}")
     try:
-        logger.info(f"TOOL: check_profiling_completeness - profile: {profile}")
 
         # Check if we have enough data to proceed
         # At least one of: domicile, unit_qty (>0), or vehicle_alias
-        has_name = profile.get('name')
+        has_name = bool(profile.get('name'))
         has_domicile = bool(profile.get('domicile'))
         has_unit_qty = profile.get('unit_qty', 0) > 0
         has_vehicle_alias = bool(profile.get('vehicle_alias'))
 
-        is_complete = has_name or has_domicile or has_unit_qty or has_vehicle_alias
+        is_complete = has_name and (has_domicile or has_unit_qty or has_vehicle_alias)
 
         # Determine route based on unit_qty
         # - If unit_qty >= 5 OR is_b2b = True → SALES
@@ -325,32 +342,40 @@ def check_profiling_completeness(profile: dict) -> dict:
 
         result = {
             'is_complete': is_complete,
-            'missing_fields': missing_fields,
+            # 'missing_fields': missing_fields,
             # 'recommended_route': recommended_route,
             # 'unit_qty': unit_qty,
             # 'is_b2b': is_b2b,
-            'has_name': has_name,
-            'has_domicile': has_domicile,
-            'has_unit_qty': has_unit_qty,
-            'has_vehicle_alias': has_vehicle_alias
+            # 'has_name': has_name,
+            # 'has_domicile': has_domicile,
+            # 'has_unit_qty': has_unit_qty,
+            # 'has_vehicle_alias': has_vehicle_alias
         }
         if recommended_route: result['update_state'] = {'route': recommended_route}
-        logger.info(f"TOOL: check_profiling_completeness - result: {result}")
+        logger.info(f"TOOL: check_profiling_completeness - DONE - result: {result}")
         return result
     except Exception as e:
-        logger.error(f"TOOL: check_profiling_completeness - ERROR: {str(e)}")
+        logger.exception(f"TOOL: check_profiling_completeness - ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             'is_complete': False,
-            'missing_fields': None,
-            'has_name': None,
-            'has_domicile': None,
-            'has_unit_qty': None,
-            'has_vehicle_alias': None,
+            # 'missing_fields': None,
+            # 'has_name': None,
+            # 'has_domicile': None,
+            # 'has_unit_qty': None,
+            # 'has_vehicle_alias': None,
         }
 
 
 @tool
-def determine_next_profiling(profile: dict) -> dict:
+async def determine_next_profiling(
+    name: str = "",
+    domicile: str = "",
+    vehicle_alias: str = "",
+    unit_qty: int = 0,
+    is_b2b: bool = False
+) -> dict:
     """
     Before use this tool, you need to use check_profiling_completeness tool first
     Determine which field to ask for next in profiling flow.
@@ -362,11 +387,23 @@ def determine_next_profiling(profile: dict) -> dict:
     Priority order: name → domicile → vehicle_alias → unit_qty
 
     Args:
-        profile: Customer profile dict with keys: name, domicile, vehicle_alias, unit_qty, is_b2b
+        name: Customer name
+        domicile: Customer location
+        vehicle_alias: Vehicle type
+        unit_qty: Number of units
+        is_b2b: Business customer flag
 
     Returns:
         dict with: next_field (str), reason (str)
     """
+    profile = {
+        'name': name,
+        'domicile': domicile,
+        'vehicle_alias': vehicle_alias,
+        'unit_qty': unit_qty,
+        'is_b2b': is_b2b
+    }
+    logger.info(f"TOOL: determine_next_profiling CALLED - profile: {profile}")
     try:
         logger.info(f"TOOL: determine_next_profiling - profile keys: {list(profile.keys())}")
         logger.info(f"TOOL: determine_next_profiling - profile: {profile}")
@@ -400,12 +437,16 @@ def determine_next_profiling(profile: dict) -> dict:
             }
 
         logger.info("TOOL: determine_next_profiling - All fields complete, returning 'complete'")
-        return {
+        result = {
             'next_field': 'complete',
             'reason': 'All profiling fields are complete'
         }
+        logger.info(f"TOOL: determine_next_profiling - DONE - result: {result}")
+        return result
     except Exception as e:
-        logger.error(f"TOOL: determine_next_profiling - ERROR: {str(e)}")
+        logger.exception(f"TOOL: determine_next_profiling - ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return {
             'next_field': 'name',
             'reason': 'Error determining next field, defaulting to name'

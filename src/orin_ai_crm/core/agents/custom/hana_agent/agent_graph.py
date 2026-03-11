@@ -238,13 +238,14 @@ async def agent_node(state: AgentState) -> Dict:
     result = await agent.ainvoke(state)
     
     # Detecting Route changes from tools
-    new_messages: List[ToolMessage] = result.get("messages", [])
+    new_messages: List = result.get("messages", [])
     
     state_updates = {}
 
-    # Scan messages backward to find the tool result
+    # Scan messages for tool results
     for msg in new_messages:
-        if hasattr(msg, 'tool_calls') and isinstance(msg, ToolMessage):
+        # Only process ToolMessage types (results from tool execution)
+        if isinstance(msg, ToolMessage):
             try:
                 # Tool outputs are usually JSON strings
                 data: Dict = json.loads(msg.content)
@@ -254,7 +255,7 @@ async def agent_node(state: AgentState) -> Dict:
                     logger.info(f"Tool: {msg.name} update states: {data_update_state}")
             except (json.JSONDecodeError, TypeError) as e:
                 logger.error(f"Failed to parse tool output: {e}, msg.content: {msg.content}")
-    
+
     if state_updates:
         logger.info(f"Final tool state_updates: {state_updates}")
 

@@ -22,7 +22,10 @@ Key Benefits:
 
 import os
 import json
+from typing import List, Dict
+
 from langgraph.graph import StateGraph, END
+from langchain_core.messages import ToolMessage
 from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.models.schemas import AgentState
@@ -42,8 +45,6 @@ llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), tempe
 
 
 #    - search_vehicle_in_vps: Search vehicle in VPS database
-#    - create_lead_routing: Create lead routing when profiling complete
-# System prompt for the agent
 
 # 3. SALES & MEETING (6 tools):
 #    - get_pending_meeting: Get existing meeting
@@ -87,7 +88,8 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - extract_customer_info_from_message: Extract info from message using LLM
    - check_profiling_completeness: Check if profiling is complete
    - determine_next_profiling_field: Determine what to ask next
-   - generate_profiling_question: Generate natural profiling question
+   - create_lead_routing: Create lead routing when profiling complete
+System prompt for the agent
 
 PENTING - PENGGUNAAN TOOL:
 - Kamu BISA dan BOLEH memanggil LEBIH DARI SATU tool secara bersamaan!
@@ -99,13 +101,16 @@ PENTING - PENGGUNAAN TOOL:
 
 Alur Percakapan:
 1. Mulai dengan get_customer_profile untuk identify customer
-2. Jika perlu, collect more profiling data dengan generate_profiling_question
-3. Setelah profiling lengkap → determine route (SALES vs ECOMMERCE)
-4. SALES: Tawarkan meeting, gunakan meeting tools
-5. ECOMMERCE: Jawab pertanyaan produk, berikan rekomendasi
+2. Pakai tool check_profiling_completeness untuk mengecek apakah profil user sudah lengkap atau belum
 
 INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
 """
+
+
+# 3. Setelah profiling lengkap → determine route (SALES vs ECOMMERCE)
+# 4. SALES: Tawarkan meeting, gunakan meeting tools
+# 5. ECOMMERCE: Jawab pertanyaan produk, berikan rekomendasi
+
 
 
 def build_system_prompt(state: AgentState) -> str:
@@ -137,7 +142,7 @@ Customer Identifier:
     return context_info
 
 
-async def agent_entry_handler(state: AgentState) -> dict:
+async def agent_entry_handler(state: AgentState) -> Dict:
     """
     Entry point handler - ensures customer_id exists and builds system prompt.
     """
@@ -163,7 +168,7 @@ async def agent_entry_handler(state: AgentState) -> dict:
 
         logger.info(f"Customer resolved: id={customer_id}")
 
-        # Build customer_data from customer dict
+        # Build customer_data from customer Dict
         customer_data = {
             'id': customer_id,
             'name': customer.get('name', ''),
@@ -218,7 +223,7 @@ async def agent_entry_handler(state: AgentState) -> dict:
 # BUILD THE AGENTIC GRAPH USING LANGCHAIN'S CREATE_AGENT
 # ============================================================================
 
-async def agent_node(state: AgentState) -> dict:
+async def agent_node(state: AgentState) -> Dict:
     """
     Agent node that creates and executes agent with dynamic system prompt.
     """
@@ -239,6 +244,27 @@ async def agent_node(state: AgentState) -> dict:
 
     # Invoke the agent with current state
     result = await agent.ainvoke(state)
+    
+    # Detecting Route changes from tools
+    new_messages = result.get("messages", [])
+    
+    state_updates = {}
+
+    # Scan messages backward to find the tool result
+    for msg in new_messages:
+        if hasattr(msg, 'tool_calls'):
+            try:
+                # Tool outputs are usually JSON strings
+                data: Dict = json.loads(msg.content)
+                data_update_state = data.get("update_state")
+                if isinstance(data_update_state, dict):
+                    state_updates.update(data_update_state)
+                    logger.info(f"Tool: {msg.name} update states: {data_update_state}")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.error(f"Failed to parse tool output: {e}")
+    
+    if state_updates:
+        logger.info(f"Final tool state_updates: {state_updates}")
 
     logger.info("EXIT: agent_node")
 

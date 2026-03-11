@@ -387,11 +387,12 @@ def check_profiling_completeness(profile: dict) -> dict:
 
         # Check if we have enough data to proceed
         # At least one of: domicile, unit_qty (>0), or vehicle_alias
+        has_name = profile.get('name')
         has_domicile = bool(profile.get('domicile'))
         has_unit_qty = profile.get('unit_qty', 0) > 0
         has_vehicle_alias = bool(profile.get('vehicle_alias'))
 
-        is_complete = has_domicile or has_unit_qty or has_vehicle_alias
+        is_complete = has_name or has_domicile or has_unit_qty or has_vehicle_alias
 
         # Determine route based on unit_qty
         # - If unit_qty >= 5 OR is_b2b = True → SALES
@@ -402,10 +403,12 @@ def check_profiling_completeness(profile: dict) -> dict:
         if is_complete:
             recommended_route = "SALES" if (unit_qty >= 5 or is_b2b) else "ECOMMERCE"
         else:
-            recommended_route = "CONTINUE_PROFILING"
+            recommended_route = None
 
         # For logging: what's missing
         missing_fields = []
+        if not has_name:
+            missing_fields.append('name')
         if not has_domicile:
             missing_fields.append('domicile')
         if not has_unit_qty:
@@ -416,28 +419,31 @@ def check_profiling_completeness(profile: dict) -> dict:
         result = {
             'is_complete': is_complete,
             'missing_fields': missing_fields,
-            'recommended_route': recommended_route,
-            'unit_qty': unit_qty,
-            'is_b2b': is_b2b,
+            # 'recommended_route': recommended_route,
+            # 'unit_qty': unit_qty,
+            # 'is_b2b': is_b2b,
+            'has_name': has_name,
             'has_domicile': has_domicile,
             'has_unit_qty': has_unit_qty,
             'has_vehicle_alias': has_vehicle_alias
         }
+        if recommended_route: result['update_state'] = {'route': recommended_route}
         logger.info(f"TOOL: check_profiling_completeness - result: {result}")
         return result
     except Exception as e:
         logger.error(f"TOOL: check_profiling_completeness - ERROR: {str(e)}")
         return {
             'is_complete': False,
-            'missing_fields': ['domicile', 'unit_qty', 'vehicle_alias'],
-            'recommended_route': "CONTINUE_PROFILING",
-            'unit_qty': 0,
-            'is_b2b': False
+            'missing_fields': None,
+            'has_name': None,
+            'has_domicile': None,
+            'has_unit_qty': None,
+            'has_vehicle_alias': None,
         }
 
 
 @tool
-def determine_next_profiling_field(profile: dict) -> dict:
+def determine_next_profiling(profile: dict) -> dict:
     """
     Determine which field to ask for next in profiling flow.
 
@@ -454,44 +460,44 @@ def determine_next_profiling_field(profile: dict) -> dict:
         dict with: next_field (str), reason (str)
     """
     try:
-        logger.info(f"TOOL: determine_next_profiling_field - profile keys: {list(profile.keys())}")
-        logger.info(f"TOOL: determine_next_profiling_field - profile: {profile}")
+        logger.info(f"TOOL: determine_next_profiling - profile keys: {list(profile.keys())}")
+        logger.info(f"TOOL: determine_next_profiling - profile: {profile}")
 
         if not profile.get('name'):
-            logger.info("TOOL: determine_next_profiling_field - Missing 'name', returning name")
+            logger.info("TOOL: determine_next_profiling - Missing 'name', returning name")
             return {
                 'next_field': 'name',
                 'reason': 'Customer name is required for personalized service'
             }
 
         if not profile.get('domicile'):
-            logger.info("TOOL: determine_next_profiling_field - Missing 'domicile', returning domicile")
+            logger.info("TOOL: determine_next_profiling - Missing 'domicile', returning domicile")
             return {
                 'next_field': 'domicile',
                 'reason': 'Domicile is needed for location-based offers and shipping'
             }
 
         if not profile.get('vehicle_alias'):
-            logger.info("TOOL: determine_next_profiling_field - Missing 'vehicle_alias', returning vehicle_alias")
+            logger.info("TOOL: determine_next_profiling - Missing 'vehicle_alias', returning vehicle_alias")
             return {
                 'next_field': 'vehicle_alias',
                 'reason': 'Vehicle information helps recommend the right GPS product'
             }
 
         if profile.get('unit_qty', 0) == 0:
-            logger.info("TOOL: determine_next_profiling_field - Missing 'unit_qty', returning unit_qty")
+            logger.info("TOOL: determine_next_profiling - Missing 'unit_qty', returning unit_qty")
             return {
                 'next_field': 'unit_qty',
                 'reason': 'Quantity is needed to determine pricing and route (sales vs ecommerce)'
             }
 
-        logger.info("TOOL: determine_next_profiling_field - All fields complete, returning 'complete'")
+        logger.info("TOOL: determine_next_profiling - All fields complete, returning 'complete'")
         return {
             'next_field': 'complete',
             'reason': 'All profiling fields are complete'
         }
     except Exception as e:
-        logger.error(f"TOOL: determine_next_profiling_field - ERROR: {str(e)}")
+        logger.error(f"TOOL: determine_next_profiling - ERROR: {str(e)}")
         return {
             'next_field': 'name',
             'reason': 'Error determining next field, defaulting to name'
@@ -624,6 +630,7 @@ async def create_lead_routing(
 ) -> dict:
     """
     Create a lead routing record when profiling is complete.
+    Check using tool check_profiling_completeness, if the profile is not yet complete, dont call this tool
 
     Use this tool when:
     - Profiling is complete
@@ -672,47 +679,6 @@ async def create_lead_routing(
             'routing_id': routing.id,
             'message': f'Routing created for {route_type}'
         }
-
-
-@tool
-async def generate_greeting_message(
-    customer_name: str,
-    conversation_context: str
-) -> dict:
-    """
-    Generate a friendly, personalized greeting message. Before use this tool, use get_customer_profile tools to gather their information.
-
-    Use this tool when:
-    - Customer sends a greeting (halo, hai, selamat pagi)
-    - Starting a new conversation
-    - Customer says thank you
-
-    Returns:
-        dict with: greeting (str) - The greeting message
-    """
-    logger.info(f"TOOL: generate_greeting_message - customer: {customer_name}")
-
-    prompt = f"""{HANA_PERSONA}
-
-Customer: {customer_name}
-Context: {conversation_context}
-
-TASK:
-Generate a natural, friendly greeting response.
-
-RULES:
-- Gunakan emoji yang sesuai
-- Natural seperti chat WhatsApp asli
-- Tanya bagaimana bisa membantu
-- Jangan terlalu formal
-- Response HANYA dengan pesan yang akan dikirim"""
-
-    response = await llm.ainvoke([SystemMessage(content=prompt)])
-
-    return {
-        'greeting': response.content
-    }
-
 
 # ============================================================================
 # CATEGORY 3: SALES & MEETING TOOLS (7 tools)
@@ -1605,8 +1571,8 @@ CUSTOMER_MANAGEMENT_TOOLS = [
 PROFILING_TOOLS = [
     extract_customer_info_from_message,
     check_profiling_completeness,
-    determine_next_profiling_field,
-    generate_profiling_question,
+    determine_next_profiling,
+    # generate_profiling_question,
     # search_vehicle_in_vps,
     # create_lead_routing,
     # generate_greeting_message,

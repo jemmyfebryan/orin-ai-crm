@@ -245,7 +245,8 @@ class ChatAgentResponse(BaseModel):
     customer_id: Optional[int]
     phone_number: Optional[str]
     lid_number: Optional[str]
-    reply: str
+    reply: str  # Kept for backward compatibility - will be first message from final_messages
+    replies: list[str]  # New field: multi-bubble messages from final_messages
     tool_calls: Optional[list[str]] = None
     messages_count: int
 
@@ -341,10 +342,10 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
 
         logger.info(f"FINAL STATE (Agent): messages_count={len(final_state['messages'])}")
 
-        # 9. Extract AI reply from final state
-        # The final message should be from node_final_message which synthesizes everything
+        # 9. Extract AI reply from final_state
+        # The node_final_message now sets 'final_messages' with multi-bubble response
         messages = final_state["messages"]
-        ai_reply = ""
+        final_messages = final_state.get("final_messages", [])
         tool_calls_used = []
 
         # Find all tool calls made during the conversation
@@ -354,35 +355,42 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
                     if tc['name'] not in tool_calls_used:
                         tool_calls_used.append(tc['name'])
 
-        # Get the last message content (should be from node_final_message or final agent response)
-        last_message = messages[-1]
-        if hasattr(last_message, 'content') and last_message.content:
-            ai_reply = last_message.content
+        # Get the final messages (multi-bubble response from node_final_message)
+        ai_replies = []
+        if final_messages:
+            ai_replies = final_messages
+            logger.info(f"Using final_messages from node_final_message: {len(ai_replies)} bubbles")
         else:
-            # Fallback: find last AIMessage with content
+            # Fallback: find last AIMessage with content (backward compatibility)
+            logger.warning("No final_messages found, using fallback to extract from messages")
             for msg in reversed(messages):
                 if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content:
                     # Skip tool result messages
                     if not hasattr(msg, 'name') or msg.name != 'ToolMessage':
-                        ai_reply = msg.content
+                        ai_replies = [msg.content]
                         break
 
         # If still no content, this is an error
-        if not ai_reply:
+        if not ai_replies:
             logger.error("No AI reply found in final state!")
-            ai_reply = "Maaf, terjadi kesalahan sistem. Silakan coba lagi."
+            ai_replies = ["Maaf, terjadi kesalahan sistem. Silakan coba lagi."]
 
         # 10. Simpan balasan AI ke Database
-        await save_message_to_db(customer_id, "ai", ai_reply)
+        # Join multiple bubbles with newlines for storage
+        ai_reply_for_db = "\n\n".join(ai_replies)
+        await save_message_to_db(customer_id, "ai", ai_reply_for_db)
 
         logger.info(f"Tool calls used: {tool_calls_used}")
-        logger.info(f"AI reply (first 200 chars): {ai_reply[:200]}")
+        logger.info(f"AI replies ({len(ai_replies)} bubbles):")
+        for i, reply in enumerate(ai_replies):
+            logger.info(f"  Bubble {i+1}: {reply[:100]}...")
 
         return ChatAgentResponse(
             customer_id=customer_id,
             phone_number=req.phone_number,
             lid_number=req.lid_number,
-            reply=ai_reply,
+            reply=ai_replies[0] if ai_replies else "",  # First bubble for backward compatibility
+            replies=ai_replies,  # All bubbles
             tool_calls=tool_calls_used if tool_calls_used else None,
             messages_count=len(messages)
         )

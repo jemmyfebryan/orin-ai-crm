@@ -26,6 +26,8 @@ class AgentState(TypedDict):
     send_form: bool
     form_data: dict  # Parsed data from form response
     next_route: Optional[str]  # Determined route after form (ecommerce_node or sales_node)
+    # Final messages for user (multi-bubble chat response)
+    final_messages: list[str]  # List of message strings to be sent as separate chat bubbles
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

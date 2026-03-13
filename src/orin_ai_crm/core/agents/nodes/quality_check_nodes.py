@@ -6,7 +6,7 @@ import os
 from datetime import timedelta, timezone
 from typing import Optional
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
@@ -48,6 +48,16 @@ class AnswerQualityEvaluation(BaseModel):
     missing_info: list[str] = Field(
         default=[],
         description="List informasi yang hilang atau kurang dari jawaban (jika ada)"
+    )
+
+
+class FinalMessagesResponse(BaseModel):
+    """Multi-bubble final messages for user"""
+    messages: list[str] = Field(
+        description="List of message strings to be sent as separate chat bubbles. Each should be a complete, standalone message."
+    )
+    reasoning: str = Field(
+        description="Alasan mengapa response dibagi menjadi beberapa bubble"
     )
 
 
@@ -198,43 +208,6 @@ Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
     response = llm.invoke([SystemMessage(content=system_prompt)])
 
-    return response.content
-
-async def add_send_form_message(
-    last_message: str
-):
-    system_prompt = f"""{HANA_PERSONA}
-
-Task:
-Ubah pesan yang ingin dikirim AI ke user dengan menambahkan form untuk user isi
-
-Pesan AI:
-{last_message}
-
-Fields yang diperlukan:
-- name: Nama
-- domicile: Domisili/kota
-- purpose: Kebutuhan kendaraan (pribadi, perusahaan, operasional kantor, fleet, delivery, dll)
-- vehicle_type: Jenis kendaraan (mobil, motor, truk, dll)
-- unit_qty: Jumlah unit
-
-CATATAN PENTING:
-- Jangan tanya field yang sudah terisi di customer_data
-- Jelaskan bahwa data ini diperlukan untuk penawaran
-- Gunakan bahasa ramah tapi tegas
-- Kebutuhan adalah tujuan penggunaan (pribadi/kantor/operasional)
-
-Contoh:
-"Supaya Hana bisa kasih penawaran yang lebih pas, mohon isi data singkat berikut:
-Nama : ...
-Domisili : ...
-Kebutuhan (pribadi, kantor, lainnya): ...
-Jenis Kendaraan (mobil, motor, lainnya): ...
-Jumlah unit : ..."""
-    response = llm.invoke([SystemMessage(content=system_prompt)])
-    
-    logger.info(f"Generated send_form_message: {response.content[:100]}...")
-    
     return response.content
 
 async def set_human_takeover_flag(customer_id: int):
@@ -393,51 +366,169 @@ def quality_router(state: AgentState) -> str:
     return "human_takeover"
 
 async def node_final_message(state: AgentState):
-    # Soon will be used to convert final message to multiple bubble of chat
-    # Now will be modify the message to include the form to fill if send_form = True
+    """
+    Final Message Node - Synthesizes the conversation into user-friendly multi-bubble response.
+
+    This node:
+    - Filters out tool messages and backend operations
+    - Summarizes what happened from user's perspective
+    - Generates multiple chat bubbles when appropriate
+    - Handles form integration when send_form=True
+    - Uses LLM to ensure dynamic, contextual responses
+
+    Args:
+        state: Current agent state (LangGraph standard)
+
+    Returns:
+        Updated state with final_messages (list of strings for multi-bubble chat)
+    """
+    from langchain_core.messages import ToolMessage, HumanMessage
+
     logger.info("=" * 50)
     logger.info("ENTER: node_final_message")
-    
+
     customer_data = state.get("customer_data", {})
-    logger.info(f"Customer Data: {customer_data}")
     customer_id = customer_data.get("id")
-    messages = state.get("messages")
-    send_form = state.get("send_form")
-    last_message = messages[-1]
-    
+    customer_name = customer_data.get("name") or state.get("contact_name", "Kak")
+    send_form = state.get("send_form", False)
+    messages = state.get("messages", [])
+
+    logger.info(f"Customer Data: {customer_data}")
     logger.info(f"send_form: {send_form}")
-    
+    logger.info(f"Total messages in state: {len(messages)}")
+
+    # Filter messages to extract only user-facing content
+    # Remove ToolMessage (backend operations) and keep only HumanMessage + AIMessage content
+    filtered_messages = []
+    for msg in messages:
+        # Skip ToolMessage (tool results - backend operations)
+        if isinstance(msg, ToolMessage):
+            continue
+        # For AIMessage, only include if it has actual content (not just tool_calls)
+        if isinstance(msg, AIMessage):
+            if msg.content and msg.content.strip():
+                filtered_messages.append(msg)
+        else:
+            # Keep HumanMessage and other message types
+            filtered_messages.append(msg)
+
+    logger.info(f"Filtered messages (user-facing): {len(filtered_messages)}")
+
+    # Build conversation summary for LLM
+    conversation_summary = ""
+    if filtered_messages:
+        # Get last few messages for context (max 10)
+        recent_messages = filtered_messages[-10:]
+        for msg in recent_messages:
+            if isinstance(msg, HumanMessage):
+                role = "User"
+            elif isinstance(msg, AIMessage):
+                role = "AI"
+            else:
+                role = "Unknown"
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            conversation_summary += f"{role}: {content}\n\n"
+
+    # Build form instructions if needed
+    form_instructions = ""
     if send_form:
-        send_form_message = await add_send_form_message(
-            last_message=last_message
-        )
-        
-        # Set is_onboarded = True
+        # Check which fields are missing
+        missing_fields = []
+        if not customer_data.get("name"):
+            missing_fields.append("- Nama")
+        if not customer_data.get("domicile"):
+            missing_fields.append("- Domisili/kota")
+        if not customer_data.get("vehicle_alias"):
+            missing_fields.append("- Jenis kendaraan (mobil, motor, truk, dll)")
+        if not customer_data.get("unit_qty") or customer_data.get("unit_qty") == 0:
+            missing_fields.append("- Jumlah unit")
+        if not customer_data.get("is_b2b"):
+            missing_fields.append("- Kebutuhan (pribadi, perusahaan, operasional, dll)")
+
+        if missing_fields:
+            form_instructions = f"""
+
+TAMBAHKAN FORM DATA UNTUK PESAN KEPADA USER (1 Form untuk 1 Bubble Chat):
+Supaya Hana bisa kasih penawaran yang lebih pas, tolong lengkapi data berikut:
+{chr(10).join(missing_fields)}
+
+Contoh format yang bisa digunakan:
+"Nama: Budi
+Domisili: Jakarta
+Jenis kendaraan: Mobil
+Jumlah unit: 2
+Kebutuhan: Pribadi"
+"""
+
+    # Build system prompt for LLM
+    system_prompt = f"""{HANA_PERSONA}
+
+TASK:
+Kamu adalah Final Message Generator untuk Hana AI dari ORIN GPS Tracker.
+Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
+
+CUSTOMER PROFILE:
+- Nama: {customer_name}
+- Domisili: {customer_data.get('domicile', 'Belum diketahui')}
+- Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
+- Jumlah Unit: {customer_data.get('unit_qty', 0)}
+- B2B: {customer_data.get('is_b2b', False)}
+{form_instructions}
+
+CONVERSATION HISTORY:
+{conversation_summary if conversation_summary else "(No conversation history)"}
+
+CONTEXT:
+- Percakapan ini mungkin melibatkan berbagai tool calls (database operations, product searches, dll)
+- JANGAN sebutkan operasi backend seperti "database", "tool", "API", "system", dll
+- Fokus pada apa yang user dapatkan/tahu
+- Gunakan bahasa yang natural dan ramah
+
+RULES FOR MULTI-BUBBLE RESPONSE:
+1. Split response into multiple bubbles when:
+   - Greeting + separate answer
+   - Answer + follow-up question
+   - Long information that's better broken down
+   - Acknowledgment + action/next step
+2. Each bubble should be complete and meaningful on its own
+3. Use emoji naturally in appropriate bubbles
+4. Be conversational and friendly
+5. DON'T mention technical/backend operations
+6. Personalized with customer name when appropriate"""
+
+    # Use LLM with structured output to generate multi-bubble response
+    final_messages_llm = llm.with_structured_output(FinalMessagesResponse)
+    result = final_messages_llm.invoke([SystemMessage(content=system_prompt)])
+
+    logger.info(f"Generated {len(result.messages)} message bubbles")
+    logger.info(f"Reasoning: {result.reasoning}")
+
+    # Set is_onboarded = True if send_form was triggered
+    if send_form and customer_id:
         try:
             async with AsyncSessionLocal() as db:
-                # Update human_takeover flag
                 stmt = update(Customer).where(Customer.id == customer_id).values(is_onboarded=True)
                 await db.execute(stmt)
                 await db.commit()
-
                 logger.info(f"Is Onboarded SET to TRUE for customer_id: {customer_id}")
         except Exception as e:
             logger.error(f"Failed to set is_onboarded: {str(e)}")
-            
-        return {
-            "messages": [AIMessage(content=send_form_message)]
-        }
-    
-    return {}
+
+    # Return state with final_messages
+    # Note: We're not returning messages because the final bubbles should be fetched from final_messages field
+    logger.info("EXIT: node_final_message")
+    logger.info("=" * 50)
+
+    return {
+        "final_messages": result.messages
+    }
 
 async def node_human_takeover(state: AgentState):
-    messages = state.get('messages', [])
     customer_id = state.get('customer_id')
     customer_data = state.get('customer_data', {})
-    step = state.get('step', '')
-    
+
     customer_name = customer_data.get('name') or state.get('contact_name')
-    
+
     # Set human_takeover flag in database
     if customer_id:
         await set_human_takeover_flag(customer_id)
@@ -451,7 +542,8 @@ async def node_human_takeover(state: AgentState):
     logger.info(f"EXIT: node_quality_check -> human takeover")
     logger.info("=" * 50)
 
-    # Return state with the handover message
+    # Return state with the handover message and final_messages
     return {
-        "messages": [AIMessage(content=handover_message)]
+        "messages": [AIMessage(content=handover_message)],
+        "final_messages": [handover_message]  # Set final_messages for consistent response format
     }

@@ -5,5 +5,4 @@
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message
 -Knowledge tentang ORIN
 -Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION
--Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing
--...
+-Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)

@@ -68,7 +68,8 @@ dependencies = [
     "langgraph-checkpoint-sqlite (>=3.0.1,<4.0.0)",
     "langchain-mcp-adapters (>=0.2.1,<0.3.0)",
     "sqlalchemy (>=2.0.46,<3.0.0)",
-    "aiomysql (>=0.3.2,<0.4.0)"
+    "aiomysql (>=0.3.2,<0.4.0)",
+    "alembic (>=1.18.4,<2.0.0)"
 ]
 
 # Development/Testing dependencies (e.g., for 'pip install -e .[dev]')

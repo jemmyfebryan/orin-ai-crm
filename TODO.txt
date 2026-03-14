@@ -1,5 +1,6 @@
 -Tracking product_inquiries, bertanya lebih interaktif
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
+-Ini kenapa ecommerce node gapernah mau pakai create_inquiry_product tool
 -Sales node -> Tawarkan meeting, jika tidak mau, share link e-commerce dan alihkan customer ke node Ecommerce
 -Tambah kolom (intent_route) -> default, ecommerce, sales agar route bisa flexible.
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message

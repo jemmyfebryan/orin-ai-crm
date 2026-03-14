@@ -703,7 +703,7 @@ async def create_product_inquiry(
     unit_qty: int
 ) -> dict:
     """
-    Create a product inquiry record for tracking.
+    Create a product inquiry record for tracking. Always call this tool when user ask about the GPS product.
 
     Use this tool when:
     - Customer asks about products

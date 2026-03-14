@@ -4,7 +4,7 @@
 # Variables
 # ----------------------------
 IMAGE_NAME=orinai-crm-app
-PORT=8090
+PORT=8081
 CONTAINER_NAME=orinai-crm-container
 USE_DOCKER ?= false
 APP_NAME=orinai-crm-app

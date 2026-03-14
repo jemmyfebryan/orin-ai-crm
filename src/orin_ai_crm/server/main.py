@@ -676,6 +676,9 @@ async def freshchat_agent_endpoint(
     - Header: Authorization: Bearer <FRESHCHAT_AGENT_BEARER_TOKEN>
     """
     try:
+        conversation_link = req.conversation_id  # temporary use link
+        conversation_id = conversation_link.split("/")[-1]
+        
         # Add background task to process the chat
         background_tasks.add_task(
             process_freshchat_agent_task,
@@ -684,11 +687,11 @@ async def freshchat_agent_endpoint(
             message=req.message,
             contact_name=req.contact_name,
             is_new_chat=req.is_new_chat,
-            conversation_id=req.conversation_id,
+            conversation_id=conversation_id,
             user_id=req.user_id
         )
 
-        logger.info(f"Background task queued for conversation {req.conversation_id}")
+        logger.info(f"Background task queued for conversation {conversation_id}")
 
         return FreshchatAgentResponse(
             status="accepted",
@@ -701,8 +704,11 @@ async def freshchat_agent_endpoint(
         logger.error(f"Error in freshchat-agent endpoint: {str(e)}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Terjadi kesalahan pada server: {str(e)}")
-
+        raise FreshchatAgentResponse(
+            status="error",
+            message=f"Chat request error: {str(e)}"
+        )
+        
 # --- ENDPOINT RESET HISTORY (UNTUK TESTING/DEV) ---
 @app.post("/reset-history", response_model=ResetHistoryResponse)
 async def reset_history_endpoint(req: ResetHistoryRequest):

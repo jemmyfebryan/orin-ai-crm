@@ -166,8 +166,9 @@ async def update_customer_data(
 
 
 # List of customer management tools for easy import
+# NOTE: get_customer_profile is NOT included here because it's called directly
+# in agent_node before the LLM agent runs. This prevents infinite loops.
 CUSTOMER_MANAGEMENT_TOOLS = [
-    get_customer_profile,
     update_customer_data,
 ]
 

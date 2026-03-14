@@ -842,24 +842,26 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "HANA AI WhatsApp Chatbot",
-        "version": "2.0 - Agentic Architecture",
+        "version": "2.1 - Agentic Architecture (Optimized)",
         "endpoints": {
             "chat": "/chat (Legacy - Intent Classification)",
-            "chat-agent": "/chat-agent (Agentic with 27 tools using LangGraph create_react_agent)",
+            "chat-agent": "/chat-agent (Agentic with max_iterations=25)",
             "freshchat-agent": "/freshchat-agent (Freshchat integration with BackgroundTasks)",
             "reset-history": "/reset-history",
             "reset-products": "/reset-products",
             "health": "/health"
         },
         "agent_tools": {
-            "total": 27,
+            "total": 18,
+            "active": 15,  # Tools assigned to agents (support tools available but not assigned)
             "categories": [
-                "Customer Management (3)",
-                "Profiling (7)",
+                "Customer Management (1)",
+                "Profiling (3)",
                 "Sales & Meeting (6)",
-                "Product & E-commerce (8)",
-                "Support & Complaints (3)"
-            ]
+                "Product & E-commerce (5)",
+                "Support & Complaints (3) - available but not assigned to specific agent"
+            ],
+            "note": "get_customer_profile is invoked directly in agent_node before LLM runs to prevent infinite loops"
         },
         "freshchat_config": {
             "configured": bool(FRESHCHAT_API_TOKEN and FRESHCHAT_URL and AGENT_ID_BOT),

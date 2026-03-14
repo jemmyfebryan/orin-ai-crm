@@ -7,6 +7,8 @@ the agent loop (Thought → Action → Observation) automatically.
 Architecture:
 1. agent_entry_handler: Ensures customer_id exists
 2. agent_node: Main profiling agent with profiling and customer tools
+   - IMPORTANT: get_customer_profile is called DIRECTLY here (not as a tool)
+   - This prevents infinite loops and guarantees customer data is loaded
 3. route_profiling_router: Decides next route based on profiling completeness
 4. sales_node: Sales agent with meeting tools (for B2B or >5 units)
 5. ecommerce_node: Ecommerce agent with product tools (for B2C or <=5 units)
@@ -22,6 +24,12 @@ Key Benefits:
 - More flexible than rigid intent classification
 - Better handles complex user requests
 - Maintains conversation context and flow
+- max_iterations=25 prevents infinite loops (~10-12 tool calls max)
+
+IMPORTANT ARCHITECTURAL CHANGE:
+- get_customer_profile is NOT in the tools list
+- It's called directly in agent_node before the LLM runs
+- This ensures: (1) Single execution, (2) Fresh data from DB, (3) No loops
 """
 
 import os
@@ -93,8 +101,7 @@ ATURAN PRODUK GPS:
 KEMAMPUAN TOOL:
 Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi menjadi:
 
-1. CUSTOMER MANAGEMENT (2 tools):
-   - get_customer_profile: Get customer profile data
+1. CUSTOMER MANAGEMENT (1 tool):
    - update_customer_data: Update specific customer fields
 
 2. PROFILING (4 tools):
@@ -109,8 +116,11 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - get_ecommerce_links: Get e-commerce purchase links
    - create_product_inquiry: Create product inquiry record
 
+DATA CUSTOMER:
+Data profil customer sudah dimuat otomatis sebelum kamu memulai. Cek informasi yang tersedia di context.
+
 Alur Percakapan:
-1. Mulai dengan get_customer_profile untuk identify customer
+1. Jawab pertanyaan customer dengan tools yang sudah tersedia
 2. Pakai tool update_customer_data setiap ada data customer profile baru dari user seperti nama, domisili, jenis kendaraan, jumlah unit kendaraan
 3. Pakai tool check_profiling_completeness untuk mengecek apakah profil user sudah lengkap atau belum
 
@@ -289,17 +299,36 @@ async def agent_node(state: AgentState) -> Dict:
     """
     from langchain.agents import create_agent
 
+    logger.info("ENTER: agent_node")
+
+    # === CRITICAL: Load customer profile FIRST (before LLM) ===
+    customer_id = state.get('customer_id')
+    if customer_id:
+        try:
+            profile_result = await get_customer_profile.ainvoke({'state': state})
+            logger.info(f"Customer profile loaded: {profile_result}")
+
+            # Update state with fresh customer data from database
+            if 'customer_data' in state:
+                state['customer_data'].update(profile_result)
+            else:
+                state['customer_data'] = profile_result
+
+            logger.info(f"State updated with customer data: {state['customer_data']}")
+        except Exception as e:
+            logger.error(f"Failed to load customer profile: {e}")
+
     # Get system prompt from state (built by agent_entry_handler)
     system_prompt = HANA_AGENT_SYSTEM_PROMPT
 
-    logger.info("ENTER: agent_node")
-
     # Create agent with dynamic system prompt and our AgentState schema
+    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=AGENT_TOOLS,
         system_prompt=system_prompt,
-        state_schema=AgentState  # Pass our custom AgentState
+        state_schema=AgentState,  # Pass our custom AgentState
+        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state
@@ -343,11 +372,13 @@ async def sales_node(state: AgentState) -> Dict:
     logger.info("ENTER: sales_node")
 
     # Create sales agent with sales tools
+    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=SALES_MEETING_TOOLS,
         system_prompt=SALES_AGENT_SYSTEM_PROMPT,
-        state_schema=AgentState
+        state_schema=AgentState,
+        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state
@@ -367,11 +398,13 @@ async def ecommerce_node(state: AgentState) -> Dict:
     logger.info("ENTER: ecommerce_node")
 
     # Create ecommerce agent with product tools
+    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=PRODUCT_ECOMMERCE_TOOLS,
         system_prompt=ECOMMERCE_AGENT_SYSTEM_PROMPT,
-        state_schema=AgentState
+        state_schema=AgentState,
+        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state

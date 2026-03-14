@@ -101,5 +101,8 @@ testpaths = ["tests"]
 # Add any default arguments for pytest runs
 addopts = "--strict-markers --cov=src --cov-report=term-missing"
 
+[tool.poetry]
+package-mode = false
+
 [tool.poetry.dependencies]
 python = "3.12.3"

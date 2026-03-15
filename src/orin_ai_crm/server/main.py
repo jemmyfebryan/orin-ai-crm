@@ -916,7 +916,8 @@ async def get_freshchat_user_details(user_id: str) -> dict:
 
 def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     """
-    Verify Freshchat webhook signature using RSA-SHA256.
+    Verify Freshchat webhook signature.
+    Tries RSA-SHA256 first, then HMAC-SHA256 as fallback.
 
     Args:
         payload: Raw request body (bytes)
@@ -925,55 +926,86 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     Returns:
         True if signature is valid, False otherwise
     """
-    try:
-        from cryptography.hazmat.primitives import hashes, serialization
-        from cryptography.hazmat.primitives.asymmetric import padding
-        from cryptography.hazmat.backends import default_backend
-        import base64
-        import re
+    import hmac
+    import hashlib
+    import base64
+    import re
 
-        # Decode the Base64 signature
-        signature = base64.b64decode(signature_b64)
+    # Try HMAC-SHA256 first (more common for webhooks)
+    try_hmac = True
+    try_rsa = True
 
-        # Load the public key from environment variable
-        public_key_str = FRESHCHAT_WEBHOOK_TOKEN.strip()
+    # Method 1: HMAC-SHA256 (using token as secret key)
+    if try_hmac:
+        try:
+            secret = FRESHCHAT_WEBHOOK_TOKEN.strip().encode('utf-8')
+            expected_signature = hmac.new(secret, payload, hashlib.sha256).digest()
+            expected_signature_b64 = base64.b64encode(expected_signature).decode('utf-8')
 
-        # If the key already has PEM headers, use it directly
-        if "-----BEGIN" in public_key_str and "-----END" in public_key_str:
-            # Already in PEM format, use as-is
-            pem_key = public_key_str
-        else:
-            # Raw base64 key, need to wrap it
-            # Remove any whitespace/newlines
-            clean_key = re.sub(r'\s+', '', public_key_str)
-            # Wrap in PEM format
-            pem_key = f"-----BEGIN PUBLIC KEY-----\n{clean_key}\n-----END PUBLIC KEY-----"
+            # Compare with constant-time comparison
+            if hmac.compare_digest(expected_signature_b64, signature_b64):
+                logger.info("HMAC-SHA256 signature verification successful")
+                return True
 
-        # Load the public key
-        public_key = serialization.load_pem_public_key(
-            pem_key.encode(),
-            backend=default_backend()
-        )
+            logger.debug(f"HMAC verification failed. Expected: {expected_signature_b64[:50]}..., Got: {signature_b64[:50]}...")
+        except Exception as e:
+            logger.debug(f"HMAC verification attempt failed: {type(e).__name__}: {str(e)}")
 
-        # Verify the signature
-        public_key.verify(
-            signature,
-            payload,
-            padding.PKCS1v15(),
-            hashes.SHA256()
-        )
+    # Method 2: RSA-SHA256 (using token as public key)
+    if try_rsa:
+        try:
+            from cryptography.hazmat.primitives import hashes, serialization
+            from cryptography.hazmat.primitives.asymmetric import padding
+            from cryptography.hazmat.backends import default_backend
 
-        logger.info("Signature verification successful")
-        return True
+            # Decode the Base64 signature
+            signature = base64.b64decode(signature_b64)
 
-    except Exception as e:
-        logger.error(f"Signature verification failed: {str(e)}")
-        logger.error(f"Public key (first 50 chars): {FRESHCHAT_WEBHOOK_TOKEN[:50] if FRESHCHAT_WEBHOOK_TOKEN else 'NOT SET'}")
-        logger.error(f"Signature header (first 100 chars): {signature_b64[:100]}")
-        logger.error(f"Payload length: {len(payload)} bytes")
-        logger.error(f"Payload (first 500 chars): {payload[:500]}")
-        logger.error(f"Payload (last 100 chars): {payload[-100:]}")
-        return False
+            # Load the public key from environment variable
+            public_key_str = FRESHCHAT_WEBHOOK_TOKEN.strip()
+
+            # If the key already has PEM headers, use it directly
+            if "-----BEGIN" in public_key_str and "-----END" in public_key_str:
+                # Already in PEM format, use as-is
+                pem_key = public_key_str
+            else:
+                # Raw base64 key, need to wrap it
+                # Remove any whitespace/newlines
+                clean_key = re.sub(r'\s+', '', public_key_str)
+                # Wrap in PEM format
+                pem_key = f"-----BEGIN PUBLIC KEY-----\n{clean_key}\n-----END PUBLIC KEY-----"
+
+            # Load the public key
+            public_key = serialization.load_pem_public_key(
+                pem_key.encode(),
+                backend=default_backend()
+            )
+
+            # Verify the signature
+            public_key.verify(
+                signature,
+                payload,
+                padding.PKCS1v15(),
+                hashes.SHA256()
+            )
+
+            logger.info("RSA-SHA256 signature verification successful")
+            return True
+
+        except Exception as e:
+            logger.debug(f"RSA verification attempt failed: {type(e).__name__}: {str(e)}")
+
+    # If we get here, both methods failed
+    import traceback
+    logger.error(f"Signature verification failed with both methods")
+    logger.error(f"Token/Webhook Secret (first 50 chars): {FRESHCHAT_WEBHOOK_TOKEN[:50] if FRESHCHAT_WEBHOOK_TOKEN else 'NOT SET'}")
+    logger.error(f"Signature header length: {len(signature_b64)}")
+    logger.error(f"Signature header: {signature_b64[:200] if len(signature_b64) > 200 else signature_b64}")
+    logger.error(f"Payload length: {len(payload)} bytes")
+    logger.error(f"Payload SHA256 hash: {hashlib.sha256(payload).hexdigest()}")
+    logger.error(f"Payload (first 500 chars): {payload[:500]}")
+    logger.error(f"Payload (last 100 chars): {payload[-100:]}")
+    return False
 
 
 class FreshchatWebhookResponse(BaseModel):

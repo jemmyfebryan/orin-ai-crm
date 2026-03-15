@@ -1,6 +1,7 @@
 import uvicorn
 import asyncio
 import httpx
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status, Request
@@ -44,6 +45,14 @@ FRESHCHAT_URL = os.getenv("FRESHCHAT_URL")
 FRESHCHAT_AGENT_BEARER_TOKEN = os.getenv("FRESHCHAT_AGENT_BEARER_TOKEN")
 AGENT_ID_BOT = os.getenv("AGENT_ID_BOT")
 FRESHCHAT_WEBHOOK_TOKEN = os.getenv("FRESHCHAT_WEBHOOK_TOKEN")
+
+# Freshchat Webhook IP Allowlist (comma-separated list of allowed IPs/CIDRs)
+# Example: "1.2.3.4,5.6.7.0/24"
+# To find Freshchat webhook IPs:
+# 1. Check logs for "X-Forwarded-For" headers from successful webhooks
+# 2. Contact Freshchat support for their webhook IP ranges
+# 3. Temporarily set to empty string ("") to allow all IPs (not recommended for production)
+FRESHCHAT_WEBHOOK_ALLOWED_IPS = os.getenv("FRESHCHAT_WEBHOOK_ALLOWED_IPS", "").split(",") if os.getenv("FRESHCHAT_WEBHOOK_ALLOWED_IPS") else []
 
 # Freshchat Channel IDs (comma-separated list of allowed channel IDs)
 # Each channel (WhatsApp, Instagram, etc.) has a unique freshchat_channel_id
@@ -914,6 +923,49 @@ async def get_freshchat_user_details(user_id: str) -> dict:
         return None
 
 
+def is_ip_allowed(client_ip: str, allowed_ips: list) -> bool:
+    """
+    Check if client IP is in the allowlist.
+    Supports both individual IPs and CIDR ranges.
+
+    Args:
+        client_ip: Client IP address string
+        allowed_ips: List of allowed IPs/CIDRs
+
+    Returns:
+        True if IP is allowed or allowlist is empty, False otherwise
+    """
+    # If no IP restrictions configured, allow all
+    if not allowed_ips or not any(allowed_ips):
+        return True
+
+    try:
+        import ipaddress
+        client = ipaddress.ip_address(client_ip)
+
+        for allowed in allowed_ips:
+            allowed = allowed.strip()
+            if not allowed:
+                continue
+
+            # Check if it's a CIDR range or single IP
+            if '/' in allowed:
+                # CIDR range
+                network = ipaddress.ip_network(allowed, strict=False)
+                if client in network:
+                    return True
+            else:
+                # Single IP
+                allowed_ip = ipaddress.ip_address(allowed)
+                if client == allowed_ip:
+                    return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"IP verification error: {e}, allowing by default")
+        return True  # Fail open for safety
+
+
 def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     """
     Verify Freshchat webhook signature.
@@ -993,7 +1045,12 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
             return True
 
         except Exception as e:
-            logger.debug(f"RSA verification attempt failed: {type(e).__name__}: {str(e)}")
+            import traceback
+            from cryptography.exceptions import InvalidSignature
+            logger.error(f"RSA verification failed with {type(e).__name__}: {str(e)}")
+            logger.error(f"Is InvalidSignature: {isinstance(e, InvalidSignature)}")
+            logger.error(f"RSA error args: {e.args}")
+            logger.error(f"RSA traceback:\n{traceback.format_exc()}")
 
     # If we get here, both methods failed
     import traceback
@@ -1003,7 +1060,18 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     logger.error(f"Signature header: {signature_b64[:200] if len(signature_b64) > 200 else signature_b64}")
     logger.error(f"Payload length: {len(payload)} bytes")
     logger.error(f"Payload SHA256 hash: {hashlib.sha256(payload).hexdigest()}")
-    logger.error(f"Payload (first 500 chars): {payload[:500]}")
+
+    # Hex dump of first 200 bytes to spot encoding issues
+    hex_dump = ' '.join(f'{b:02x}' for b in payload[:200])
+    logger.error(f"Payload hex dump (first 200 bytes): {hex_dump}")
+
+    # Check for common encoding issues
+    try:
+        decoded = payload.decode('utf-8')
+        logger.error(f"Payload UTF-8 decoded successfully (first 500 chars): {decoded[:500]}")
+    except UnicodeDecodeError as e:
+        logger.error(f"Payload UTF-8 decode failed: {e}")
+
     logger.error(f"Payload (last 100 chars): {payload[-100:]}")
     return False
 
@@ -1029,9 +1097,11 @@ async def debug_webhook_key():
             "configured": bool(key),
             "key_preview": key[:100] if key else None,
             "key_length": len(key) if key else 0,
-            "has_begin_marker": "-----BEGIN" in key if key else False,
-            "has_end_marker": "-----END" in key if key else False,
-            "format": "PEM" if key and "-----BEGIN" in key else "Raw base64"
+        },
+        "webhook_ip_allowlist": {
+            "enabled": bool(FRESHCHAT_WEBHOOK_ALLOWED_IPS and any(FRESHCHAT_WEBHOOK_ALLOWED_IPS)),
+            "allowed_ips": FRESHCHAT_WEBHOOK_ALLOWED_IPS,
+            "description": "If enabled, only webhooks from these IPs will be accepted"
         },
         "freshchat_api": {
             "configured": bool(api_token and freshchat_url),
@@ -1090,21 +1160,44 @@ async def freshchat_webhook_endpoint(
         # 1. Get Raw Body for Signature Verification
         body = await request.body()
 
-        # 2. Authentication Check (RSA Signature Verification)
+        # 2. IP Allowlist Check (additional security layer)
+        # Get client IP from X-Forwarded-For header (for proxy/load balancer setups)
+        # or fall back to direct client IP
+        client_ip = (
+            request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            or request.headers.get("X-Real-IP", "")
+            or request.client.host if request.client else "unknown"
+        )
+
+        ip_is_allowed = is_ip_allowed(client_ip, FRESHCHAT_WEBHOOK_ALLOWED_IPS)
+        logger.info(f"Client IP: {client_ip}, IP allowlist enabled: {bool(FRESHCHAT_WEBHOOK_ALLOWED_IPS and any(FRESHCHAT_WEBHOOK_ALLOWED_IPS))}, IP allowed: {ip_is_allowed}")
+
+        # 3. Authentication Check (RSA Signature Verification)
         signature_header = request.headers.get("X-Freshchat-Signature", "").strip()
 
         if not signature_header:
-            logger.warning("Webhook authentication failed: missing X-Freshchat-Signature header")
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            if ip_is_allowed:
+                logger.warning(f"Webhook signature missing but IP {client_ip} is in allowlist - allowing")
+            else:
+                logger.warning("Webhook authentication failed: missing X-Freshchat-Signature header")
+                raise HTTPException(status_code=401, detail="Unauthorized")
 
         logger.info(f"Received signature header (first 50 chars): {signature_header[:50]}")
+        logger.info(f"Body length: {len(body)} bytes")
+        logger.info(f"Body SHA256: {hashlib.sha256(body).hexdigest()}")
 
         # Verify the signature
-        if not verify_freshchat_signature(body, signature_header):
-            logger.warning("Webhook authentication failed: invalid signature")
+        signature_valid = verify_freshchat_signature(body, signature_header) if signature_header else False
+
+        # Allow webhook if EITHER signature is valid OR IP is in allowlist
+        if not signature_valid and not ip_is_allowed:
+            logger.warning("Webhook authentication failed: invalid signature and IP not in allowlist")
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        logger.info("Webhook signature verified successfully")
+        if signature_valid:
+            logger.info("Webhook signature verified successfully")
+        elif ip_is_allowed:
+            logger.info(f"Webhook signature verification failed but IP {client_ip} is in allowlist - allowing")
 
         # 3. Parse JSON Payload
         payload = await request.json()

@@ -996,12 +996,9 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
 
             # Compare with constant-time comparison
             if hmac.compare_digest(expected_signature_b64, signature_b64):
-                logger.info("HMAC-SHA256 signature verification successful")
                 return True
-
-            logger.debug(f"HMAC verification failed. Expected: {expected_signature_b64[:50]}..., Got: {signature_b64[:50]}...")
-        except Exception as e:
-            logger.debug(f"HMAC verification attempt failed: {type(e).__name__}: {str(e)}")
+        except Exception:
+            pass  # Silently try next method
 
     # Method 2: RSA-SHA256 (using token as public key)
     if try_rsa:
@@ -1041,38 +1038,12 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
                 hashes.SHA256()
             )
 
-            logger.info("RSA-SHA256 signature verification successful")
             return True
 
-        except Exception as e:
-            import traceback
-            from cryptography.exceptions import InvalidSignature
-            logger.error(f"RSA verification failed with {type(e).__name__}: {str(e)}")
-            logger.error(f"Is InvalidSignature: {isinstance(e, InvalidSignature)}")
-            logger.error(f"RSA error args: {e.args}")
-            logger.error(f"RSA traceback:\n{traceback.format_exc()}")
+        except Exception:
+            pass  # Silently fail
 
     # If we get here, both methods failed
-    import traceback
-    logger.error(f"Signature verification failed with both methods")
-    logger.error(f"Token/Webhook Secret (first 50 chars): {FRESHCHAT_WEBHOOK_TOKEN[:50] if FRESHCHAT_WEBHOOK_TOKEN else 'NOT SET'}")
-    logger.error(f"Signature header length: {len(signature_b64)}")
-    logger.error(f"Signature header: {signature_b64[:200] if len(signature_b64) > 200 else signature_b64}")
-    logger.error(f"Payload length: {len(payload)} bytes")
-    logger.error(f"Payload SHA256 hash: {hashlib.sha256(payload).hexdigest()}")
-
-    # Hex dump of first 200 bytes to spot encoding issues
-    hex_dump = ' '.join(f'{b:02x}' for b in payload[:200])
-    logger.error(f"Payload hex dump (first 200 bytes): {hex_dump}")
-
-    # Check for common encoding issues
-    try:
-        decoded = payload.decode('utf-8')
-        logger.error(f"Payload UTF-8 decoded successfully (first 500 chars): {decoded[:500]}")
-    except UnicodeDecodeError as e:
-        logger.error(f"Payload UTF-8 decode failed: {e}")
-
-    logger.error(f"Payload (last 100 chars): {payload[-100:]}")
     return False
 
 
@@ -1170,21 +1141,14 @@ async def freshchat_webhook_endpoint(
         )
 
         ip_is_allowed = is_ip_allowed(client_ip, FRESHCHAT_WEBHOOK_ALLOWED_IPS)
-        logger.info(f"Client IP: {client_ip}, IP allowlist enabled: {bool(FRESHCHAT_WEBHOOK_ALLOWED_IPS and any(FRESHCHAT_WEBHOOK_ALLOWED_IPS))}, IP allowed: {ip_is_allowed}")
 
         # 3. Authentication Check (RSA Signature Verification)
         signature_header = request.headers.get("X-Freshchat-Signature", "").strip()
 
         if not signature_header:
-            if ip_is_allowed:
-                logger.warning(f"Webhook signature missing but IP {client_ip} is in allowlist - allowing")
-            else:
+            if not ip_is_allowed:
                 logger.warning("Webhook authentication failed: missing X-Freshchat-Signature header")
                 raise HTTPException(status_code=401, detail="Unauthorized")
-
-        logger.info(f"Received signature header (first 50 chars): {signature_header[:50]}")
-        logger.info(f"Body length: {len(body)} bytes")
-        logger.info(f"Body SHA256: {hashlib.sha256(body).hexdigest()}")
 
         # Verify the signature
         signature_valid = verify_freshchat_signature(body, signature_header) if signature_header else False
@@ -1194,19 +1158,8 @@ async def freshchat_webhook_endpoint(
             logger.warning("Webhook authentication failed: invalid signature and IP not in allowlist")
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        if signature_valid:
-            logger.info("Webhook signature verified successfully")
-        elif ip_is_allowed:
-            logger.info(f"Webhook signature verification failed but IP {client_ip} is in allowlist - allowing")
-
         # 3. Parse JSON Payload
         payload = await request.json()
-
-        # DEBUG: Log the entire webhook payload to understand the structure
-        logger.info(f"========== WEBHOOK PAYLOAD START ==========")
-        logger.info(f"Full payload: {payload}")
-        logger.info(f"Payload keys: {list(payload.keys())}")
-        logger.info(f"========== WEBHOOK PAYLOAD END ==========")
 
         # 4. Anti-Loop Mechanism (CRITICAL)
         # Extract actor_type to prevent processing our own AI's messages
@@ -1215,14 +1168,12 @@ async def freshchat_webhook_endpoint(
         actor_type = actor.get("actor_type", "")
 
         if actor_type != "user":
-            logger.info(f"Ignoring non-user message: actor_type={actor_type}")
             # Still return 200 OK to Freshchat (don't retry)
             return FreshchatWebhookResponse(status="success")
 
         # 5. Action Filter (only process message_create)
         action = payload.get("action", "")
         if action != "message_create":
-            logger.info(f"Ignoring non-message action: action={action}")
             return FreshchatWebhookResponse(status="success")
 
         # 6. Safe Payload Extraction
@@ -1237,11 +1188,8 @@ async def freshchat_webhook_endpoint(
         # Freshchat uses freshchat_channel_id to identify the channel (WhatsApp, Instagram, etc.)
         freshchat_channel_id = message.get("freshchat_channel_id", "")
 
-        logger.info(f"Detected freshchat_channel_id: '{freshchat_channel_id}'")
-
         # Check if this channel ID is allowed
         if FRESHCHAT_ALLOWED_CHANNEL_IDS and freshchat_channel_id not in FRESHCHAT_ALLOWED_CHANNEL_IDS:
-            logger.info(f"Ignoring message from non-allowed channel: freshchat_channel_id='{freshchat_channel_id}'. Allowed: {FRESHCHAT_ALLOWED_CHANNEL_IDS}. This AI CRM only responds to configured channels.")
             return FreshchatWebhookResponse(status="success")
 
         if not freshchat_channel_id:
@@ -1258,9 +1206,6 @@ async def freshchat_webhook_endpoint(
         # Extract user_id from Freshchat
         user_id = message.get("user_id", "")
 
-        # Log extracted data
-        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, user_id={user_id}, message={message_content[:50] if message_content else 'empty'}")
-
         # 7. Validation Checks
         if not conversation_id or not message_content:
             logger.warning(f"Incomplete webhook payload: conversation_id={conversation_id}, has_message={bool(message_content)}")
@@ -1275,8 +1220,6 @@ async def freshchat_webhook_endpoint(
             message_content=message_content,
             conversation_id=conversation_id
         )
-
-        logger.info(f"Background task queued for webhook: conversation={conversation_id}")
 
         # 11. Instant Response (CRITICAL - must be within 3 seconds)
         return FreshchatWebhookResponse(status="success")

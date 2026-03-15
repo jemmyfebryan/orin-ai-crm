@@ -2,7 +2,7 @@ import uvicorn
 import asyncio
 import httpx
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
@@ -39,6 +39,13 @@ FRESHCHAT_API_TOKEN = os.getenv("FRESHCHAT_API_TOKEN")
 FRESHCHAT_URL = os.getenv("FRESHCHAT_URL")
 FRESHCHAT_AGENT_BEARER_TOKEN = os.getenv("FRESHCHAT_AGENT_BEARER_TOKEN")
 AGENT_ID_BOT = os.getenv("AGENT_ID_BOT")
+FRESHCHAT_WEBHOOK_TOKEN = os.getenv("FRESHCHAT_WEBHOOK_TOKEN")
+
+# Allowlist for beta testing (only these numbers can use the webhook)
+ALLOWED_NUMBERS = [
+    "+628123456789",
+    "+6285850434383",
+]
 
 # Security scheme for Bearer token authentication
 security = HTTPBearer()
@@ -862,6 +869,151 @@ async def reset_products_endpoint():
             errors=[str(e)]
         )
 
+# --- FRESHCHAT WEBHOOK ENDPOINT (Production-Ready) ---
+
+class FreshchatWebhookResponse(BaseModel):
+    status: str
+
+@app.post("/freshchat-webhook", response_model=FreshchatWebhookResponse)
+async def freshchat_webhook_endpoint(
+    request: Request,
+    background_tasks: BackgroundTasks
+):
+    """
+    Production-ready Freshchat webhook endpoint.
+
+    This endpoint:
+    - Accepts webhooks from Freshchat platform
+    - Validates authentication token
+    - Implements anti-loop mechanism (only processes user messages)
+    - Filters by allowlist for beta testing
+    - Responds instantly with 200 OK (within 3-second timeout)
+    - Processes all heavy lifting in background tasks
+
+    Authentication:
+    - Header: X-Freshchat-Token: <FRESHCHAT_WEBHOOK_TOKEN>
+
+    Anti-Loop Mechanism:
+    - Only processes messages where actor_type == "user"
+    - Safely aborts if actor_type is "agent" or "bot"
+
+    Allowlist Filter:
+    - Only processes phone numbers in ALLOWED_NUMBERS
+    - Logs and aborts for non-allowed numbers
+    """
+    try:
+        # 1. Authentication Check (Critical - must be first)
+        auth_token = request.headers.get("X-Freshchat-Token", "")
+
+        if not auth_token or auth_token != FRESHCHAT_WEBHOOK_TOKEN:
+            logger.warning(f"Webhook authentication failed: token={'present' if auth_token else 'missing'}")
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        # 2. Parse JSON Payload
+        payload = await request.json()
+        logger.info(f"Webhook payload received: {payload.get('actor_type', 'unknown')} actor")
+
+        # 3. Anti-Loop Mechanism (CRITICAL)
+        # Extract actor_type to prevent processing our own AI's messages
+        actor_type = payload.get("actor_type", "")
+
+        if actor_type != "user":
+            logger.info(f"Ignoring non-user message: actor_type={actor_type}")
+            # Still return 200 OK to Freshchat (don't retry)
+            return FreshchatWebhookResponse(status="success")
+
+        # 4. Safe Payload Extraction
+        # Use .get() to prevent KeyError on malformed payloads
+        data = payload.get("data", {})
+        message = data.get("message", {})
+        user = data.get("user", {})
+
+        # Extract required fields with safe defaults
+        conversation_id = message.get("conversation_id", "")
+        phone_number = user.get("phone", "")
+
+        # Extract message content from message_parts array
+        message_parts = message.get("message_parts", [])
+        message_content = ""
+        if message_parts and len(message_parts) > 0:
+            message_content = message_parts[0].get("text", {}).get("content", "")
+
+        # Log extracted data
+        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, phone={phone_number}, message={message_content[:50] if message_content else 'empty'}")
+
+        # 5. Validation Checks
+        if not conversation_id or not phone_number or not message_content:
+            logger.warning(f"Incomplete webhook payload: conversation_id={conversation_id}, phone={phone_number}, has_message={bool(message_content)}")
+            # Still return 200 OK (payload was malformed but we received it)
+            return FreshchatWebhookResponse(status="success")
+
+        # 6. Allowlist / Beta Testing Filter
+        if phone_number not in ALLOWED_NUMBERS:
+            logger.info(f"Phone number not in allowlist: {phone_number}. Leaving for human agents.")
+            # Return 200 OK - don't process, but don't retry
+            return FreshchatWebhookResponse(status="success")
+
+        # 7. Queue Background Task (all heavy processing happens here)
+        background_tasks.add_task(
+            process_freshchat_webhook_task,
+            phone_number=phone_number,
+            message_content=message_content,
+            conversation_id=conversation_id
+        )
+
+        logger.info(f"Background task queued for webhook: conversation={conversation_id}")
+
+        # 8. Instant Response (CRITICAL - must be within 3 seconds)
+        return FreshchatWebhookResponse(status="success")
+
+    except Exception as e:
+        logger.error(f"Error in freshchat-webhook endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # STILL return 200 OK to prevent Freshchat from retrying
+        # (we've logged the error, so we can investigate)
+        return FreshchatWebhookResponse(status="success")
+
+
+async def process_freshchat_webhook_task(
+    phone_number: str,
+    message_content: str,
+    conversation_id: str
+):
+    """
+    Background task to process Freshchat webhook payload.
+
+    This function runs asynchronously after the webhook returns 200 OK.
+    All heavy processing happens here to avoid the 3-second timeout.
+
+    Args:
+        phone_number: User's WhatsApp phone number
+        message_content: Message text content
+        conversation_id: Freshchat conversation ID
+    """
+    try:
+        logger.info(f"Processing webhook task: conversation={conversation_id}, phone={phone_number}")
+
+        # Integrate with existing AI processing logic
+        # Reuse the process_freshchat_agent_task function
+        await process_freshchat_agent_task(
+            phone_number=phone_number,
+            lid_number=None,  # Webhook only provides phone_number
+            message=message_content,
+            contact_name=None,  # Could be extracted from payload if needed
+            is_new_chat=False,  # Could be determined from conversation history
+            conversation_id=conversation_id,
+            user_id=""  # Could be extracted from payload if needed
+        )
+
+        logger.info(f"Webhook processing completed for conversation {conversation_id}")
+
+    except Exception as e:
+        logger.error(f"Error in webhook background task: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
 # --- HEALTH CHECK ENDPOINT ---
 @app.get("/health")
 async def health_check():
@@ -872,8 +1024,9 @@ async def health_check():
         "version": "2.1 - Agentic Architecture (Optimized)",
         "endpoints": {
             "chat": "/chat (Legacy - Intent Classification)",
-            "chat-agent": "/chat-agent (Agentic with max_iterations=25)",
-            "freshchat-agent": "/freshchat-agent (Freshchat integration with BackgroundTasks)",
+            "chat-agent": "/chat-agent (Agentic with recursion_limit=50)",
+            "freshchat-agent": "/freshchat-agent (Freshchat API with BackgroundTasks)",
+            "freshchat-webhook": "/freshchat-webhook (Freshchat Webhook with anti-loop)",
             "reset-history": "/reset-history",
             "reset-products": "/reset-products",
             "health": "/health"
@@ -892,7 +1045,9 @@ async def health_check():
         },
         "freshchat_config": {
             "configured": bool(FRESHCHAT_API_TOKEN and FRESHCHAT_URL and AGENT_ID_BOT),
-            "auth_required": bool(FRESHCHAT_AGENT_BEARER_TOKEN)
+            "agent_auth": bool(FRESHCHAT_AGENT_BEARER_TOKEN),
+            "webhook_auth": bool(FRESHCHAT_WEBHOOK_TOKEN),
+            "allowed_numbers": len(ALLOWED_NUMBERS)
         }
     }
 

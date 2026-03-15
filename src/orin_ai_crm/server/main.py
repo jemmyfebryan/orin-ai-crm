@@ -887,27 +887,28 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
         from cryptography.hazmat.primitives.asymmetric import padding
         from cryptography.hazmat.backends import default_backend
         import base64
+        import re
 
         # Decode the Base64 signature
         signature = base64.b64decode(signature_b64)
 
-        # Load the public key (remove BEGIN/END markers and newlines if present)
+        # Load the public key from environment variable
         public_key_str = FRESHCHAT_WEBHOOK_TOKEN.strip()
 
-        # Clean up the key format if it has BEGIN/END markers
-        if "-----BEGIN" in public_key_str:
-            # Extract just the base64 part between the markers
-            lines = public_key_str.split('\n')
-            key_lines = [line.strip() for line in lines if line.strip() and not line.startswith("-----")]
-            public_key_str = ''.join(key_lines)
-
-        # Add the proper header/footer if missing
-        if not public_key_str.startswith("-----BEGIN"):
-            public_key_str = f"-----BEGIN PUBLIC KEY-----\n{public_key_str}\n-----END PUBLIC KEY-----"
+        # If the key already has PEM headers, use it directly
+        if "-----BEGIN" in public_key_str and "-----END" in public_key_str:
+            # Already in PEM format, use as-is
+            pem_key = public_key_str
+        else:
+            # Raw base64 key, need to wrap it
+            # Remove any whitespace/newlines
+            clean_key = re.sub(r'\s+', '', public_key_str)
+            # Wrap in PEM format
+            pem_key = f"-----BEGIN PUBLIC KEY-----\n{clean_key}\n-----END PUBLIC KEY-----"
 
         # Load the public key
         public_key = serialization.load_pem_public_key(
-            public_key_str.encode(),
+            pem_key.encode(),
             backend=default_backend()
         )
 
@@ -924,11 +925,37 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
 
     except Exception as e:
         logger.error(f"Signature verification failed: {str(e)}")
+        logger.error(f"Public key (first 50 chars): {FRESHCHAT_WEBHOOK_TOKEN[:50] if FRESHCHAT_WEBHOOK_TOKEN else 'NOT SET'}")
         return False
 
 
 class FreshchatWebhookResponse(BaseModel):
     status: str
+
+
+@app.get("/debug-webhook-key")
+async def debug_webhook_key():
+    """
+    Debug endpoint to check if the Freshchat public key is loaded correctly.
+    Remove this endpoint in production!
+    """
+    key = FRESHCHAT_WEBHOOK_TOKEN
+    if not key:
+        return {
+            "status": "error",
+            "message": "FRESHCHAT_WEBHOOK_TOKEN is not set",
+            "key_preview": None
+        }
+
+    return {
+        "status": "ok",
+        "message": "Public key is set",
+        "key_preview": key[:100] if len(key) > 100 else key,
+        "key_length": len(key),
+        "has_begin_marker": "-----BEGIN" in key,
+        "has_end_marker": "-----END" in key,
+        "format": "PEM" if "-----BEGIN" in key else "Raw base64"
+    }
 
 @app.post("/freshchat-webhook", response_model=FreshchatWebhookResponse)
 async def freshchat_webhook_endpoint(

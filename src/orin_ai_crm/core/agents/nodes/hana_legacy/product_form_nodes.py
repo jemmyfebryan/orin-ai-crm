@@ -10,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.schemas import AgentState, CustomerProfile
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     get_all_active_products,
@@ -20,7 +21,7 @@ from src.orin_ai_crm.core.agents.tools.hana_legacy.customer_tools import (
 )
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
 

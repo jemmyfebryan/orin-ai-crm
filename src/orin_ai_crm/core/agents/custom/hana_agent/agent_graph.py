@@ -42,6 +42,7 @@ from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.agents.tools.agent_tools import AGENT_TOOLS
 from src.orin_ai_crm.core.agents.tools.profiling_agent_tools import (
     check_profiling_completeness,
@@ -61,7 +62,7 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
 logger = get_logger(__name__)
 
 # Initialize LLM with tool calling support
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
+llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
 
 
 #    - search_vehicle_in_vps: Search vehicle in VPS database

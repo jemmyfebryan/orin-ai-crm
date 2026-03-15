@@ -10,12 +10,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
 from sqlalchemy import update, select
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
 HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.

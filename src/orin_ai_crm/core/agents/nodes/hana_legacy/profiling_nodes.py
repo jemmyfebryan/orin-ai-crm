@@ -12,13 +12,14 @@ from langchain_core.messages import AIMessage, SystemMessage
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, LeadRouting
 from src.orin_ai_crm.core.models.schemas import AgentState, CustomerProfile
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.agents.tools import (
     get_or_create_customer,
     update_customer_profile
 )
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
 # Patterns that indicate contact_name is NOT a person's name

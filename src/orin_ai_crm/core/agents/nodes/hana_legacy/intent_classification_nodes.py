@@ -9,12 +9,13 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage
 
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.schemas import AgentState, IntentClassification
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal
 from src.orin_ai_crm.core.models.database import IntentClassification as IntentClassificationModel
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
 HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.

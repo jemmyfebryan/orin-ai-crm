@@ -969,6 +969,10 @@ def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     except Exception as e:
         logger.error(f"Signature verification failed: {str(e)}")
         logger.error(f"Public key (first 50 chars): {FRESHCHAT_WEBHOOK_TOKEN[:50] if FRESHCHAT_WEBHOOK_TOKEN else 'NOT SET'}")
+        logger.error(f"Signature header (first 100 chars): {signature_b64[:100]}")
+        logger.error(f"Payload length: {len(payload)} bytes")
+        logger.error(f"Payload (first 500 chars): {payload[:500]}")
+        logger.error(f"Payload (last 100 chars): {payload[-100:]}")
         return False
 
 
@@ -1055,11 +1059,13 @@ async def freshchat_webhook_endpoint(
         body = await request.body()
 
         # 2. Authentication Check (RSA Signature Verification)
-        signature_header = request.headers.get("X-Freshchat-Signature", "")
+        signature_header = request.headers.get("X-Freshchat-Signature", "").strip()
 
         if not signature_header:
             logger.warning("Webhook authentication failed: missing X-Freshchat-Signature header")
             raise HTTPException(status_code=401, detail="Unauthorized")
+
+        logger.info(f"Received signature header (first 50 chars): {signature_header[:50]}")
 
         # Verify the signature
         if not verify_freshchat_signature(body, signature_header):

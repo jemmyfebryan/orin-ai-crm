@@ -41,19 +41,15 @@ FRESHCHAT_AGENT_BEARER_TOKEN = os.getenv("FRESHCHAT_AGENT_BEARER_TOKEN")
 AGENT_ID_BOT = os.getenv("AGENT_ID_BOT")
 FRESHCHAT_WEBHOOK_TOKEN = os.getenv("FRESHCHAT_WEBHOOK_TOKEN")
 
+# Freshchat Channel IDs (comma-separated list of allowed channel IDs)
+# Each channel (WhatsApp, Instagram, etc.) has a unique freshchat_channel_id
+# Find your channel IDs in Freshchat Admin > Channels > WhatsApp > Settings
+FRESHCHAT_ALLOWED_CHANNEL_IDS = os.getenv("FRESHCHAT_ALLOWED_CHANNEL_IDS", "").split(",") if os.getenv("FRESHCHAT_ALLOWED_CHANNEL_IDS") else []
+
 # Allowlist for beta testing (only these numbers can use the webhook)
 ALLOWED_NUMBERS = [
     "+628123456789",
     "+6285850434383",
-]
-
-# Supported message sources for WhatsApp (case-insensitive)
-WHATSAPP_ALIASES = [
-    "whatsapp",
-    "wa",
-    "whatsapp_integration",
-    "whatsapp-integration",
-    "whats_app",  # Just in case
 ]
 
 # Freshchat API configuration
@@ -1010,9 +1006,9 @@ async def debug_webhook_key():
             "mode": "Restricted (phone number filter)"
         },
         "channel_filter": {
-            "allowed_sources": WHATSAPP_ALIASES,
-            "description": "This AI CRM only responds to WhatsApp messages",
-            "matching": "case-insensitive"
+            "allowed_channel_ids": FRESHCHAT_ALLOWED_CHANNEL_IDS,
+            "description": "This AI CRM only responds to configured Freshchat channels",
+            "find_your_channel_id": "Freshchat Admin > Channels > WhatsApp > Settings"
         }
     }
 
@@ -1038,11 +1034,10 @@ async def freshchat_webhook_endpoint(
     - Public key from: FRESHCHAT_WEBHOOK_TOKEN env variable
 
     Channel Filter (CRITICAL):
-    - Only processes messages where message_source in WHATSAPP_ALIASES
-    - Supported aliases: "whatsapp", "wa", "whatsapp_integration", etc.
-    - Matching is case-insensitive (e.g., "WhatsApp", "WHATSAPP", "whatsapp" all work)
-    - Ignores Instagram, web, and other channels
-    - This AI CRM is WhatsApp ONLY
+    - Only processes messages from configured FRESHCHAT_ALLOWED_CHANNEL_IDS
+    - Each channel (WhatsApp, Instagram, etc.) has a unique freshchat_channel_id
+    - Find your channel ID: Freshchat Admin > Channels > WhatsApp > Settings
+    - This AI CRM only responds to configured channels (e.g., WhatsApp only)
 
     Anti-Loop Mechanism:
     - Only processes messages where actor.actor_type == "user"
@@ -1103,34 +1098,23 @@ async def freshchat_webhook_endpoint(
         data = payload.get("data", {})
         message = data.get("message", {})
 
-        # DEBUG: Log message structure
-        logger.info(f"Message object: {message}")
-        logger.info(f"Message keys: {list(message.keys())}")
-
         # Extract required fields with safe defaults
         conversation_id = message.get("conversation_id", "")
 
-        # CRITICAL: Channel Filter - ONLY respond to WhatsApp messages
-        # Try multiple possible locations for channel/source information
-        message_source = (
-            message.get("message_source", "") or  # In message object
-            message.get("source", "") or           # Alternative field name
-            message.get("channel", "") or          # Another alternative
-            data.get("source", "") or              # In data object
-            data.get("channel", "") or             # In data object
-            ""
-        ).lower().strip()
+        # CRITICAL: Channel Filter - ONLY respond to allowed channels
+        # Freshchat uses freshchat_channel_id to identify the channel (WhatsApp, Instagram, etc.)
+        freshchat_channel_id = message.get("freshchat_channel_id", "")
 
-        logger.info(f"Detected message_source: '{message_source}'")
+        logger.info(f"Detected freshchat_channel_id: '{freshchat_channel_id}'")
 
-        if message_source and message_source not in WHATSAPP_ALIASES:
-            logger.info(f"Ignoring non-WhatsApp message: message_source='{message_source}'. Allowed: {WHATSAPP_ALIASES}. This AI CRM only responds to WhatsApp.")
+        # Check if this channel ID is allowed
+        if FRESHCHAT_ALLOWED_CHANNEL_IDS and freshchat_channel_id not in FRESHCHAT_ALLOWED_CHANNEL_IDS:
+            logger.info(f"Ignoring message from non-allowed channel: freshchat_channel_id='{freshchat_channel_id}'. Allowed: {FRESHCHAT_ALLOWED_CHANNEL_IDS}. This AI CRM only responds to configured channels.")
             return FreshchatWebhookResponse(status="success")
 
-        # If message_source is empty, log a warning but allow it for now (for debugging)
-        if not message_source:
-            logger.warning(f"message_source is empty! Check the payload above. Allowing message for debugging purposes.")
-            # TODO: After debugging, uncomment below to reject empty message_source
+        if not freshchat_channel_id:
+            logger.warning(f"freshchat_channel_id is empty! This might be a test or system message. Allowing for now.")
+            # TODO: After testing, uncomment below to reject messages without channel_id
             # return FreshchatWebhookResponse(status="success")
 
         # Extract message content from message_parts array
@@ -1143,7 +1127,7 @@ async def freshchat_webhook_endpoint(
         user_id = message.get("user_id", "")
 
         # Log extracted data
-        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, user_id={user_id}, source={message_source}, message={message_content[:50] if message_content else 'empty'}")
+        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, user_id={user_id}, message={message_content[:50] if message_content else 'empty'}")
 
         # 7. Validation Checks
         if not conversation_id or not message_content:

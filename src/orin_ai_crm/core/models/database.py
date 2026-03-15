@@ -13,7 +13,12 @@ load_dotenv()
 
 DB_URL = f"mysql+aiomysql://{os.getenv('DB_USERNAME')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}:{os.getenv('DB_PORT')}/{os.getenv('DB_DATABASE')}"
 
-engine = create_async_engine(DB_URL, echo=False)
+engine = create_async_engine(
+    DB_URL,
+    echo=False,
+    pool_pre_ping=True,    # Test connections before using them (detect stale connections)
+    pool_recycle=3600,     # Recycle connections after 1 hour (prevent connection timeout issues)
+)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
 

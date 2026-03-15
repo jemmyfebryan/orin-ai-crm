@@ -272,6 +272,7 @@ class FreshchatAgentRequest(BaseModel):
     is_new_chat: bool = Field(False, description="Apakah ada pesan user pertama kali di WhatsApp")
     conversation_id: str = Field(..., description="Freshchat conversation ID")
     user_id: str = Field(..., description="Freshchat user ID")
+    async_mode: bool = Field(True, description="Run asynchronously (background) or synchronously (wait for completion)")
 
     @field_validator('contact_name')
     @classmethod
@@ -651,17 +652,16 @@ async def process_freshchat_agent_task(
 @app.post("/freshchat-agent", response_model=FreshchatAgentResponse)
 async def freshchat_agent_endpoint(
     req: FreshchatAgentRequest,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     token: str = Depends(verify_bearer_token)
 ):
     """
-    Freshchat integration endpoint using BackgroundTasks.
+    Freshchat integration endpoint with async/sync mode support.
 
     This endpoint:
     - Accepts chat requests from Freshchat webhook
     - Validates Bearer token for security
-    - Processes the chat asynchronously in background
-    - Returns immediately with {"status": "accepted"}
+    - Can process asynchronously (background) or synchronously (wait)
     - Sends AI replies back to Freshchat via API
 
     Expected payload fields:
@@ -671,32 +671,58 @@ async def freshchat_agent_endpoint(
     - is_new_chat: Whether this is a new conversation
     - conversation_id: Freshchat conversation ID (required)
     - user_id: Freshchat user ID (required)
+    - async_mode: True=background (immediate response), False=wait for completion
 
     Authentication:
     - Header: Authorization: Bearer <FRESHCHAT_AGENT_BEARER_TOKEN>
+
+    Response modes:
+    - async_mode=True: Returns {"status": "accepted"} immediately
+    - async_mode=False: Waits for processing, returns {"status": "completed"}
     """
     try:
         conversation_link = req.conversation_id  # temporary use link
         conversation_id = conversation_link.split("/")[-1]
-        
-        # Add background task to process the chat
-        background_tasks.add_task(
-            process_freshchat_agent_task,
-            phone_number=req.phone_number,
-            lid_number=req.lid_number,
-            message=req.message,
-            contact_name=req.contact_name,
-            is_new_chat=req.is_new_chat,
-            conversation_id=conversation_id,
-            user_id=req.user_id
-        )
 
-        logger.info(f"Background task queued for conversation {conversation_id}")
+        if req.async_mode:
+            # Asynchronous mode: process in background, return immediately
+            background_tasks.add_task(
+                process_freshchat_agent_task,
+                phone_number=req.phone_number,
+                lid_number=req.lid_number,
+                message=req.message,
+                contact_name=req.contact_name,
+                is_new_chat=req.is_new_chat,
+                conversation_id=conversation_id,
+                user_id=req.user_id
+            )
 
-        return FreshchatAgentResponse(
-            status="accepted",
-            message="Chat request accepted and is being processed asynchronously"
-        )
+            logger.info(f"Background task queued for conversation {conversation_id}")
+
+            return FreshchatAgentResponse(
+                status="accepted",
+                message="Chat request accepted and is being processed asynchronously"
+            )
+        else:
+            # Synchronous mode: wait for processing to complete
+            logger.info(f"Processing chat synchronously for conversation {conversation_id}")
+
+            await process_freshchat_agent_task(
+                phone_number=req.phone_number,
+                lid_number=req.lid_number,
+                message=req.message,
+                contact_name=req.contact_name,
+                is_new_chat=req.is_new_chat,
+                conversation_id=conversation_id,
+                user_id=req.user_id
+            )
+
+            logger.info(f"Synchronous processing completed for conversation {conversation_id}")
+
+            return FreshchatAgentResponse(
+                status="completed",
+                message="Chat request processed successfully"
+            )
 
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

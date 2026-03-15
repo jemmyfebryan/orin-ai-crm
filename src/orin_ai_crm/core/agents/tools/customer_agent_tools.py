@@ -73,7 +73,7 @@ async def get_customer_profile(
 
 @tool
 async def update_customer_data(
-    customer_id: int,
+    state: Annotated[dict, InjectedState],
     name: Optional[str] = None,
     domicile: Optional[str] = None,
     vehicle_alias: Optional[str] = None,
@@ -91,7 +91,6 @@ async def update_customer_data(
     Only provided fields will be updated. Others remain unchanged.
 
     Args:
-        customer_id: The customer ID (provided in system prompt - use that exact value!)
         name: Nama customer
         domicile: Domisili customer
         vehicle_alias: Jenis/Tipe kendaraan customer
@@ -101,8 +100,15 @@ async def update_customer_data(
     Returns:
         dict with: success (bool), message, updated_fields
     """
+    # Get customer_id from state (prevents LLM from using wrong customer_id)
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: update_customer_data - No customer_id in state!")
+        return {'success': False, 'message': 'No customer_id in state', 'updated_fields': []}
+
     try:
-        logger.info(f"TOOL: update_customer_data - customer_id: {customer_id}")
+        logger.info(f"TOOL: update_customer_data - customer_id: {customer_id} (from state)")
         logger.info(f"TOOL: update_customer_data - params: name={name}, domicile={domicile}, vehicle_alias={vehicle_alias}, unit_qty={unit_qty}, is_b2b={is_b2b}")
 
         async with AsyncSessionLocal() as db:

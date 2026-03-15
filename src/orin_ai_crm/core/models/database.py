@@ -25,8 +25,8 @@ Base = declarative_base()
 class Customer(Base):
     __tablename__ = "customers"
     id = Column(Integer, primary_key=True, index=True)
-    phone_number = Column(String(20), unique=True, index=True, nullable=True)
-    lid_number = Column(String(50), unique=True, index=True, nullable=True)
+    phone_number = Column(String(20), index=True, nullable=True)  # Removed unique constraint (allow duplicates for soft-deleted)
+    lid_number = Column(String(50), index=True, nullable=True)  # Removed unique constraint (allow duplicates for soft-deleted)
     contact_name = Column(String(100), nullable=True)  # Nama kontak dari WA
     name = Column(String(100), nullable=True)  # Nama asli customer
     domicile = Column(String(100), nullable=True)
@@ -36,7 +36,7 @@ class Customer(Base):
     is_b2b = Column(Boolean, default=False)
     is_onboarded = Column(Boolean, default=False)
     human_takeover = Column(Boolean, default=False)  # Flag untuk human takeover when AI cannot handle
-    deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
+    deleted_at = Column(DateTime, nullable=True, index=True)  # Soft delete timestamp (indexed for performance)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
 

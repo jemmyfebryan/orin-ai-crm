@@ -18,6 +18,68 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+async def soft_delete_customer_by_phone(phone_number: str) -> dict:
+    """
+    Soft delete a customer by phone number.
+
+    This is a reusable function that can be called from multiple places.
+    Sets deleted_at timestamp instead of actually deleting the record.
+
+    Args:
+        phone_number: Customer's phone number
+
+    Returns:
+        dict with: success (bool), message (str), customer_id (int or None)
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            # Find customer by phone_number
+            query = select(Customer).where(
+                Customer.phone_number == phone_number,
+                Customer.deleted_at.is_(None)
+            )
+            result = await db.execute(query)
+            customer = result.scalars().first()
+
+            if not customer:
+                logger.info(f"Customer not found for phone: {phone_number}")
+                return {
+                    'success': True,
+                    'message': f'No customer found for phone: {phone_number}',
+                    'customer_id': None
+                }
+
+            # Check if already deleted
+            if customer.deleted_at is not None:
+                logger.info(f"Customer already deleted: {customer.id}")
+                return {
+                    'success': True,
+                    'message': f'Customer already deleted at: {customer.deleted_at}',
+                    'customer_id': customer.id
+                }
+
+            # Soft delete: Set deleted_at timestamp
+            customer.deleted_at = datetime.now(WIB)
+            await db.commit()
+            await db.refresh(customer)
+
+            logger.info(f"Customer {customer.id} soft-deleted successfully")
+
+            return {
+                'success': True,
+                'message': f'Customer {customer.id} deleted successfully. Chat reset complete.',
+                'customer_id': customer.id
+            }
+
+    except Exception as e:
+        logger.error(f"Error soft-deleting customer: {str(e)}")
+        return {
+            'success': False,
+            'message': f'Failed to delete customer: {str(e)}',
+            'customer_id': None
+        }
+
+
 @router.post("/delete-customer", response_model=ResetCustomerResponse)
 async def delete_customer_endpoint(req: ResetCustomerRequest):
     """
@@ -40,72 +102,35 @@ async def delete_customer_endpoint(req: ResetCustomerRequest):
             "lid_number": req.lid_number
         }
 
-        async with AsyncSessionLocal() as db:
-            # DEBUG: Log what we're searching for
-            logger.warning(f"DELETE CUSTOMER REQUEST - Searching for: {identifier}")
+        logger.warning(f"DELETE CUSTOMER REQUEST - Searching for: {identifier}")
 
-            # 1. Cari customer berdasarkan identifier
-            # Build conditions properly to avoid NULL matching issues
-            conditions = []
-            if identifier.get('phone_number'):
-                conditions.append(Customer.phone_number == identifier.get('phone_number'))
-            if identifier.get('lid_number'):
-                conditions.append(Customer.lid_number == identifier.get('lid_number'))
+        # For now, only support phone_number
+        # TODO: Add lid_number support if needed
+        if not req.phone_number:
+            return ResetCustomerResponse(
+                success=False,
+                message=f"Must provide phone_number. lid_number not yet supported.",
+                deleted_tables={"customers_marked_deleted": 0},
+                customer_id=None
+            )
 
-            if not conditions:
-                return ResetCustomerResponse(
-                    success=False,
-                    message=f"Invalid identifier: {identifier}. Must provide phone_number or lid_number.",
-                    deleted_tables={"customers_marked_deleted": 0},
-                    customer_id=None
-                )
-
-            query = select(Customer).where(Customer.deleted_at.is_(None), or_(*conditions))
-            result = await db.execute(query)
-            customer = result.scalars().first()
-
-            # DEBUG: Log what we found
-            if customer:
-                logger.warning(f"FOUND CUSTOMER - id={customer.id}, phone={customer.phone_number}, lid={customer.lid_number}, deleted_at={customer.deleted_at}")
-            else:
-                logger.warning(f"NO CUSTOMER FOUND for identifier: {identifier}")
-
-            if not customer:
-                return ResetCustomerResponse(
-                    success=True,
-                    message=f"Tidak ditemukan customer untuk identifier: {identifier}",
-                    deleted_tables={"customers_marked_deleted": 0},
-                    customer_id=None
-                )
-
-            # Check if already deleted
-            if customer.deleted_at is not None:
-                return ResetCustomerResponse(
-                    success=True,
-                    message=f"Customer sudah di-delete sebelumnya pada: {customer.deleted_at}",
-                    deleted_tables={"customers_marked_deleted": 0},
-                    customer_id=customer.id
-                )
-
-            # 2. Soft delete: Set deleted_at timestamp
-            customer.deleted_at = datetime.now(WIB)
-            await db.commit()
-            await db.refresh(customer)
+        # Use the reusable function
+        result = await soft_delete_customer_by_phone(req.phone_number)
 
         return ResetCustomerResponse(
-            success=True,
-            message=f"Berhasil soft-delete customer untuk customer_id: {customer.id}. Data preserved untuk training.",
-            deleted_tables={"customers_marked_deleted": 1},
-            customer_id=customer.id
+            success=result['success'],
+            message=result['message'],
+            deleted_tables={"customers_marked_deleted": 1 if result['customer_id'] else 0},
+            customer_id=result['customer_id']
         )
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.error(f"Error in delete_customer_endpoint: {str(e)}")
         import traceback
         traceback.print_exc()
         return ResetCustomerResponse(
             success=False,
-            message=f"Gagal soft-delete customer: {str(e)}",
+            message=f"Error: {str(e)}",
             deleted_tables={"customers_marked_deleted": 0},
             customer_id=None
         )

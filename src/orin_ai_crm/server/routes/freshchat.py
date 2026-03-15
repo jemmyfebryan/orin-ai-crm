@@ -192,6 +192,28 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
+        # 2.5. TESTING: Check for "reset_chat" command (only for allowed numbers)
+        if message_content.strip().lower() == "reset_chat":
+            logger.info(f"Reset chat command detected for phone: {phone_number}")
+
+            # Import the delete function
+            from src.orin_ai_crm.server.routes.admin import soft_delete_customer_by_phone
+
+            # Delete the customer
+            result = await soft_delete_customer_by_phone(phone_number)
+
+            # Send confirmation message back to user
+            if result['success']:
+                confirmation_msg = f"✅ Chat reset successful! Customer ID: {result['customer_id']}. Starting fresh chat."
+            else:
+                confirmation_msg = f"❌ Failed to reset chat: {result['message']}"
+
+            # Send message to Freshchat
+            await send_message_to_freshchat(conversation_id, confirmation_msg)
+
+            logger.info(f"Reset chat completed for {phone_number}: {result['message']}")
+            return  # Stop processing, don't continue to AI
+
         # 3. Integrate with existing AI processing logic
         await process_freshchat_agent_task(
             phone_number=phone_number,

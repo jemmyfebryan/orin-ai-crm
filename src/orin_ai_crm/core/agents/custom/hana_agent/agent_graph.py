@@ -24,7 +24,7 @@ Key Benefits:
 - More flexible than rigid intent classification
 - Better handles complex user requests
 - Maintains conversation context and flow
-- max_iterations=25 prevents infinite loops (~10-12 tool calls max)
+- recursion_limit in graph invocation prevents infinite loops
 
 IMPORTANT ARCHITECTURAL CHANGE:
 - get_customer_profile is NOT in the tools list
@@ -322,13 +322,11 @@ async def agent_node(state: AgentState) -> Dict:
     system_prompt = HANA_AGENT_SYSTEM_PROMPT
 
     # Create agent with dynamic system prompt and our AgentState schema
-    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=AGENT_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,  # Pass our custom AgentState
-        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state
@@ -372,13 +370,11 @@ async def sales_node(state: AgentState) -> Dict:
     logger.info("ENTER: sales_node")
 
     # Create sales agent with sales tools
-    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=SALES_MEETING_TOOLS,
         system_prompt=SALES_AGENT_SYSTEM_PROMPT,
         state_schema=AgentState,
-        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state
@@ -398,13 +394,11 @@ async def ecommerce_node(state: AgentState) -> Dict:
     logger.info("ENTER: ecommerce_node")
 
     # Create ecommerce agent with product tools
-    # max_iterations=25 allows ~10-12 tool calls (iterations count all messages)
     agent = create_agent(
         model=llm,
         tools=PRODUCT_ECOMMERCE_TOOLS,
         system_prompt=ECOMMERCE_AGENT_SYSTEM_PROMPT,
         state_schema=AgentState,
-        max_iterations=25  # Prevent infinite loops
     )
 
     # Invoke the agent with current state

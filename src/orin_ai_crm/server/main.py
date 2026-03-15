@@ -382,7 +382,7 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
         }
 
         # 8. Jalankan Agentic AI Workflow (dengan 30+ tools)
-        final_state = await hana_agent.ainvoke(initial_state)
+        final_state = await hana_agent.ainvoke(initial_state, recursion_limit=50)
 
         logger.info(f"FINAL STATE (Agent): messages_count={len(final_state['messages'])}")
 
@@ -604,7 +604,7 @@ async def process_freshchat_agent_task(
         }
 
         # 7. Run Agentic AI Workflow
-        final_state = await hana_agent.ainvoke(initial_state)
+        final_state = await hana_agent.ainvoke(initial_state, recursion_limit=50)
 
         logger.info(f"AI Agent processing completed for conversation {conversation_id}")
 

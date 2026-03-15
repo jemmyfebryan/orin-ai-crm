@@ -6,11 +6,12 @@ These tools are used by the LangGraph agent for meeting-related operations.
 """
 
 import os
-from typing import Optional
+from typing import Optional, Annotated
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage
+from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
@@ -32,7 +33,9 @@ ATURAN PRODUK GPS MOBIL:
 
 
 @tool
-async def get_pending_meeting(customer_id: int) -> dict:
+async def get_pending_meeting(
+    state: Annotated[dict, InjectedState],
+) -> dict:
     """
     Get pending or confirmed meeting for customer.
 
@@ -44,7 +47,21 @@ async def get_pending_meeting(customer_id: int) -> dict:
     Returns:
         dict with: found (bool), meeting_id (int), date (str), time (str), status (str)
     """
-    logger.info(f"TOOL: get_pending_meeting - customer: {customer_id}")
+    # Get customer_id from state (prevents LLM from using wrong customer_id)
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: get_pending_meeting - No customer_id in state!")
+        return {
+            'found': False,
+            'meeting_id': None,
+            'date': '',
+            'time': '',
+            'status': '',
+            'notes': ''
+        }
+
+    logger.info(f"TOOL: get_pending_meeting - customer_id: {customer_id} (from state)")
 
     async with AsyncSessionLocal() as db:
         query = select(CustomerMeeting).where(
@@ -142,7 +159,7 @@ Return JSON format."""
 
 @tool
 async def book_or_update_meeting_db(
-    customer_id: int,
+    state: Annotated[dict, InjectedState],
     meeting_date: str,
     meeting_time: str,
     meeting_format: str = "online",
@@ -160,7 +177,14 @@ async def book_or_update_meeting_db(
     Returns:
         dict with: success (bool), meeting_id (int), action (str)
     """
-    logger.info(f"TOOL: book_or_update_meeting_db - customer: {customer_id}, reschedule: {wants_reschedule}")
+    # Get customer_id from state (prevents LLM from using wrong customer_id)
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: book_or_update_meeting_db - No customer_id in state!")
+        return {'success': False, 'message': 'No customer_id in state', 'action': 'failed'}
+
+    logger.info(f"TOOL: book_or_update_meeting_db - customer_id: {customer_id} (from state), reschedule: {wants_reschedule}")
 
     async with AsyncSessionLocal() as db:
         if wants_reschedule and existing_meeting_id:

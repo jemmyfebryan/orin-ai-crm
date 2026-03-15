@@ -7,10 +7,12 @@ These tools are used by the LangGraph agent for support-related operations.
 
 import os
 import json
+from typing import Annotated
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage
+from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
@@ -128,7 +130,9 @@ RULES:
 
 
 @tool
-async def set_human_takeover_flag(customer_id: int) -> dict:
+async def set_human_takeover_flag(
+    state: Annotated[dict, InjectedState],
+) -> dict:
     """
     Set human_takeover flag to true for a customer.
 
@@ -140,7 +144,14 @@ async def set_human_takeover_flag(customer_id: int) -> dict:
     Returns:
         dict with: success (bool), message (str)
     """
-    logger.info(f"TOOL: set_human_takeover_flag - customer: {customer_id}")
+    # Get customer_id from state (prevents LLM from using wrong customer_id)
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: set_human_takeover_flag - No customer_id in state!")
+        return {'success': False, 'message': 'No customer_id in state'}
+
+    logger.info(f"TOOL: set_human_takeover_flag - customer_id: {customer_id} (from state)")
 
     async with AsyncSessionLocal() as db:
         query = select(Customer).where(Customer.id == customer_id)

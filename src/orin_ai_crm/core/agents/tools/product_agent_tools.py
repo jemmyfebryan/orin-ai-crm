@@ -6,12 +6,13 @@ For non-agent contexts, call these tools using .ainvoke() or .invoke()
 """
 
 import os
-from typing import Optional, List
+from typing import Optional, List, Annotated
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
 from sqlalchemy import select, delete, text
+from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
@@ -698,7 +699,7 @@ async def get_ecommerce_links(product_id: int) -> dict:
 
 @tool
 async def create_product_inquiry(
-    customer_id: int,
+    state: Annotated[dict, InjectedState],
     product_type: str,
     vehicle_type: str,
     unit_qty: int
@@ -712,7 +713,14 @@ async def create_product_inquiry(
     Returns:
         dict with: success (bool), inquiry_id (int)
     """
-    logger.info(f"TOOL: create_product_inquiry - customer: {customer_id}")
+    # Get customer_id from state (prevents LLM from using wrong customer_id)
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: create_product_inquiry - No customer_id in state!")
+        return {'success': False, 'message': 'No customer_id in state', 'inquiry_id': None}
+
+    logger.info(f"TOOL: create_product_inquiry - customer_id: {customer_id} (from state)")
 
     async with AsyncSessionLocal() as db:
         query = select(ProductInquiry).where(

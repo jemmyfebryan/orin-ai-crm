@@ -779,15 +779,34 @@ async def delete_customer_endpoint(req: ResetCustomerRequest):
         }
 
         async with AsyncSessionLocal() as db:
+            # DEBUG: Log what we're searching for
+            logger.warning(f"DELETE CUSTOMER REQUEST - Searching for: {identifier}")
+
             # 1. Cari customer berdasarkan identifier
-            query = select(Customer).where(
-                or_(
-                    Customer.phone_number == identifier.get('phone_number'),
-                    Customer.lid_number == identifier.get('lid_number')
+            # Build conditions properly to avoid NULL matching issues
+            conditions = []
+            if identifier.get('phone_number'):
+                conditions.append(Customer.phone_number == identifier.get('phone_number'))
+            if identifier.get('lid_number'):
+                conditions.append(Customer.lid_number == identifier.get('lid_number'))
+
+            if not conditions:
+                return ResetCustomerResponse(
+                    success=False,
+                    message=f"Invalid identifier: {identifier}. Must provide phone_number or lid_number.",
+                    deleted_tables={"customers_marked_deleted": 0},
+                    customer_id=None
                 )
-            )
+
+            query = select(Customer).where(or_(*conditions))
             result = await db.execute(query)
             customer = result.scalars().first()
+
+            # DEBUG: Log what we found
+            if customer:
+                logger.warning(f"FOUND CUSTOMER - id={customer.id}, phone={customer.phone_number}, lid={customer.lid_number}, deleted_at={customer.deleted_at}")
+            else:
+                logger.warning(f"NO CUSTOMER FOUND for identifier: {identifier}")
 
             if not customer:
                 return ResetCustomerResponse(

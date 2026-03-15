@@ -571,16 +571,16 @@ async def process_freshchat_agent_task(
 
         # 2. Fetch chat history if not new chat
         history = []
-        if not is_new_chat:
-            logger.info(f"Fetching chat history for customer_id: {customer_id}")
-            history_rows = await get_chat_history(customer_id, limit=10)
-            for row in history_rows:
-                if row.message_role == "user":
-                    history.append(HumanMessage(content=row.content))
-                else:
-                    history.append(AIMessage(content=row.content))
-        else:
-            logger.info(f"Skipping chat history fetch (is_new_chat=True)")
+        # if not is_new_chat:
+        logger.info(f"Fetching chat history for customer_id: {customer_id}")
+        history_rows = await get_chat_history(customer_id, limit=10)
+        for row in history_rows:
+            if row.message_role == "user":
+                history.append(HumanMessage(content=row.content))
+            else:
+                history.append(AIMessage(content=row.content))
+        # else:
+        #     logger.info(f"Skipping chat history fetch (is_new_chat=True)")
 
         # 3. Load customer data
         customer_data = {
@@ -1207,7 +1207,7 @@ async def process_freshchat_webhook_task(
             lid_number=None,  # Webhook only provides phone_number
             message=message_content,
             contact_name=contact_name,  # Pass the contact name from Freshchat
-            is_new_chat=False,  # Could be determined from conversation history
+            is_new_chat=True,  # Always new chat at first, the second tries will use DB as source of truth
             conversation_id=conversation_id,
             user_id=user_id  # Pass the user_id from webhook
         )

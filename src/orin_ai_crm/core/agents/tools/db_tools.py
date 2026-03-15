@@ -90,18 +90,27 @@ async def get_or_create_customer(
 
 
 async def get_chat_history(customer_id: int, limit: int = 20):
-    """Mengambil riwayat chat dari database"""
+    """
+    Mengambil riwayat chat paling baru dari database.
+
+    Fetches the most recent 'limit' messages, sorted oldest->newest for LLM context.
+    Example: If customer has 100 messages and limit=20, returns messages #81-100 sorted #81->#100.
+    """
     logger.info(f"get_chat_history called - customer_id: {customer_id}, limit: {limit}")
 
     async with AsyncSessionLocal() as db:
+        # First fetch most recent messages (DESC order)
         query = (
             select(ChatSession)
             .where(ChatSession.customer_id == customer_id)
-            .order_by(ChatSession.created_at.asc())
+            .order_by(ChatSession.created_at.desc())
             .limit(limit)
         )
         result = await db.execute(query)
         rows = result.scalars().all()
+
+        # Reverse to get oldest->newest order for proper LLM context
+        rows = rows[::-1]
 
         logger.info(f"get_chat_history found {len(rows)} rows for customer_id: {customer_id}")
         for row in rows:

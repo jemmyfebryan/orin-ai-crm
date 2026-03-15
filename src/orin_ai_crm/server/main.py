@@ -474,9 +474,9 @@ async def send_message_to_freshchat(conversation_id: str, message_content: str, 
     url = f"{FRESHCHAT_URL}/conversations/{conversation_id}/messages"
 
     payload = {
-        # "actor_type": "agent",
-        # "actor_id": AGENT_ID_BOT,
-        # "message_type": "normal",
+        "actor_type": "agent",
+        "actor_id": AGENT_ID_BOT,
+        "message_type": "normal",
         "message_parts": [
             {
                 "text": {

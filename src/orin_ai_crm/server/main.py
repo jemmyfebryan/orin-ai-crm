@@ -1075,6 +1075,12 @@ async def freshchat_webhook_endpoint(
         # 3. Parse JSON Payload
         payload = await request.json()
 
+        # DEBUG: Log the entire webhook payload to understand the structure
+        logger.info(f"========== WEBHOOK PAYLOAD START ==========")
+        logger.info(f"Full payload: {payload}")
+        logger.info(f"Payload keys: {list(payload.keys())}")
+        logger.info(f"========== WEBHOOK PAYLOAD END ==========")
+
         # 4. Anti-Loop Mechanism (CRITICAL)
         # Extract actor_type to prevent processing our own AI's messages
         # Structure: {"actor": {"actor_type": "user|agent|system"}}
@@ -1097,15 +1103,35 @@ async def freshchat_webhook_endpoint(
         data = payload.get("data", {})
         message = data.get("message", {})
 
+        # DEBUG: Log message structure
+        logger.info(f"Message object: {message}")
+        logger.info(f"Message keys: {list(message.keys())}")
+
         # Extract required fields with safe defaults
         conversation_id = message.get("conversation_id", "")
 
         # CRITICAL: Channel Filter - ONLY respond to WhatsApp messages
-        message_source = message.get("message_source", "").lower().strip()
+        # Try multiple possible locations for channel/source information
+        message_source = (
+            message.get("message_source", "") or  # In message object
+            message.get("source", "") or           # Alternative field name
+            message.get("channel", "") or          # Another alternative
+            data.get("source", "") or              # In data object
+            data.get("channel", "") or             # In data object
+            ""
+        ).lower().strip()
 
-        if message_source not in WHATSAPP_ALIASES:
+        logger.info(f"Detected message_source: '{message_source}'")
+
+        if message_source and message_source not in WHATSAPP_ALIASES:
             logger.info(f"Ignoring non-WhatsApp message: message_source='{message_source}'. Allowed: {WHATSAPP_ALIASES}. This AI CRM only responds to WhatsApp.")
             return FreshchatWebhookResponse(status="success")
+
+        # If message_source is empty, log a warning but allow it for now (for debugging)
+        if not message_source:
+            logger.warning(f"message_source is empty! Check the payload above. Allowing message for debugging purposes.")
+            # TODO: After debugging, uncomment below to reject empty message_source
+            # return FreshchatWebhookResponse(status="success")
 
         # Extract message content from message_parts array
         message_parts = message.get("message_parts", [])

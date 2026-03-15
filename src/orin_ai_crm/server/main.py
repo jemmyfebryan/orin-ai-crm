@@ -2,16 +2,20 @@ import uvicorn
 import asyncio
 import httpx
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
-from sqlalchemy import select, or_, delete, inspect
+from sqlalchemy import select, or_
 import os
+
+# Setup WIB timezone (UTC+7)
+WIB = timezone(timedelta(hours=7))
 
 # Import dari modular structure
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, ChatSession, Customer
+from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, Customer
 
 # Explicit imports from specific modules to avoid naming conflicts with tools
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
@@ -99,7 +103,7 @@ class ChatResponse(BaseModel):
     route: str
     step: str
 
-class ResetHistoryRequest(BaseModel):
+class ResetCustomerRequest(BaseModel):
     phone_number: Optional[str] = Field(None, description="Nomor WhatsApp user")
     lid_number: Optional[str] = Field(None, description="WhatsApp LID number")
 
@@ -113,10 +117,10 @@ class ResetHistoryRequest(BaseModel):
             raise ValueError('Minimal salah satu dari phone_number atau lid_number harus diisi')
         return v
 
-class ResetHistoryResponse(BaseModel):
+class ResetCustomerResponse(BaseModel):
     success: bool
     message: str
-    deleted_count: int
+    deleted_tables: dict[str, int]
     customer_id: Optional[int] = None
 
 class ResetProductsResponse(BaseModel):
@@ -751,21 +755,28 @@ async def freshchat_agent_endpoint(
             message=f"Chat request error: {str(e)}"
         )
         
-# --- ENDPOINT RESET HISTORY (UNTUK TESTING/DEV) ---
-@app.post("/reset-history", response_model=ResetHistoryResponse)
-async def reset_history_endpoint(req: ResetHistoryRequest):
+# --- ENDPOINT DELETE CUSTOMER (SOFT DELETE - UNTUK TESTING/DEV) ---
+@app.post("/delete-customer", response_model=ResetCustomerResponse)
+async def delete_customer_endpoint(req: ResetCustomerRequest):
     """
-    Reset history chat dan data customer untuk testing/development.
-    Ini akan menghapus semua chat history dan mereset data customer ke nilai default,
-    tetapi mempertahankan phone_number dan lid_number.
+    Soft delete customer dengan menandai deleted_at timestamp.
+
+    Ini TIDAK menghapus data dari database, hanya menandai customer sebagai "deleted".
+    Semua data (chat_sessions, intent_classifications, dll) tetap preserved untuk ML training.
+
+    Yang diubah:
+    - Set deleted_at timestamp di tabel customers
+
+    Data preserved untuk training:
+    - intent_classifications (untuk intent classification training)
+    - chat_sessions (untuk context analysis)
+    - semua foreign key tables lainnya
     """
     try:
         identifier = {
             "phone_number": req.phone_number,
             "lid_number": req.lid_number
         }
-
-        deleted_count = 0
 
         async with AsyncSessionLocal() as db:
             # 1. Cari customer berdasarkan identifier
@@ -779,72 +790,43 @@ async def reset_history_endpoint(req: ResetHistoryRequest):
             customer = result.scalars().first()
 
             if not customer:
-                return ResetHistoryResponse(
+                return ResetCustomerResponse(
                     success=True,
                     message=f"Tidak ditemukan customer untuk identifier: {identifier}",
-                    deleted_count=0
+                    deleted_tables={"customers_marked_deleted": 0},
+                    customer_id=None
                 )
 
-            customer_id = customer.id
+            # Check if already deleted
+            if customer.deleted_at is not None:
+                return ResetCustomerResponse(
+                    success=True,
+                    message=f"Customer sudah di-delete sebelumnya pada: {customer.deleted_at}",
+                    deleted_tables={"customers_marked_deleted": 0},
+                    customer_id=customer.id
+                )
 
-            # 2. Hapus semua chat sessions untuk customer ini
-            chat_delete = delete(ChatSession).where(ChatSession.customer_id == customer_id)
-            chat_result = await db.execute(chat_delete)
-            deleted_count += chat_result.rowcount
-
-            # 3. Reset customer data ke nilai default dari model (dynamic approach)
-            # Kolom yang di-preserve: phone_number, lid_number, created_at, id
-            preserved_columns = {"id", "phone_number", "lid_number", "created_at"}
-
-            # Get SQLAlchemy mapper untuk Customer
-            mapper = inspect(Customer)
-
-            for column_prop in mapper.attrs:
-                column_name = column_prop.key
-
-                # Skip preserved columns
-                if column_name in preserved_columns:
-                    continue
-
-                # Get the SQLAlchemy Column object
-                column = column_prop.columns[0]
-
-                # Get default value from column definition
-                default_value = column.default
-
-                if default_value is not None:
-                    # Handle callable defaults (like lambda functions for datetime)
-                    if callable(default_value.arg):
-                        # Skip callable defaults like datetime.now(WIB)
-                        # Use None if column is nullable
-                        setattr(customer, column_name, None if column.nullable else None)
-                    else:
-                        # Use the static default value
-                        setattr(customer, column_name, default_value.arg)
-                else:
-                    # No default specified, use None if nullable
-                    setattr(customer, column_name, None)
-
-            # Explicitly set is_onboarded to False
-            customer.is_onboarded = False
-
-            # updated_at akan auto-update oleh onupdate
-
+            # 2. Soft delete: Set deleted_at timestamp
+            customer.deleted_at = datetime.now(WIB)
             await db.commit()
+            await db.refresh(customer)
 
-        return ResetHistoryResponse(
+        return ResetCustomerResponse(
             success=True,
-            message=f"Berhasil reset history untuk customer_id: {customer_id}",
-            deleted_count=deleted_count,
-            customer_id=customer_id
+            message=f"Berhasil soft-delete customer untuk customer_id: {customer.id}. Data preserved untuk training.",
+            deleted_tables={"customers_marked_deleted": 1},
+            customer_id=customer.id
         )
 
     except Exception as e:
         print(f"Error: {str(e)}")
-        return ResetHistoryResponse(
+        import traceback
+        traceback.print_exc()
+        return ResetCustomerResponse(
             success=False,
-            message=f"Gagal reset history: {str(e)}",
-            deleted_count=0
+            message=f"Gagal soft-delete customer: {str(e)}",
+            deleted_tables={"customers_marked_deleted": 0},
+            customer_id=None
         )
 
 # --- ENDPOINT RESET PRODUCTS (UNTUK TESTING/DEV) ---

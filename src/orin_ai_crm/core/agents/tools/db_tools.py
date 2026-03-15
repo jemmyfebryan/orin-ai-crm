@@ -33,13 +33,19 @@ async def get_or_create_customer(
         # Search by phone_number first (priority)
         customer = None
         if phone_number:
-            query = select(Customer).where(Customer.phone_number == phone_number)
+            query = select(Customer).where(
+                Customer.phone_number == phone_number,
+                Customer.deleted_at.is_(None)  # Exclude soft-deleted customers
+            )
             result = await db.execute(query)
             customer = result.scalars().first()
 
         # If not found, search by lid_number
         if not customer and lid_number:
-            query = select(Customer).where(Customer.lid_number == lid_number)
+            query = select(Customer).where(
+                Customer.lid_number == lid_number,
+                Customer.deleted_at.is_(None)  # Exclude soft-deleted customers
+            )
             result = await db.execute(query)
             customer = result.scalars().first()
 

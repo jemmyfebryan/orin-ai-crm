@@ -36,6 +36,7 @@ class Customer(Base):
     is_b2b = Column(Boolean, default=False)
     is_onboarded = Column(Boolean, default=False)
     human_takeover = Column(Boolean, default=False)  # Flag untuk human takeover when AI cannot handle
+    deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
 

@@ -798,7 +798,7 @@ async def delete_customer_endpoint(req: ResetCustomerRequest):
                     customer_id=None
                 )
 
-            query = select(Customer).where(or_(*conditions))
+            query = select(Customer).where(Customer.deleted_at.is_(None), or_(*conditions))
             result = await db.execute(query)
             customer = result.scalars().first()
 

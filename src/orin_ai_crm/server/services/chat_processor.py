@@ -103,7 +103,9 @@ async def process_chat_request(
     }
 
     # 7. Run Agentic AI Workflow
-    final_state = await hana_agent.ainvoke(initial_state, recursion_limit=50)
+    # Lower recursion limit to prevent infinite tool calling loops
+    # Each tool call = 1 step. 10 steps = plenty for normal flow
+    final_state = await hana_agent.ainvoke(initial_state, recursion_limit=10)
 
     logger.info(f"FINAL STATE (Agent): messages_count={len(final_state['messages'])}")
 

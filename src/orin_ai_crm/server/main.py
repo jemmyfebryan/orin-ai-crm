@@ -681,6 +681,7 @@ async def freshchat_agent_endpoint(
     - async_mode=False: Waits for processing, returns {"status": "completed"}
     """
     try:
+        logger.info(f"Get a request: {req}")
         conversation_link = req.conversation_id  # temporary use link
         conversation_id = conversation_link.split("/")[-1]
 

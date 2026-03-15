@@ -53,6 +53,7 @@ python-dateutil = "^2.9.0"
 # Jupyter
 ipykernel = "^7.1.0"
 jupyter = "^1.1.1"
+cryptography = "^46.0.5"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^9.0.2"

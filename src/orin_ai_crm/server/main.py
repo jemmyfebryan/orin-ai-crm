@@ -47,6 +47,18 @@ ALLOWED_NUMBERS = [
     "+6285850434383",
 ]
 
+# Supported message sources for WhatsApp (case-insensitive)
+WHATSAPP_ALIASES = [
+    "whatsapp",
+    "wa",
+    "whatsapp_integration",
+    "whatsapp-integration",
+    "whats_app",  # Just in case
+]
+
+# Freshchat API configuration
+FRESHCHAT_API_VERSION = "v2"  # or "v1" depending on your Freshchat account
+
 # Security scheme for Bearer token authentication
 security = HTTPBearer()
 
@@ -871,6 +883,40 @@ async def reset_products_endpoint():
 
 # --- FRESHCHAT WEBHOOK ENDPOINT (Production-Ready) ---
 
+async def get_freshchat_user_details(user_id: str) -> dict:
+    """
+    Fetch user details from Freshchat API to get phone number and other info.
+
+    Args:
+        user_id: Freshchat user ID
+
+    Returns:
+        User details dict with phone, first_name, etc. or None if failed
+    """
+    try:
+        url = f"{FRESHCHAT_URL}/users/{user_id}"
+
+        headers = {
+            "Authorization": f"Bearer {FRESHCHAT_API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers, timeout=10.0)
+
+            if response.status_code == 200:
+                user_data = response.json()
+                logger.info(f"Fetched user details: phone={user_data.get('phone')}, first_name={user_data.get('first_name')}")
+                return user_data
+            else:
+                logger.error(f"Failed to fetch user details: status={response.status_code}, body={response.text}")
+                return None
+
+    except Exception as e:
+        logger.error(f"Error fetching Freshchat user details: {str(e)}")
+        return None
+
+
 def verify_freshchat_signature(payload: bytes, signature_b64: str) -> bool:
     """
     Verify Freshchat webhook signature using RSA-SHA256.
@@ -936,25 +982,38 @@ class FreshchatWebhookResponse(BaseModel):
 @app.get("/debug-webhook-key")
 async def debug_webhook_key():
     """
-    Debug endpoint to check if the Freshchat public key is loaded correctly.
+    Debug endpoint to check if the Freshchat public key and allowlist are configured correctly.
     Remove this endpoint in production!
     """
     key = FRESHCHAT_WEBHOOK_TOKEN
-    if not key:
-        return {
-            "status": "error",
-            "message": "FRESHCHAT_WEBHOOK_TOKEN is not set",
-            "key_preview": None
-        }
+    api_token = FRESHCHAT_API_TOKEN
+    freshchat_url = FRESHCHAT_URL
 
     return {
         "status": "ok",
-        "message": "Public key is set",
-        "key_preview": key[:100] if len(key) > 100 else key,
-        "key_length": len(key),
-        "has_begin_marker": "-----BEGIN" in key,
-        "has_end_marker": "-----END" in key,
-        "format": "PEM" if "-----BEGIN" in key else "Raw base64"
+        "message": "Configuration loaded",
+        "webhook_auth": {
+            "configured": bool(key),
+            "key_preview": key[:100] if key else None,
+            "key_length": len(key) if key else 0,
+            "has_begin_marker": "-----BEGIN" in key if key else False,
+            "has_end_marker": "-----END" in key if key else False,
+            "format": "PEM" if key and "-----BEGIN" in key else "Raw base64"
+        },
+        "freshchat_api": {
+            "configured": bool(api_token and freshchat_url),
+            "url": freshchat_url
+        },
+        "allowlist": {
+            "allowed_numbers": ALLOWED_NUMBERS,
+            "count": len(ALLOWED_NUMBERS),
+            "mode": "Restricted (phone number filter)"
+        },
+        "channel_filter": {
+            "allowed_sources": WHATSAPP_ALIASES,
+            "description": "This AI CRM only responds to WhatsApp messages",
+            "matching": "case-insensitive"
+        }
     }
 
 @app.post("/freshchat-webhook", response_model=FreshchatWebhookResponse)
@@ -968,23 +1027,32 @@ async def freshchat_webhook_endpoint(
     This endpoint:
     - Accepts webhooks from Freshchat platform
     - Verifies RSA signature authentication
+    - ONLY responds to WhatsApp messages (ignores Instagram, web, etc.)
     - Implements anti-loop mechanism (only processes user messages)
-    - Filters by allowlist for beta testing
     - Responds instantly with 200 OK (within 3-second timeout)
-    - Processes all heavy lifting in background tasks
+    - Processes all heavy lifting in background tasks (API calls, allowlist checks, AI)
 
     Authentication:
     - Header: X-Freshchat-Signature: <Base64-encoded signature>
     - Algorithm: RSA-SHA256
     - Public key from: FRESHCHAT_WEBHOOK_TOKEN env variable
 
+    Channel Filter (CRITICAL):
+    - Only processes messages where message_source in WHATSAPP_ALIASES
+    - Supported aliases: "whatsapp", "wa", "whatsapp_integration", etc.
+    - Matching is case-insensitive (e.g., "WhatsApp", "WHATSAPP", "whatsapp" all work)
+    - Ignores Instagram, web, and other channels
+    - This AI CRM is WhatsApp ONLY
+
     Anti-Loop Mechanism:
     - Only processes messages where actor.actor_type == "user"
     - Safely aborts if actor_type is "agent" or "system"
 
-    Allowlist Filter:
-    - Only processes phone numbers in ALLOWED_NUMBERS
-    - Logs and aborts for non-allowed numbers
+    Background Processing:
+    - All heavy lifting happens in background task (FAST response)
+    - Fetches user details from Freshchat API
+    - Checks phone number against ALLOWED_NUMBERS
+    - Processes AI response
     """
     try:
         # 1. Get Raw Body for Signature Verification
@@ -1032,18 +1100,24 @@ async def freshchat_webhook_endpoint(
         # Extract required fields with safe defaults
         conversation_id = message.get("conversation_id", "")
 
+        # CRITICAL: Channel Filter - ONLY respond to WhatsApp messages
+        message_source = message.get("message_source", "").lower().strip()
+
+        if message_source not in WHATSAPP_ALIASES:
+            logger.info(f"Ignoring non-WhatsApp message: message_source='{message_source}'. Allowed: {WHATSAPP_ALIASES}. This AI CRM only responds to WhatsApp.")
+            return FreshchatWebhookResponse(status="success")
+
         # Extract message content from message_parts array
         message_parts = message.get("message_parts", [])
         message_content = ""
         if message_parts and len(message_parts) > 0:
             message_content = message_parts[0].get("text", {}).get("content", "")
 
-        # Extract phone number from actor_id (user_id in Freshchat)
-        # Note: Freshchat webhook doesn't send phone directly, need to use user_id
+        # Extract user_id from Freshchat
         user_id = message.get("user_id", "")
 
         # Log extracted data
-        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, user_id={user_id}, message={message_content[:50] if message_content else 'empty'}")
+        logger.info(f"Webhook data extracted: conversation_id={conversation_id}, user_id={user_id}, source={message_source}, message={message_content[:50] if message_content else 'empty'}")
 
         # 7. Validation Checks
         if not conversation_id or not message_content:
@@ -1051,24 +1125,13 @@ async def freshchat_webhook_endpoint(
             # Still return 200 OK (payload was malformed but we received it)
             return FreshchatWebhookResponse(status="success")
 
-        # 8. Phone Number Resolution (from user_id or use default)
-        # For now, we'll use a placeholder since Freshchat webhook doesn't send phone directly
-        # In production, you might need to call Freshchat API to get user details
-        phone_number = "+6285850434383"  # Placeholder - will be resolved in background task
-
-        # 9. Allowlist / Beta Testing Filter
-        if phone_number not in ALLOWED_NUMBERS:
-            logger.info(f"Phone number not in allowlist: {phone_number}. Leaving for human agents.")
-            # Return 200 OK - don't process, but don't retry
-            return FreshchatWebhookResponse(status="success")
-
-        # 10. Queue Background Task (all heavy processing happens here)
+        # 8. Queue Background Task (all heavy processing happens here)
+        # We do all heavy lifting (API calls, allowlist checks, AI processing) in background
         background_tasks.add_task(
             process_freshchat_webhook_task,
-            phone_number=phone_number,
+            user_id=user_id,
             message_content=message_content,
-            conversation_id=conversation_id,
-            user_id=user_id
+            conversation_id=conversation_id
         )
 
         logger.info(f"Background task queued for webhook: conversation={conversation_id}")
@@ -1086,10 +1149,9 @@ async def freshchat_webhook_endpoint(
 
 
 async def process_freshchat_webhook_task(
-    phone_number: str,
+    user_id: str,
     message_content: str,
-    conversation_id: str,
-    user_id: str
+    conversation_id: str
 ):
     """
     Background task to process Freshchat webhook payload.
@@ -1098,21 +1160,43 @@ async def process_freshchat_webhook_task(
     All heavy processing happens here to avoid the 3-second timeout.
 
     Args:
-        phone_number: User's WhatsApp phone number
+        user_id: Freshchat user ID
         message_content: Message text content
         conversation_id: Freshchat conversation ID
-        user_id: Freshchat user ID
     """
     try:
-        logger.info(f"Processing webhook task: conversation={conversation_id}, phone={phone_number}, user_id={user_id}")
+        logger.info(f"Processing webhook task: conversation={conversation_id}, user_id={user_id}")
 
-        # Integrate with existing AI processing logic
+        # 1. Fetch User Details from Freshchat API (to get phone number)
+        user_details = await get_freshchat_user_details(user_id)
+
+        if not user_details:
+            logger.warning(f"Failed to fetch user details for user_id={user_id}. Leaving for human agents.")
+            return
+
+        phone_number = user_details.get("phone", "")
+        contact_name = user_details.get("first_name", "")
+
+        if not phone_number:
+            logger.warning(f"User has no phone number: user_id={user_id}. Leaving for human agents.")
+            return
+
+        logger.info(f"User details fetched: phone={phone_number}, name={contact_name}")
+
+        # 2. Allowlist / Beta Testing Filter (by phone number)
+        if phone_number not in ALLOWED_NUMBERS:
+            logger.info(f"Phone number not in allowlist: {phone_number}. ALLOWED_NUMBERS={ALLOWED_NUMBERS}. Leaving for human agents.")
+            return
+
+        logger.info(f"Allowlist check passed for phone_number: {phone_number}")
+
+        # 3. Integrate with existing AI processing logic
         # Reuse the process_freshchat_agent_task function
         await process_freshchat_agent_task(
             phone_number=phone_number,
             lid_number=None,  # Webhook only provides phone_number
             message=message_content,
-            contact_name=None,  # Could be extracted from payload if needed
+            contact_name=contact_name,  # Pass the contact name from Freshchat
             is_new_chat=False,  # Could be determined from conversation history
             conversation_id=conversation_id,
             user_id=user_id  # Pass the user_id from webhook

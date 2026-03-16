@@ -19,18 +19,25 @@ logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
-HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+# HANA_PERSONA is now loaded from database (hana_persona prompt key)
+# Hardcoded fallback in case DB is not available
+HANA_PERSONA_FALLBACK = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
-
-ATURAN PRODUK GPS MOBIL:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
-- Tipe INSTAL: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak).
 
 ATURAN PERCAKAPAN:
 - Jawab dengan personalized berdasarkan nama customer jika tersedia
-- Gunakan konteks percakapan sebelumnya untuk memberikan response yang relevan
-- Jangan ulang informasi yang sudah diketahui dari percakapan sebelumnya
 - Singkat tapi ramah dan membantu"""
+
+
+async def get_hana_persona() -> str:
+    """Load Hana persona from database, with fallback to hardcoded value."""
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+
+    persona = await get_prompt_from_db("hana_persona")
+    if not persona:
+        logger.warning("hana_persona not found in DB, using fallback")
+        return HANA_PERSONA_FALLBACK
+    return persona
 
 
 class AnswerQualityEvaluation(BaseModel):
@@ -62,7 +69,7 @@ class FinalMessagesResponse(BaseModel):
     )
 
 
-def evaluate_answer_quality(
+async def evaluate_answer_quality(
     user_message: str,
     ai_answer: str,
     customer_name: Optional[str] = None,
@@ -82,6 +89,9 @@ def evaluate_answer_quality(
     """
     logger.info(f"evaluate_answer_quality called - user_msg: {user_message[:50]}..., ai_answer: {ai_answer[:50]}...")
 
+    # Load persona from DB
+    hana_persona = await get_hana_persona()
+
     customer_context = f"Customer: {customer_name}" if customer_name else "Customer: Kak"
 
     # Build conversation context from history
@@ -98,7 +108,7 @@ def evaluate_answer_quality(
             content = msg.content if hasattr(msg, 'content') else str(msg)
             conversation_context += f"{role}: {content}\n"
 
-    system_prompt = f"""{HANA_PERSONA}
+    system_prompt = f"""{hana_persona}
 
 TASK:
 Kamu adalah Quality Evaluator untuk jawaban AI dari ORIN GPS Tracker.
@@ -180,9 +190,12 @@ async def generate_human_takeover_message(
     """
     logger.info(f"generate_human_takeover_message called - customer: {customer_name}")
 
+    # Load persona from DB
+    hana_persona = await get_hana_persona()
+
     customer_context = customer_name if customer_name else "Kak"
 
-    system_prompt = f"""{HANA_PERSONA}
+    system_prompt = f"""{hana_persona}
 
 TASK:
 Generate pesan handover yang natural dan ramah untuk menjelaskan bahwa agent manusia yang akan mengambil alih percakapan.
@@ -461,8 +474,11 @@ Jumlah unit: 2
 Kebutuhan: Pribadi"
 """
 
+    # Load persona from DB
+    hana_persona = await get_hana_persona()
+
     # Build system prompt for LLM
-    system_prompt = f"""{HANA_PERSONA}
+    system_prompt = f"""{hana_persona}
 
 TASK:
 Kamu adalah Final Message Generator untuk Hana AI dari ORIN GPS Tracker.

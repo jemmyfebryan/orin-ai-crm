@@ -6,6 +6,7 @@ For non-agent contexts, call these tools using .ainvoke() or .invoke()
 """
 
 import os
+import importlib.util
 from typing import Optional, List, Annotated
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
@@ -112,26 +113,45 @@ def format_products_for_llm(products: List[dict]) -> str:
     return formatted
 
 
-def get_default_products_json_path() -> str:
-    """Get path to default_products.json file"""
+def get_default_products_py_path() -> str:
+    """Get path to default_products.py file"""
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(current_dir, "..", "custom", "hana_agent", "default_products.json")
+    return os.path.join(current_dir, "..", "custom", "hana_agent", "default_products.py")
 
 
-def load_default_products_from_json() -> list:
-    """Load default products from JSON file in hana_agent folder."""
-    json_path = get_default_products_json_path()
+def load_default_products_from_py() -> list:
+    """Load default products from Python file in hana_agent folder."""
+    py_path = get_default_products_py_path()
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            default_products = json.load(f)
-        logger.info(f"Loaded {len(default_products)} default products from {json_path}")
-        return default_products if isinstance(default_products, list) else []
+        # Load the Python module dynamically
+        spec = importlib.util.spec_from_file_location("default_products", py_path)
+        if spec is None or spec.loader is None:
+            logger.error(f"Failed to load module spec from {py_path}")
+            return []
+
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Get DEFAULT_PRODUCTS from the module
+        default_products = getattr(module, 'DEFAULT_PRODUCTS', None)
+
+        if default_products is None:
+            logger.error(f"DEFAULT_PRODUCTS not found in {py_path}")
+            return []
+
+        if not isinstance(default_products, list):
+            logger.error(f"DEFAULT_PRODUCTS is not a list in {py_path}")
+            return []
+
+        logger.info(f"Loaded {len(default_products)} default products from {py_path}")
+        return default_products
+
     except FileNotFoundError:
-        logger.error(f"Default products JSON file not found: {json_path}")
+        logger.error(f"Default products Python file not found: {py_path}")
         return []
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding default products JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error loading default products from Python file: {e}")
         return []
 
 
@@ -985,14 +1005,14 @@ async def get_ecommerce_product(product_identifier: str) -> dict:
 
 @tool
 async def reset_products_to_default() -> dict:
-    """Reset all products in database to default values from JSON file."""
+    """Reset all products in database to default values from Python file."""
     logger.info("TOOL: reset_products_to_default")
 
-    default_products = load_default_products_from_json()
+    default_products = load_default_products_from_py()
 
     if not default_products:
-        logger.error("No default products found in JSON file")
-        return {"deleted": 0, "created": 0, "errors": ["JSON file not found or empty"]}
+        logger.error("No default products found in Python file")
+        return {"deleted": 0, "created": 0, "errors": ["Python file not found or empty"]}
 
     summary = {"deleted": 0, "created": 0, "errors": []}
 

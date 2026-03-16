@@ -6,7 +6,7 @@ Following the same pattern as product_agent_tools.py.
 """
 
 import os
-import json
+import importlib.util
 from typing import Optional
 
 from sqlalchemy import select, delete, text
@@ -21,39 +21,48 @@ logger = get_logger(__name__)
 # INTERNAL HELPER FUNCTIONS
 # ============================================================================
 
-def get_default_prompts_json_path() -> str:
-    """Get path to default_prompts.json file in hana_agent folder"""
+def get_default_prompts_py_path() -> str:
+    """Get path to default_prompts.py file in hana_agent folder"""
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(current_dir, "..", "custom", "hana_agent", "default_prompts.json")
+    return os.path.join(current_dir, "..", "custom", "hana_agent", "default_prompts.py")
 
 
-def load_default_prompts_from_json() -> list:
+def load_default_prompts_from_py() -> list:
     """
-    Load default prompts from JSON file in hana_agent folder.
+    Load default prompts from Python file in hana_agent folder.
     Returns list of prompt dicts matching Prompt schema.
     """
-    json_path = get_default_prompts_json_path()
+    py_path = get_default_prompts_py_path()
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # Extract prompts array from JSON structure
-        if isinstance(data, dict) and "prompts" in data:
-            default_prompts = data["prompts"]
-        elif isinstance(data, list):
-            default_prompts = data
-        else:
-            logger.error(f"Invalid JSON structure in {json_path}")
+        # Load the Python module dynamically
+        spec = importlib.util.spec_from_file_location("default_prompts", py_path)
+        if spec is None or spec.loader is None:
+            logger.error(f"Failed to load module spec from {py_path}")
             return []
 
-        logger.info(f"Loaded {len(default_prompts)} default prompts from {json_path}")
-        return default_prompts if isinstance(default_prompts, list) else []
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Get DEFAULT_PROMPTS from the module
+        default_prompts = getattr(module, 'DEFAULT_PROMPTS', None)
+
+        if default_prompts is None:
+            logger.error(f"DEFAULT_PROMPTS not found in {py_path}")
+            return []
+
+        if not isinstance(default_prompts, list):
+            logger.error(f"DEFAULT_PROMPTS is not a list in {py_path}")
+            return []
+
+        logger.info(f"Loaded {len(default_prompts)} default prompts from {py_path}")
+        return default_prompts
+
     except FileNotFoundError:
-        logger.error(f"Default prompts JSON file not found: {json_path}")
+        logger.error(f"Default prompts Python file not found: {py_path}")
         return []
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding default prompts JSON: {e}")
+    except Exception as e:
+        logger.error(f"Error loading default prompts from Python file: {e}")
         return []
 
 
@@ -154,17 +163,17 @@ async def update_prompt_in_db(prompt_key: str, prompt_text: str) -> dict:
 
 async def reset_prompts_to_default() -> dict:
     """
-    Reset all prompts in database to default values from JSON file.
+    Reset all prompts in database to default values from Python file.
 
     This is similar to reset_products_to_default in product_agent_tools.py.
-    It will delete all existing prompts and create new ones from JSON.
+    It will delete all existing prompts and create new ones from Python file.
 
     Returns:
         dict with: deleted (int), created (int), errors (list)
     """
-    logger.info("Resetting prompts to default from JSON")
+    logger.info("Resetting prompts to default from Python file")
 
-    default_prompts = load_default_prompts_from_json()
+    default_prompts = load_default_prompts_from_py()
 
     if not default_prompts:
         logger.error("No default prompts found in JSON file")

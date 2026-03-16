@@ -1,0 +1,233 @@
+"""
+Default Products for ORIN GPS Tracker
+
+This file contains the default product catalog.
+These products are loaded into the database on first startup or when reset.
+
+To add a new product:
+1. Add a dict to the DEFAULT_PRODUCTS list
+2. Ensure all required fields are present
+3. Use triple quotes for multi-line description if needed
+"""
+
+DEFAULT_PRODUCTS = [
+    {
+        "name": "OBU M",
+        "sku": "OBU-M",
+        "category": "TANAM",
+        "subcategory": "OBU",
+        "description": "GPS Tracker dengan fitur pelacakan real-time. Termasuk FREE Pelacak mini Orin Tag Android.",
+        "features": {
+            "fitur_utama": ["Lacak real-time", "Riwayat perjalanan seminggu terakhir"],
+            "bonus": "FREE Pelacak mini Orin Tag Android",
+            "server": "ORIN LITE"
+        },
+        "price": "25rb/bulan (perpanjangan setelah 1 bulan pertama)",
+        "installation_type": "pasang_technisi",
+        "can_shutdown_engine": False,
+        "is_realtime_tracking": True,
+        "ecommerce_links": {
+            "tokopedia": "https://tk.tokopedia.com/ZSa1x5Rpd/",
+            "shopee": "https://id.shp.ee/5mJ3NnE"
+        },
+        "specifications": {
+            "kuota_awal": "Gratis 1 bulan",
+            "garansi": "Seumur hidup",
+            "komponen": ["Sim Card"],
+            "note": "Varian 'unit only' hanya alat saja tanpa kuota dan server, ada garansi 1th"
+        },
+        "is_active": True,
+        "sort_order": 1
+    },
+    {
+        "name": "OBU V",
+        "sku": "OBU-V",
+        "category": "TANAM",
+        "subcategory": "OBU",
+        "description": "GPS Tracker dengan fitur matikan mesin jarak jauh dan sadap suara. Pemasangan oleh teknisi.",
+        "features": {
+            "fitur_utama": ["Lacak real-time", "Matikan mesin jarak jauh", "Sadap suara", "Riwayat perjalanan seminggu terakhir"],
+            "server": "ORIN LITE"
+        },
+        "price": "25rb/bulan (perpanjangan setelah 1 bulan pertama)",
+        "installation_type": "pasang_technisi",
+        "can_shutdown_engine": True,
+        "is_realtime_tracking": True,
+        "ecommerce_links": {
+            "tokopedia": "https://tk.tokopedia.com/ZSfrb4RGp/",
+            "tiktokshop": "https://vt.tokopedia.com/t/ZSHw7cTrBkss4-Of0ut/",
+            "shopee": "https://id.shp.ee/gmGRm9J"
+        },
+        "specifications": {
+            "kuota_awal": "Gratis 1 bulan",
+            "garansi": "Seumur hidup",
+            "komponen": ["Sim Card"],
+            "note": "Varian 'unit only' hanya alat saja tanpa kuota dan server, ada garansi 1th"
+        },
+        "is_active": True,
+        "sort_order": 2
+    },
+    {
+        "name": "OBU F",
+        "sku": "OBU-F",
+        "category": "TANAM",
+        "subcategory": "OBU",
+        "description": "GPS Tracker premium dengan fitur matikan mesin, monitoring BBM, dan memori internal untuk area lemah sinyal.",
+        "features": {
+            "fitur_utama": ["Lacak real-time", "Matikan mesin jarak jauh", "Monitoring BBM (add on)", "Memori internal penyimpan data", "Riwayat perjalanan 3 bulan terakhir", "5 geofence/pagar maya", "Data report/laporan detail"],
+            "server": "ORIN PLUS"
+        },
+        "price": "350k/6 bulan atau 600rb/tahun (perpanjangan setelah 1 tahun pertama)",
+        "installation_type": "pasang_technisi",
+        "can_shutdown_engine": True,
+        "is_realtime_tracking": True,
+        "ecommerce_links": {
+            "tokopedia": "https://tk.tokopedia.com/ZS5qRnT6e/",
+            "shopee": "https://id.shp.ee/YZF3wbA"
+        },
+        "specifications": {
+            "kuota_awal": "Gratis 1 tahun",
+            "garansi": "Seumur Hidup",
+            "komponen": ["Sim Card"],
+            "note": "Varian 'unit only' hanya alat saja tanpa kuota dan server, ada garansi 1th"
+        },
+        "is_active": True,
+        "sort_order": 3
+    },
+    {
+        "name": "OBU D",
+        "sku": "OBU-D",
+        "category": "INSTAN",
+        "subcategory": "OBU",
+        "description": "GPS Tracker plug-and-play. Bisa pasang mandiri, tinggal colok ke port OBD mobil.",
+        "features": {
+            "fitur_utama": ["Lacak real-time", "Riwayat perjalanan 3 bulan terakhir", "5 geofence/pagar maya", "Data report/laporan detail"],
+            "server": "ORIN PLUS",
+            "pemasangan": "Bisa pasang mandiri, colok ke port OBD"
+        },
+        "price": "350k/6 bulan atau 600rb/tahun (perpanjangan setelah 6 bulan pertama)",
+        "installation_type": "colok_sendiri",
+        "can_shutdown_engine": False,
+        "is_realtime_tracking": True,
+        "ecommerce_links": {
+            "shopee": "https://id.shp.ee/kBFg5iz"
+        },
+        "specifications": {
+            "kuota_awal": "Gratis 6 bulan",
+            "garansi": "1 tahun",
+            "komponen": ["Sim Card"],
+            "note": "Varian 'unit only' hanya alat saja tanpa kuota dan server, ada garansi 1th"
+        },
+        "is_active": True,
+        "sort_order": 4
+    },
+    {
+        "name": "OBU T1",
+        "sku": "OBU-T1",
+        "category": "INSTAN",
+        "subcategory": "OBU",
+        "description": "GPS Tracker compact type, plug-and-play via OBD port.",
+        "features": {
+            "pemasangan": "Colok sendiri ke OBD port"
+        },
+        "installation_type": "colok_sendiri",
+        "can_shutdown_engine": False,
+        "is_realtime_tracking": True,
+        "specifications": {
+            "pemasangan": "Plug-and-play ke OBD port"
+        },
+        "is_active": True,
+        "sort_order": 5
+    },
+    {
+        "name": "OBU T",
+        "sku": "OBU-T",
+        "category": "INSTAN",
+        "subcategory": "OBU",
+        "description": "GPS Tracker basic type, plug-and-play via OBD port.",
+        "features": {
+            "pemasangan": "Colok sendiri ke OBD port"
+        },
+        "installation_type": "colok_sendiri",
+        "can_shutdown_engine": False,
+        "is_realtime_tracking": True,
+        "specifications": {
+            "pemasangan": "Plug-and-play ke OBD port"
+        },
+        "is_active": True,
+        "sort_order": 6
+    },
+    {
+        "name": "ORIN TAG ANDROID",
+        "sku": "ORIN-TAG-ANDROID",
+        "category": "AKSESORIS",
+        "subcategory": "TAG",
+        "description": "Pelacak mini untuk Android. Compact tracker yang bisa dipasang pada berbagai benda berharga.",
+        "features": {
+            "kompatibilitas": "Android",
+            "tipe": "Bluetooth/GPS tracker"
+        },
+        "is_realtime_tracking": True,
+        "specifications": {
+            "platform": "Android"
+        },
+        "is_active": True,
+        "sort_order": 7
+    },
+    {
+        "name": "ORIN TAG IOS",
+        "sku": "ORIN-TAG-IOS",
+        "category": "AKSESORIS",
+        "subcategory": "TAG",
+        "description": "Pelacak mini untuk iOS. Compact tracker yang bisa dipasang pada berbagai benda berharga.",
+        "features": {
+            "kompatibilitas": "iOS",
+            "tipe": "Bluetooth/GPS tracker"
+        },
+        "is_realtime_tracking": True,
+        "specifications": {
+            "platform": "iOS"
+        },
+        "is_active": True,
+        "sort_order": 8
+    },
+    {
+        "name": "TPMS",
+        "sku": "TPMS",
+        "category": "AKSESORIS",
+        "subcategory": "SENSOR",
+        "description": "Tire Pressure Monitoring System - Sensor tekanan ban untuk monitoring kesehatan ban kendaraan.",
+        "features": {
+            "tipe": "Sensor tekanan ban"
+        },
+        "specifications": {
+            "fungsi": "Monitoring tekanan ban"
+        },
+        "is_active": True,
+        "sort_order": 9
+    },
+    {
+        "name": "AI CAM",
+        "sku": "AI-CAM",
+        "category": "KAMERA",
+        "subcategory": "CAMERA",
+        "description": "Kamera AI dengan fitur streaming live, deteksi AI (ADAS & DMS), dan GPS tracker.",
+        "features": {
+            "fitur_utama": ["Streaming Live Camera", "Deteksi AI (ADAS & DMS)", "Pengawasan Audio", "Komunikasi microphone 2 arah", "GPS lacak real-time", "Laporan perjalanan"],
+            "tidak_termasuk": "SDCard penyimpanan"
+        },
+        "price": "600rb/6 bulan atau 1.200.000/tahun (perpanjangan kuota include server)",
+        "installation_type": "pasang_technisi",
+        "can_shutdown_engine": False,
+        "is_realtime_tracking": True,
+        "ecommerce_links": {
+            "shopee": "https://id.shp.ee/YXi7N7Z"
+        },
+        "specifications": {
+            "garansi": "1 tahun",
+            "note": "Varian 'unit only' hanya alat saja tanpa kuota dan server"
+        },
+        "is_active": True,
+        "sort_order": 10
+    }
+]

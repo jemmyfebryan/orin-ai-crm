@@ -92,6 +92,9 @@ llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_K
 #    - generate_empathetic_response: Generate empathetic response
 #    - set_human_takeover_flag: Trigger human takeover
 
+# 6. COMPANY INFORMATION (1 tool):
+#    - get_company_profile: Get company profile, address, contact info
+
 # System prompts are now loaded from database via get_prompt_from_db()
 # The default prompts are stored in default_prompts.json
 # Available prompt keys:

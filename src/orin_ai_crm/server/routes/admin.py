@@ -1,5 +1,5 @@
 """
-Admin endpoints for customer management and product reset.
+Admin endpoints for customer management, product reset, and prompt management.
 """
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_
@@ -7,9 +7,13 @@ from sqlalchemy import select, or_
 from fastapi import APIRouter, HTTPException
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
-from src.orin_ai_crm.server.schemas.admin import ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse
+from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
+from src.orin_ai_crm.server.schemas.admin import (
+    ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
+    PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse
+)
 
 # Setup WIB timezone (UTC+7)
 WIB = timezone(timedelta(hours=7))
@@ -160,6 +164,123 @@ async def reset_products_endpoint():
         return ResetProductsResponse(
             success=False,
             message=f"Gagal reset products: {str(e)}",
+            deleted=0,
+            created=0,
+            errors=[str(e)]
+        )
+
+
+# ============================================================================
+# PROMPT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/prompts", response_model=GetPromptsResponse)
+async def get_prompts_endpoint():
+    """
+    Get all prompts from database.
+
+    Returns all active prompts with their details.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Prompt).where(Prompt.is_active == True)
+            )
+            prompts = result.scalars().all()
+
+            prompt_items = [
+                PromptItem(
+                    prompt_key=p.prompt_key,
+                    prompt_name=p.prompt_name,
+                    prompt_text=p.prompt_text,
+                    description=p.description,
+                    prompt_type=p.prompt_type,
+                    is_active=p.is_active
+                )
+                for p in prompts
+            ]
+
+            return GetPromptsResponse(
+                success=True,
+                prompts=prompt_items,
+                count=len(prompt_items)
+            )
+
+    except Exception as e:
+        logger.error(f"Error in get_prompts_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return GetPromptsResponse(
+            success=False,
+            prompts=[],
+            count=0
+        )
+
+
+@router.put("/prompts/{prompt_key}", response_model=UpdatePromptResponse)
+async def update_prompt_endpoint(prompt_key: str, req: UpdatePromptRequest):
+    """
+    Update a specific prompt in database.
+
+    Args:
+        prompt_key: The prompt key to update (e.g., "hana_base_agent")
+        req: Request body with new prompt_text
+
+    Returns:
+        UpdatePromptResponse with success status
+    """
+    try:
+        logger.info(f"UPDATE PROMPT REQUEST - prompt_key: {prompt_key}")
+
+        result = await update_prompt_in_db(prompt_key, req.prompt_text)
+
+        if result['success']:
+            return UpdatePromptResponse(
+                success=True,
+                message=result['message'],
+                prompt_key=prompt_key
+            )
+        else:
+            raise HTTPException(status_code=404, detail=result['message'])
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in update_prompt_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UpdatePromptResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            prompt_key=prompt_key
+        )
+
+
+@router.post("/prompts/reset", response_model=ResetPromptsResponse)
+async def reset_prompts_endpoint():
+    """
+    Reset prompts table to default values from JSON file.
+
+    Hati-hati: Ini akan MENGHAPUS SEMUA prompts dan menggantinya dengan default dari JSON!
+    """
+    try:
+        result = await reset_prompts_to_default()
+
+        return ResetPromptsResponse(
+            success=True,
+            message=f"Berhasil reset prompts: {result['created']} prompt dibuat, {result['deleted']} prompt dihapus",
+            deleted=result.get("deleted", 0),
+            created=result.get("created", 0),
+            errors=result.get("errors", [])
+        )
+
+    except Exception as e:
+        logger.error(f"Error in reset_prompts_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ResetPromptsResponse(
+            success=False,
+            message=f"Gagal reset prompts: {str(e)}",
             deleted=0,
             created=0,
             errors=[str(e)]

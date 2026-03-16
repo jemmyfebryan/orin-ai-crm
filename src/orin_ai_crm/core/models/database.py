@@ -134,3 +134,16 @@ class IntentClassification(Base):
     step = Column(String(50), nullable=True)  # Step yang dieksekusi
     message_context = Column(Text, nullable=True)  # Context pesan user (last message for reference)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
+
+class Prompt(Base):
+    """Table untuk menyimpan prompts - system, user, tool prompts"""
+    __tablename__ = "prompts"
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_key = Column(String(100), unique=True, index=True, nullable=False)  # e.g., "hana_base_agent"
+    prompt_name = Column(String(200), nullable=False)  # e.g., "Hana Base Agent"
+    prompt_text = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    prompt_type = Column(String(50), default="system")  # "system", "user", "tool", etc
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))
+    updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))

@@ -17,19 +17,12 @@ from langgraph.prebuilt import InjectedState
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 import json
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
-
-HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif.
-Jangan terlalu kaku, gunakan bahasa natural seperti chat WhatsApp asli.
-
-ATURAN PRODUK GPS MOBIL:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)."""
 
 
 # ============================================================================
@@ -624,6 +617,11 @@ async def answer_product_question(
     """
     logger.info("TOOL: answer_product_question")
 
+    # Get Hana persona from database (fresh on each invoke)
+    hana_persona = await get_prompt_from_db("hana_ecommerce_agent")
+    if not hana_persona:
+        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+
     result = await get_all_active_products.ainvoke({})
     products = result['products']
     products_context = format_products_for_llm(products)
@@ -637,7 +635,7 @@ Customer Profile:
 - B2B: {customer_profile.get('is_b2b', False)}
 """
 
-    prompt = f"""{HANA_PERSONA}
+    prompt = f"""{hana_persona}
 
 {products_context}
 
@@ -819,6 +817,11 @@ async def recommend_products_for_customer(
     """
     logger.info("TOOL: recommend_products_for_customer")
 
+    # Get Hana persona from database (fresh on each invoke)
+    hana_persona = await get_prompt_from_db("hana_ecommerce_agent")
+    if not hana_persona:
+        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+
     vehicle_alias = customer_profile.get('vehicle_alias', '')
     vehicle_type = 'motor' if 'motor' in vehicle_alias.lower() else 'mobil'
 
@@ -838,7 +841,7 @@ async def recommend_products_for_customer(
     customer_name = customer_profile.get('name') or 'Kak'
     unit_qty = customer_profile.get('unit_qty', 1)
 
-    prompt = f"""{HANA_PERSONA}
+    prompt = f"""{hana_persona}
 
 {products_context}
 

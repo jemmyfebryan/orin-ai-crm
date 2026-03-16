@@ -36,3 +36,41 @@ class ResetProductsResponse(BaseModel):
     deleted: int
     created: int
     errors: list[str]
+
+
+class PromptItem(BaseModel):
+    """Single prompt item."""
+    prompt_key: str
+    prompt_name: str
+    prompt_text: str
+    description: Optional[str] = None
+    prompt_type: str = "system"
+    is_active: bool = True
+
+
+class GetPromptsResponse(BaseModel):
+    """Response schema for get-prompts endpoint."""
+    success: bool
+    prompts: list[PromptItem]
+    count: int
+
+
+class UpdatePromptRequest(BaseModel):
+    """Request schema for update-prompt endpoint."""
+    prompt_text: str
+
+
+class UpdatePromptResponse(BaseModel):
+    """Response schema for update-prompt endpoint."""
+    success: bool
+    message: str
+    prompt_key: str
+
+
+class ResetPromptsResponse(BaseModel):
+    """Response schema for reset-prompts endpoint."""
+    success: bool
+    message: str
+    deleted: int
+    created: int
+    errors: list[str]

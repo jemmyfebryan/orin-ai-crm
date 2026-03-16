@@ -37,7 +37,7 @@ import json
 from typing import List, Dict
 
 from langgraph.graph import StateGraph, END
-from langchain_core.messages import ToolMessage, AIMessage
+from langchain_core.messages import ToolMessage
 from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.models.schemas import AgentState
@@ -52,6 +52,7 @@ from src.orin_ai_crm.core.agents.tools.customer_agent_tools import (
 )
 from src.orin_ai_crm.core.agents.tools.meeting_agent_tools import SALES_MEETING_TOOLS
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import PRODUCT_ECOMMERCE_TOOLS
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_quality_check,
     quality_router,
@@ -91,158 +92,12 @@ llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_K
 #    - generate_empathetic_response: Generate empathetic response
 #    - set_human_takeover_flag: Trigger human takeover
 
-HANA_AGENT_SYSTEM_PROMPT = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
-
-ATURAN PRODUK GPS:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
-
-KEMAMPUAN TOOL:
-Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi menjadi:
-
-1. CUSTOMER MANAGEMENT (1 tool):
-   - update_customer_data: Update specific customer fields
-
-2. PROFILING (4 tools):
-   - extract_customer_info_from_message: Extract info from message using LLM
-   - check_profiling_completeness: Check if profiling is complete
-   - determine_next_profiling_field: Determine what to ask next
-
-3. PRODUCT (5 tools):
-   - query_products_with_llm: Universal tool about products
-   - get_all_active_products: Get all products from database
-   - get_product_details: Get detailed product info
-   - get_ecommerce_links: Get e-commerce purchase links
-   - create_product_inquiry: Create product inquiry record
-
-DATA CUSTOMER:
-Data profil customer sudah dimuat otomatis sebelum kamu memulai. Cek informasi yang tersedia di context.
-
-Alur Percakapan:
-1. JAWAB PERTANYAAN CUSTOMER adalah PRIORITAS UTAMA
-2. Pakai tool update_customer_data setiap ada data customer profile baru dari user seperti nama, domisili, jenis kendaraan, jumlah unit kendaraan
-3. Pakai tool check_profiling_completeness untuk mengecek apakah profil user sudah lengkap atau belum
-
-⚠️ PENTING - BATASAN PENGGUNAAN TOOL:
-1. PROFILING TOOLS (check_profiling_completeness, determine_next_profiling, extract_customer_info):
-   - MAKSIMAL dipanggil 2x setiap
-   - Setelah 2x, langsung JAWAB pertanyaan customer dengan product tools
-   - Jangan panggil profiling tools berulang-ulang
-
-2. JIKA CUSTOMER TANYA PRODUK (ada kata "bedanya", "apa", "bagaimana", "produk", "obu", "gps"):
-   - PRIORITAS: Jawab dengan query_products_with_llm
-   - Profiling bisa dilakukan sambil menjawab
-   - Jangan fokus ke profiling dulu
-
-3. JIKA PROFILING TOOLS mengembalikan hasil kosong 2x berturut-turut:
-   - BERHENTI panggil profiling tools
-   - Langsung jawab pertanyaan customer
-
-INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
-"""
-
-SALES_AGENT_SYSTEM_PROMPT = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
-
-ATURAN PRODUK GPS:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
-
-SALES MODE:
-Customer ini adalah PEMBELI KECIL (B2C atau order kecil <=5 unit).
-Fokus tugas kamu:
-1. Tawarkan meeting dengan tim sales untuk pembahasan lebih lanjut
-2. Gunakan meeting tools untuk booking/jadwal meeting
-3. Jangan langsung push ke e-commerce untuk pembelian
-4. Berikan info produk secara umum, tapi arahkan ke meeting untuk deal yang lebih baik
-
-KEMAMPUAN TOOL (Sales & Meeting):
-- get_pending_meeting: Cek meeting yang sudah ada
-- extract_meeting_details: Extract info meeting dari pesan
-- book_or_update_meeting_db: Booking/update meeting di database
-- generate_meeting_negotiation_message: Generate pesan negosiasi meeting
-- generate_meeting_confirmation: Generate pesan konfirmasi meeting
-- generate_existing_meeting_reminder: Generate reminder meeting yang sudah ada
-
-Alur Percakapan:
-1. Sapa customer dengan ramah
-2. Tawarkan meeting untuk diskusi lebih lanjut
-3. Jika customer setuju, booking meeting menggunakan tools
-4. Berikan konfirmasi meeting setelah berhasil dibooking
-
-INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
-"""
-
-ECOMMERCE_AGENT_SYSTEM_PROMPT = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
-
-ATURAN PRODUK GPS:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
-
-ECOMMERCE MODE:
-Customer ini adalah PROSPEK BESAR (B2B atau order besar >5 unit).
-Fokus tugas kamu:
-1. Jawab pertanyaan tentang produk dengan detail
-2. Berikan rekomendasi produk yang sesuai
-3. Berikan link e-commerce untuk pembelian langsung
-4. Bantu customer dengan informasi produk, harga, fitur, dll
-5. Selalu gunakan tool create_product_inquiry saat user tertarik pada produk
-
-KEMAMPUAN TOOL (Product & E-Commerce):
-- query_products_with_llm: Universal tool untuk tanya produk apapun
-- get_all_active_products: Get semua produk aktif dari database
-- get_product_details: Get detail produk spesifik
-- get_ecommerce_links: Get link pembelian e-commerce (Tokopedia, Shopee, dll)
-- create_product_inquiry: Create record product inquiry
-
-Alur Percakapan:
-1. Jawab pertanyaan produk dengan jelas dan akurat
-2. Berikan rekomendasi produk yang sesuai dengan kebutuhan
-3. Berikan link e-commerce untuk pembelian, pakai tools create_product_inquiry untuk memantau customer yang berpotensi membeli barang dari e-commerce
-4. Bantu customer dengan informasi yang dibutuhkan
-
-INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.
-"""
-
-
-# 3. Setelah profiling lengkap → determine route (SALES vs ECOMMERCE)
-# 4. SALES: Tawarkan meeting, gunakan meeting tools
-# 5. ECOMMERCE: Jawab pertanyaan produk, berikan rekomendasi
-
-
-
-def build_system_prompt(state: AgentState) -> str:
-    """
-    Build system prompt with customer profile context.
-    This is passed to the agent as system_prompt.
-    """
-    customer_data = state.get('customer_data', {})
-    customer_id = state.get('customer_id')
-    contact_name = state.get('contact_name')
-
-    customer_name = customer_data.get('name') or contact_name or 'Kak'
-
-    context_info = f"""Customer Profile:
-- Nama: {customer_name}
-- Domisili: {customer_data.get('domicile', 'Belum diketahui')}
-- Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
-- Jumlah Unit: {customer_data.get('unit_qty', 0)}
-- B2B: {customer_data.get('is_b2b', False)}
-- Customer ID: {customer_id or 'Belum ada'}
-
-Customer Identifier:
-- Phone Number: {state.get('phone_number') or 'N/A'}
-- LID Number: {state.get('lid_number') or 'N/A'}
-
-{HANA_AGENT_SYSTEM_PROMPT}
-"""
-
-    return context_info
+# System prompts are now loaded from database via get_prompt_from_db()
+# The default prompts are stored in default_prompts.json
+# Available prompt keys:
+#   - hana_base_agent: Main profiling agent
+#   - hana_sales_agent: Sales agent for B2B/large orders
+#   - hana_ecommerce_agent: Ecommerce agent for B2C/small orders
 
 
 async def agent_entry_handler(state: AgentState) -> Dict:
@@ -293,12 +148,6 @@ async def agent_entry_handler(state: AgentState) -> Dict:
 
         logger.info(f"State updated: customer_id={customer_id}, send_form={send_form}")
 
-    # Build system prompt with customer context
-    customer_data = state.get('customer_data', {})
-    customer_id = state.get('customer_id')
-    contact_name = state.get('contact_name')
-    customer_name = customer_data.get('name') or contact_name or 'Kak'
-
     logger.info("EXIT: agent_entry_handler")
     logger.info(f"current state: {state}")
     return state
@@ -334,8 +183,11 @@ async def agent_node(state: AgentState) -> Dict:
         except Exception as e:
             logger.error(f"Failed to load customer profile: {e}")
 
-    # Get system prompt from state (built by agent_entry_handler)
-    system_prompt = HANA_AGENT_SYSTEM_PROMPT
+    # Get system prompt from database (fresh on each invoke)
+    system_prompt = await get_prompt_from_db("hana_base_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_base_agent prompt from DB, using fallback")
+        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
 
     # Create agent with dynamic system prompt and our AgentState schema
     agent = create_agent(
@@ -385,11 +237,17 @@ async def sales_node(state: AgentState) -> Dict:
 
     logger.info("ENTER: sales_node")
 
+    # Get sales agent prompt from database (fresh on each invoke)
+    system_prompt = await get_prompt_from_db("hana_sales_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_sales_agent prompt from DB, using fallback")
+        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+
     # Create sales agent with sales tools
     agent = create_agent(
         model=llm,
         tools=SALES_MEETING_TOOLS,
-        system_prompt=SALES_AGENT_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         state_schema=AgentState,
     )
 
@@ -409,11 +267,17 @@ async def ecommerce_node(state: AgentState) -> Dict:
 
     logger.info("ENTER: ecommerce_node")
 
+    # Get ecommerce agent prompt from database (fresh on each invoke)
+    system_prompt = await get_prompt_from_db("hana_ecommerce_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_ecommerce_agent prompt from DB, using fallback")
+        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+
     # Create ecommerce agent with product tools
     agent = create_agent(
         model=llm,
         tools=PRODUCT_ECOMMERCE_TOOLS,
-        system_prompt=ECOMMERCE_AGENT_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         state_schema=AgentState,
     )
 

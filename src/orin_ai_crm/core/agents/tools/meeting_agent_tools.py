@@ -17,19 +17,12 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.schemas import MeetingInfo
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, CustomerMeeting
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 from sqlalchemy import select
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
-
-HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif.
-Jangan terlalu kaku, gunakan bahasa natural seperti chat WhatsApp asli.
-
-ATURAN PRODUK GPS MOBIL:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)."""
 
 
 @tool
@@ -255,9 +248,14 @@ async def generate_meeting_negotiation_message(
     """
     logger.info(f"TOOL: generate_meeting_negotiation_message - reschedule: {is_reschedule}")
 
+    # Get Hana persona from database (fresh on each invoke)
+    hana_persona = await get_prompt_from_db("hana_sales_agent")
+    if not hana_persona:
+        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+
     task = "reschedule meeting" if is_reschedule else "book new meeting"
 
-    prompt = f"""{HANA_PERSONA}
+    prompt = f"""{hana_persona}
 
 Customer: {customer_name}
 Context: {conversation_context}
@@ -334,7 +332,12 @@ async def generate_existing_meeting_reminder(
     """
     logger.info(f"TOOL: generate_existing_meeting_reminder")
 
-    prompt = f"""{HANA_PERSONA}
+    # Get Hana persona from database (fresh on each invoke)
+    hana_persona = await get_prompt_from_db("hana_sales_agent")
+    if not hana_persona:
+        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+
+    prompt = f"""{hana_persona}
 
 Customer: {customer_name}
 Existing Meeting: {existing_meeting_info}

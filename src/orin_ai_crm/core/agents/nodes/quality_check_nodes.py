@@ -411,27 +411,57 @@ async def node_final_message(state: AgentState):
     logger.info(f"send_form: {send_form}")
     logger.info(f"customer_id: {customer_id}")
 
-    # Fetch real WhatsApp conversation history from database
-    # This gives us clean context without workflow artifacts (tool calls, routing, etc.)
-    conversation_summary = ""
+    # Build conversation context from TWO sources:
+    # 1. Database history (real WhatsApp messages) - for conversation flow context
+    # 2. State messages (current execution) - for tool results and what just happened
+
+    # PART 1: Get WhatsApp conversation history from database
+    db_conversation_summary = ""
     if customer_id:
         try:
-            chat_history = await get_chat_history(customer_id, limit=10)
+            chat_history = await get_chat_history(customer_id, limit=8)  # Last 8 messages
+            logger.info(f"Fetched {len(chat_history)} messages from database for customer {customer_id}")
 
-            # Build conversation summary from database history
+            # Build summary from database (pure WhatsApp messages)
             for msg in chat_history:
                 role = msg.message_role  # 'user' or 'ai'
                 content = msg.content
                 role_display = "User" if role == "user" else "AI"
-                conversation_summary += f"{role_display}: {content}\n\n"
+                db_conversation_summary += f"{role_display}: {content}\n\n"
 
-            logger.info(f"Built conversation summary from DB: {len(chat_history)} messages")
+            logger.info(f"Built DB conversation summary: {len(chat_history)} messages")
         except Exception as e:
             logger.error(f"Error fetching chat history from DB: {e}")
-            conversation_summary = "(Error loading conversation history)"
-    else:
-        logger.warning("No customer_id available, cannot fetch chat history")
-        conversation_summary = "(No conversation history available)"
+            db_conversation_summary = "(Error loading conversation history)"
+
+    # PART 2: Get current workflow execution from state
+    # Filter to show what happened in THIS interaction (tool calls + latest messages)
+    current_execution_summary = ""
+    messages = state.get("messages", [])
+
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            current_execution_summary += f"User: {msg.content}\n\n"
+        elif isinstance(msg, AIMessage):
+            # Include AIMessage content (actual responses)
+            if msg.content and msg.content.strip():
+                current_execution_summary += f"AI: {msg.content}\n\n"
+            # Include tool calls for transparency
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    tool_name = tool_call.get('name', 'unknown_tool')
+                    current_execution_summary += f"[AI called tool: {tool_name}]\n"
+
+    logger.info(f"Built current execution summary: {len(messages)} recent messages")
+
+    # PART 3: Combine both summaries
+    # Start with DB history for context, then add current execution
+    conversation_summary = f"""=== WHATSAPP CONVERSATION HISTORY ===
+{db_conversation_summary}
+
+=== AI AGENT WORKFLOW INTERNAL CONVERSATION ===
+{current_execution_summary}
+"""
 
     # Build form instructions if needed
     form_instructions = ""
@@ -474,16 +504,9 @@ TASK:
 Kamu adalah Final Message Generator untuk Hana AI dari ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
-CUSTOMER PROFILE:
-- Nama: {customer_name}
-- Domisili: {customer_data.get('domicile', 'Belum diketahui')}
-- Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
-- Jumlah Unit: {customer_data.get('unit_qty', 0)}
-- B2B: {customer_data.get('is_b2b', False)}
-{form_instructions}
-
 CONVERSATION HISTORY:
 {conversation_summary if conversation_summary else "(No conversation history)"}
+{form_instructions}
 
 CONTEXT:
 - Percakapan ini mungkin melibatkan berbagai tool calls (database operations, product searches, dll)

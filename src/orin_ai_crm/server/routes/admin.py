@@ -1,18 +1,20 @@
 """
 Admin endpoints for customer management, product reset, and prompt management.
 """
+import json
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_
 
 from fastapi import APIRouter, HTTPException
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
 from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
 from src.orin_ai_crm.server.schemas.admin import (
     ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
-    PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse
+    PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse,
+    ProductItem, GetProductsResponse, UpdateProductRequest, UpdateProductResponse
 )
 
 # Setup WIB timezone (UTC+7)
@@ -145,6 +147,8 @@ async def reset_products_endpoint():
     """
     Reset products table to default values from JSON file.
     Hati-hati: Ini akan MENGHAPUS SEMUA produk dan menggantinya dengan default dari JSON!
+
+    DEPRECATED: Use /admin/products/reset instead
     """
     try:
         result = await reset_products_to_default.ainvoke({})
@@ -159,6 +163,181 @@ async def reset_products_endpoint():
 
     except Exception as e:
         print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ResetProductsResponse(
+            success=False,
+            message=f"Gagal reset products: {str(e)}",
+            deleted=0,
+            created=0,
+            errors=[str(e)]
+        )
+
+
+# ============================================================================
+# PRODUCT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/products", response_model=GetProductsResponse)
+async def get_products_endpoint():
+    """
+    Get all products from database.
+
+    Returns all products with their details.
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Product).where(Product.is_active == True).order_by(Product.sort_order.asc(), Product.name.asc())
+            )
+            products = result.scalars().all()
+
+            product_items = [
+                ProductItem(
+                    id=p.id,
+                    name=p.name,
+                    sku=p.sku,
+                    category=p.category,
+                    subcategory=p.subcategory,
+                    vehicle_type=p.vehicle_type,
+                    description=p.description,
+                    features=json.loads(p.features) if p.features else {},
+                    price=p.price,
+                    installation_type=p.installation_type,
+                    can_shutdown_engine=p.can_shutdown_engine,
+                    is_realtime_tracking=p.is_realtime_tracking,
+                    ecommerce_links=json.loads(p.ecommerce_links) if p.ecommerce_links else {},
+                    images=json.loads(p.images) if p.images else [],
+                    specifications=json.loads(p.specifications) if p.specifications else {},
+                    compatibility=json.loads(p.compatibility) if p.compatibility else {},
+                    is_active=p.is_active,
+                    sort_order=p.sort_order
+                )
+                for p in products
+            ]
+
+            return GetProductsResponse(
+                success=True,
+                products=product_items,
+                count=len(product_items)
+            )
+
+    except Exception as e:
+        logger.error(f"Error in get_products_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return GetProductsResponse(
+            success=False,
+            products=[],
+            count=0
+        )
+
+
+@router.put("/products/{product_id}", response_model=UpdateProductResponse)
+async def update_product_endpoint(product_id: int, req: UpdateProductRequest):
+    """
+    Update a specific product in database.
+
+    Args:
+        product_id: The product ID to update
+        req: Request body with fields to update
+
+    Returns:
+        UpdateProductResponse with success status
+    """
+    try:
+        logger.info(f"UPDATE PRODUCT REQUEST - product_id: {product_id}")
+
+        async with AsyncSessionLocal() as db:
+            # Find existing product
+            result = await db.execute(
+                select(Product).where(Product.id == product_id)
+            )
+            product = result.scalars().first()
+
+            if not product:
+                raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
+
+            # Update fields that are provided
+            if req.name is not None:
+                product.name = req.name
+            if req.sku is not None:
+                product.sku = req.sku
+            if req.category is not None:
+                product.category = req.category
+            if req.subcategory is not None:
+                product.subcategory = req.subcategory
+            if req.vehicle_type is not None:
+                product.vehicle_type = req.vehicle_type
+            if req.description is not None:
+                product.description = req.description
+            if req.features is not None:
+                product.features = json.dumps(req.features)
+            if req.price is not None:
+                product.price = req.price
+            if req.installation_type is not None:
+                product.installation_type = req.installation_type
+            if req.can_shutdown_engine is not None:
+                product.can_shutdown_engine = req.can_shutdown_engine
+            if req.is_realtime_tracking is not None:
+                product.is_realtime_tracking = req.is_realtime_tracking
+            if req.ecommerce_links is not None:
+                product.ecommerce_links = json.dumps(req.ecommerce_links)
+            if req.images is not None:
+                product.images = json.dumps(req.images)
+            if req.specifications is not None:
+                product.specifications = json.dumps(req.specifications)
+            if req.compatibility is not None:
+                product.compatibility = json.dumps(req.compatibility)
+            if req.is_active is not None:
+                product.is_active = req.is_active
+            if req.sort_order is not None:
+                product.sort_order = req.sort_order
+
+            await db.commit()
+            await db.refresh(product)
+
+            logger.info(f"Product updated: {product_id}")
+
+            return UpdateProductResponse(
+                success=True,
+                message=f"Product {product_id} updated successfully",
+                product_id=product_id
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in update_product_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return UpdateProductResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            product_id=product_id
+        )
+
+
+@router.post("/products/reset", response_model=ResetProductsResponse)
+async def reset_products_endpoint_v2():
+    """
+    Reset products table to default values from JSON file.
+
+    Hati-hati: Ini akan MENGHAPUS SEMUA produk dan menggantinya dengan default dari JSON!
+    """
+    try:
+        result = await reset_products_to_default.ainvoke({})
+
+        return ResetProductsResponse(
+            success=True,
+            message=f"Berhasil reset products: {result['created']} produk dibuat, {result['deleted']} produk dihapus",
+            deleted=result.get("deleted", 0),
+            created=result.get("created", 0),
+            errors=result.get("errors", [])
+        )
+
+    except Exception as e:
+        logger.error(f"Error in reset_products_endpoint_v2: {str(e)}")
         import traceback
         traceback.print_exc()
         return ResetProductsResponse(

@@ -2,7 +2,7 @@
 Admin endpoint Pydantic schemas.
 """
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Optional, Dict, Any
 
 
 class ResetCustomerRequest(BaseModel):
@@ -36,6 +36,63 @@ class ResetProductsResponse(BaseModel):
     deleted: int
     created: int
     errors: list[str]
+
+
+class ProductItem(BaseModel):
+    """Single product item."""
+    id: int
+    name: str
+    sku: str
+    category: str
+    subcategory: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    description: Optional[str] = None
+    features: Optional[Dict[str, Any]] = None
+    price: Optional[str] = None
+    installation_type: str
+    can_shutdown_engine: bool = False
+    is_realtime_tracking: bool = True
+    ecommerce_links: Optional[Dict[str, str]] = None
+    images: Optional[list[str]] = None
+    specifications: Optional[Dict[str, Any]] = None
+    compatibility: Optional[Dict[str, Any]] = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class GetProductsResponse(BaseModel):
+    """Response schema for get-products endpoint."""
+    success: bool
+    products: list[ProductItem]
+    count: int
+
+
+class UpdateProductRequest(BaseModel):
+    """Request schema for update-product endpoint."""
+    name: Optional[str] = None
+    sku: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    description: Optional[str] = None
+    features: Optional[Dict[str, Any]] = None
+    price: Optional[str] = None
+    installation_type: Optional[str] = None
+    can_shutdown_engine: Optional[bool] = None
+    is_realtime_tracking: Optional[bool] = None
+    ecommerce_links: Optional[Dict[str, str]] = None
+    images: Optional[list[str]] = None
+    specifications: Optional[Dict[str, Any]] = None
+    compatibility: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class UpdateProductResponse(BaseModel):
+    """Response schema for update-product endpoint."""
+    success: bool
+    message: str
+    product_id: int
 
 
 class PromptItem(BaseModel):

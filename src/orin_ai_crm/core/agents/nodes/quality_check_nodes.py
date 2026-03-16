@@ -504,9 +504,16 @@ TASK:
 Kamu adalah Final Message Generator untuk Hana AI dari ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
+CUSTOMER PROFILE:
+- Nama: {customer_name}
+- Domisili: {customer_data.get('domicile', 'Belum diketahui')}
+- Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
+- Jumlah Unit: {customer_data.get('unit_qty', 0)}
+- B2B: {customer_data.get('is_b2b', False)}
+{form_instructions}
+
 CONVERSATION HISTORY:
 {conversation_summary if conversation_summary else "(No conversation history)"}
-{form_instructions}
 
 CONTEXT:
 - Percakapan ini mungkin melibatkan berbagai tool calls (database operations, product searches, dll)

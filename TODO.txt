@@ -6,7 +6,6 @@
 -Tambah kolom (intent_route) -> default, ecommerce, sales agar route bisa flexible.
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message
 -Update products knowledge, tambahkan kolom apakah produk ini untuk motor atau bukan
--Knowledge tentang ORIN
 -Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION
 
 -Field nama otomatis diambil dr contact_name langsung insert aja
@@ -19,3 +18,4 @@
 
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)
+-Knowledge tentang ORIN (Done)

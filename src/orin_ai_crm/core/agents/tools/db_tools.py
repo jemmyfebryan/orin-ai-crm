@@ -74,6 +74,7 @@ async def get_or_create_customer(
                 phone_number=phone_number,
                 lid_number=lid_number,
                 contact_name=contact_name,
+                name=contact_name,
                 is_onboarded=False
             )
             db.add(customer)

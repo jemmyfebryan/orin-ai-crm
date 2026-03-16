@@ -4,8 +4,6 @@
 -Tambah kolom (intent_route) -> default, ecommerce, sales agar route bisa flexible.
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message
 -Update products knowledge, tambahkan kolom apakah produk ini untuk motor atau bukan
--Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION
--Final messages ini aneh kadang gk nyambung dengan chat historis
 -Kirim Gambar, Kirim PDF produk
 -Kalau is_b2b langsung ke sales node aja tawarin meeting (btw ini works cuma mungkin perlu langsung routing ke sales_node), tapi malah stuck ke pertanyaan apakah mau meeting, ini dicoba 2-3x kali baru nawarin jadwal
 -After node nya agak aneh, mungkin butuh agent tambahan sebelum ke final message. Contoh setelah udah fix jadwal meeting, nanya2 tentang produk ini harusnya sales_node bisa kosongin tools paling nggak
@@ -18,3 +16,5 @@
 -Pesan mohon tunggu sebentar jika lebih dari 10 detik (Done)
 -Hapus tools query db dari ecommerce_tools, terlalu lama dan tidak pernah berguna (DOne)
 -Pertimbangkan mengembalikan tools2 ecommerce_tools yang telah dihapus (Done)
+-Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION (Done)
+-Final messages ini aneh kadang gk nyambung dengan chat historis, inject dari get_chat_history (Done)

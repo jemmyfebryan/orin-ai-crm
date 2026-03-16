@@ -384,7 +384,7 @@ async def node_final_message(state: AgentState):
     Final Message Node - Synthesizes the conversation into user-friendly multi-bubble response.
 
     This node:
-    - Filters out tool messages and backend operations
+    - Fetches WhatsApp conversation history from database for context
     - Summarizes what happened from user's perspective
     - Generates multiple chat bubbles when appropriate
     - Handles form integration when send_form=True
@@ -397,6 +397,7 @@ async def node_final_message(state: AgentState):
         Updated state with final_messages (list of strings for multi-bubble chat)
     """
     from langchain_core.messages import ToolMessage, HumanMessage
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
 
     logger.info("=" * 50)
     logger.info("ENTER: node_final_message")
@@ -405,43 +406,32 @@ async def node_final_message(state: AgentState):
     customer_id = customer_data.get("id")
     customer_name = customer_data.get("name") or state.get("contact_name", "Kak")
     send_form = state.get("send_form", False)
-    messages = state.get("messages", [])
 
     logger.info(f"Customer Data: {customer_data}")
     logger.info(f"send_form: {send_form}")
-    logger.info(f"Total messages in state: {len(messages)}")
+    logger.info(f"customer_id: {customer_id}")
 
-    # Filter messages to extract only user-facing content
-    # Remove ToolMessage (backend operations) and keep only HumanMessage + AIMessage content
-    filtered_messages = []
-    for msg in messages:
-        # Skip ToolMessage (tool results - backend operations)
-        if isinstance(msg, ToolMessage):
-            continue
-        # For AIMessage, only include if it has actual content (not just tool_calls)
-        if isinstance(msg, AIMessage):
-            if msg.content and msg.content.strip():
-                filtered_messages.append(msg)
-        else:
-            # Keep HumanMessage and other message types
-            filtered_messages.append(msg)
-
-    logger.info(f"Filtered messages (user-facing): {len(filtered_messages)}")
-
-    # Build conversation summary for LLM
+    # Fetch real WhatsApp conversation history from database
+    # This gives us clean context without workflow artifacts (tool calls, routing, etc.)
     conversation_summary = ""
-    if filtered_messages:
-        # Get last few messages for context (max 10)
-        recent_messages = filtered_messages[-10:]
-        for msg in recent_messages:
-            if isinstance(msg, HumanMessage):
-                role = "User"
-            elif isinstance(msg, AIMessage):
-                role = "AI"
-            else:
-                role = "Unknown"
-            content = msg.content if hasattr(msg, 'content') else str(msg)
-            conversation_summary += f"{role}: {content}\n\n"
+    if customer_id:
+        try:
+            chat_history = await get_chat_history(customer_id, limit=10)
+
+            # Build conversation summary from database history
+            for msg in chat_history:
+                role = msg.message_role  # 'user' or 'ai'
+                content = msg.content
+                role_display = "User" if role == "user" else "AI"
+                conversation_summary += f"{role_display}: {content}\n\n"
+
+            logger.info(f"Built conversation summary from DB: {len(chat_history)} messages")
+        except Exception as e:
+            logger.error(f"Error fetching chat history from DB: {e}")
+            conversation_summary = "(Error loading conversation history)"
+    else:
+        logger.warning("No customer_id available, cannot fetch chat history")
+        conversation_summary = "(No conversation history available)"
 
     # Build form instructions if needed
     form_instructions = ""
@@ -511,7 +501,8 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 3. Use emoji naturally in appropriate bubbles
 4. Be conversational and friendly
 5. DON'T mention technical/backend operations
-6. Personalized with customer name when appropriate"""
+6. Personalized with customer name when appropriate
+7. If this is your first message with customer (empty conversation history), introduce yourself"""
 
     # Use LLM with structured output to generate multi-bubble response
     final_messages_llm = llm.with_structured_output(FinalMessagesResponse)

@@ -458,9 +458,6 @@ PROFILING_TOOLS = [
     extract_customer_info_from_message,
     check_profiling_completeness,
     determine_next_profiling,
-    # generate_profiling_question,
-    # search_vehicle_in_vps,
-    # create_lead_routing,
 ]
 
 __all__ = ['PROFILING_TOOLS']

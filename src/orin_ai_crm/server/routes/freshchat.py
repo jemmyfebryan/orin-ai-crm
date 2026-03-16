@@ -205,10 +205,10 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 2.5. Start timeout timer (5 seconds)
+        # 2.5. Start timeout timer (10 seconds)
         # If processing takes longer, send "please wait" message
         async def send_timeout_after_delay():
-            await asyncio.sleep(5)  # Wait 5 seconds
+            await asyncio.sleep(10)  # Wait 10 seconds
             await send_timeout_message(conversation_id)
 
         timeout_task = asyncio.create_task(send_timeout_after_delay())

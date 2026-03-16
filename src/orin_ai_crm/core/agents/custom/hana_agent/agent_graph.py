@@ -65,44 +65,6 @@ logger = get_logger(__name__)
 # Initialize LLM with tool calling support
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
 
-
-#    - search_vehicle_in_vps: Search vehicle in VPS database
-#    - create_lead_routing: Create lead routing when profiling complete
-# System prompt for the agent
-
-# 3. SALES & MEETING (6 tools):
-#    - get_pending_meeting: Get existing meeting
-#    - extract_meeting_details: Extract meeting info from message
-#    - book_or_update_meeting_db: Book/update meeting in database
-#    - generate_meeting_negotiation_message: Generate negotiation message
-#    - generate_meeting_confirmation: Generate confirmation message
-#    - generate_existing_meeting_reminder: Generate reminder for existing meeting
-
-# 4. PRODUCT & E-COMMERCE (8 tools):
-#    - search_products: Search products by keyword/category/vehicle
-#    - get_product_details: Get detailed product info
-#    - answer_product_question: Answer product questions
-#    - get_ecommerce_links: Get e-commerce purchase links
-#    - create_product_inquiry: Create product inquiry record
-#    - get_pending_product_inquiry: Get existing inquiry
-#    - recommend_products_for_customer: Recommend products
-
-# 5. SUPPORT & COMPLAINTS (3 tools):
-#    - classify_issue_type: Classify issue (complaint/support/general)
-#    - generate_empathetic_response: Generate empathetic response
-#    - set_human_takeover_flag: Trigger human takeover
-
-# 6. COMPANY INFORMATION (1 tool):
-#    - get_company_profile: Get company profile, address, contact info
-
-# System prompts are now loaded from database via get_prompt_from_db()
-# The default prompts are stored in default_prompts.json
-# Available prompt keys:
-#   - hana_base_agent: Main profiling agent
-#   - hana_sales_agent: Sales agent for B2B/large orders
-#   - hana_ecommerce_agent: Ecommerce agent for B2C/small orders
-
-
 async def agent_entry_handler(state: AgentState) -> Dict:
     """
     Entry point handler - ensures customer_id exists and builds system prompt.
@@ -201,7 +163,9 @@ async def agent_node(state: AgentState) -> Dict:
     )
 
     # Invoke the agent with current state
-    result = await agent.ainvoke(state)
+    # IMPORTANT: recursion_limit prevents infinite tool-calling loops within this node
+    # This is SEPARATE from the graph-level recursion_limit
+    result = await agent.ainvoke(state, recursion_limit=8)
 
     # Detecting Route changes from tools
     new_messages: List = result.get("messages", [])
@@ -255,7 +219,8 @@ async def sales_node(state: AgentState) -> Dict:
     )
 
     # Invoke the agent with current state
-    result = await agent.ainvoke(state)
+    # IMPORTANT: recursion_limit prevents infinite tool-calling loops
+    result = await agent.ainvoke(state, recursion_limit=10)
 
     logger.info("EXIT: sales_node")
 
@@ -285,7 +250,8 @@ async def ecommerce_node(state: AgentState) -> Dict:
     )
 
     # Invoke the agent with current state
-    result = await agent.ainvoke(state)
+    # IMPORTANT: recursion_limit prevents infinite tool-calling loops
+    result = await agent.ainvoke(state, recursion_limit=10)
 
     logger.info("EXIT: ecommerce_node")
 

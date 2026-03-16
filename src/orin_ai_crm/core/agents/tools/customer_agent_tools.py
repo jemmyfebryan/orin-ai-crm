@@ -177,13 +177,12 @@ async def get_company_profile() -> dict:
     """
     Get company profile information from database.
 
-    Use this tool when:
-    - Customer asks about the company (ORIN GPS Tracker)
+    Use this tool ONLY when:
+    - Customer EXPLICITLY asks about the company (ORIN GPS Tracker)
     - Customer asks about company address, contact info, working hours
     - Customer wants to know who we are and what we do
-    - Customer asks about our products overview
     - Customer asks about payment methods or services
-
+    
     Args:
         None
 
@@ -197,22 +196,10 @@ async def get_company_profile() -> dict:
         company_profile = await get_prompt_from_db("company_profile")
 
         if not company_profile:
-            logger.warning("Company profile not found in database, using fallback")
-            company_profile = """**ORIN GPS Tracker**
-
-Perusahaan teknologi yang berfokus pada solusi pelacakan GPS kendaraan untuk keamanan dan manajemen armada.
-
-**Alamat Kantor:**
-Jl. Teknologi No. 123, Jakarta Selatan, Indonesia 12345
-
-**Kontak:**
-- WhatsApp: +62 812-3456-7890
-- Email: info@oringpstracker.com
-
-**Jam Operasional:**
-Senin - Jumat: 08:00 - 17:00 WIB
-Sabtu: 09:00 - 14:00 WIB"""
-
+            logger.warning("Company profile not found in database, return empty")
+            return {
+                'profile': ""
+            }
         logger.info("TOOL: get_company_profile - Successfully retrieved company profile")
         return {
             'profile': company_profile
@@ -227,8 +214,6 @@ Sabtu: 09:00 - 14:00 WIB"""
 
 
 # List of customer management tools for easy import
-# NOTE: get_customer_profile is NOT included here because it's called directly
-# in agent_node before the LLM agent runs. This prevents infinite loops.
 CUSTOMER_MANAGEMENT_TOOLS = [
     update_customer_data,
     get_company_profile,

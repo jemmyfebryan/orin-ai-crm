@@ -2,6 +2,7 @@
 Freshchat integration endpoints - agent and webhook.
 """
 from typing import Optional
+import asyncio
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends
 
 from src.orin_ai_crm.core.logger import get_logger
@@ -150,6 +151,16 @@ async def freshchat_agent_endpoint(
         raise HTTPException(status_code=500, detail=f"Chat request error: {str(e)}")
 
 
+async def send_timeout_message(conversation_id: str):
+    """
+    Send a timeout message to customer if processing takes too long.
+    This function is called after 10 seconds if processing hasn't completed.
+    """
+    timeout_message = "Mohon tunggu sebentar ya, Hana akan segera membalas..."
+    logger.info(f"Sending timeout message to conversation {conversation_id}")
+    await send_message_to_freshchat(conversation_id, timeout_message)
+
+
 async def process_freshchat_webhook_task(
     user_id: str,
     message_content: str,
@@ -160,6 +171,8 @@ async def process_freshchat_webhook_task(
 
     This function runs asynchronously after the webhook returns 200 OK.
     All heavy processing happens here to avoid the 3-second timeout.
+
+    If processing takes more than 10 seconds, sends a "please wait" message.
 
     Args:
         user_id: Freshchat user ID
@@ -192,40 +205,57 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 2.5. TESTING: Check for "reset_chat" command (only for allowed numbers)
-        if message_content.strip().lower() == "reset_chat":
-            logger.info(f"Reset chat command detected for phone: {phone_number}")
+        # 2.5. Start timeout timer (5 seconds)
+        # If processing takes longer, send "please wait" message
+        async def send_timeout_after_delay():
+            await asyncio.sleep(5)  # Wait 5 seconds
+            await send_timeout_message(conversation_id)
 
-            # Import the delete function
-            from src.orin_ai_crm.server.routes.admin import soft_delete_customer_by_phone
+        timeout_task = asyncio.create_task(send_timeout_after_delay())
 
-            # Delete the customer
-            result = await soft_delete_customer_by_phone(phone_number)
+        try:
+            # 2.6. TESTING: Check for "reset_chat" command (only for allowed numbers)
+            if message_content.strip().lower() == "reset_chat":
+                logger.info(f"Reset chat command detected for phone: {phone_number}")
 
-            # Send confirmation message back to user
-            if result['success']:
-                confirmation_msg = f"✅ Chat reset successful! Customer ID: {result['customer_id']}. Starting fresh chat."
-            else:
-                confirmation_msg = f"❌ Failed to reset chat: {result['message']}"
+                # Import the delete function
+                from src.orin_ai_crm.server.routes.admin import soft_delete_customer_by_phone
 
-            # Send message to Freshchat
-            await send_message_to_freshchat(conversation_id, confirmation_msg)
+                # Delete the customer
+                result = await soft_delete_customer_by_phone(phone_number)
 
-            logger.info(f"Reset chat completed for {phone_number}: {result['message']}")
-            return  # Stop processing, don't continue to AI
+                # Send confirmation message back to user
+                if result['success']:
+                    confirmation_msg = f"✅ Chat reset successful! Customer ID: {result['customer_id']}. Starting fresh chat."
+                else:
+                    confirmation_msg = f"❌ Failed to reset chat: {result['message']}"
 
-        # 3. Integrate with existing AI processing logic
-        await process_freshchat_agent_task(
-            phone_number=phone_number,
-            lid_number=None,  # Webhook only provides phone_number
-            message=message_content,
-            contact_name=contact_name,
-            is_new_chat=True,  # Always new chat at first, the second tries will use DB as source of truth
-            conversation_id=conversation_id,
-            user_id=user_id
-        )
+                # Send message to Freshchat
+                await send_message_to_freshchat(conversation_id, confirmation_msg)
 
-        logger.info(f"Webhook processing completed for conversation {conversation_id}")
+                logger.info(f"Reset chat completed for {phone_number}: {result['message']}")
+                return  # Stop processing, don't continue to AI
+
+            # 3. Integrate with existing AI processing logic
+            await process_freshchat_agent_task(
+                phone_number=phone_number,
+                lid_number=None,  # Webhook only provides phone_number
+                message=message_content,
+                contact_name=contact_name,
+                is_new_chat=True,  # Always new chat at first, the second tries will use DB as source of truth
+                conversation_id=conversation_id,
+                user_id=user_id
+            )
+
+            logger.info(f"Webhook processing completed for conversation {conversation_id}")
+
+        finally:
+            # Cancel timeout task if processing completed within 10 seconds
+            timeout_task.cancel()
+            try:
+                await timeout_task
+            except asyncio.CancelledError:
+                pass  # Expected if task was cancelled
 
     except Exception as e:
         logger.error(f"Error in webhook background task: {str(e)}")

@@ -8,8 +8,6 @@
 -Update products knowledge, tambahkan kolom apakah produk ini untuk motor atau bukan
 -Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION
 
--Field nama otomatis diambil dr contact_name langsung insert aja
--Pesan mohon tunggu sebentar jika lebih dari 10 detik
 -Final messages ini aneh kadang gk nyambung dengan chat historis
 -Kirim Gambar, Kirim PDF produk
 -Kalau is_b2b langsung ke sales node aja tawarin meeting (btw ini works cuma mungkin perlu langsung routing ke sales_node), tapi malah stuck ke pertanyaan apakah mau meeting, ini dicoba 2-3x kali baru nawarin jadwal
@@ -19,3 +17,5 @@
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)
 -Knowledge tentang ORIN (Done)
+-Field nama otomatis diambil dr contact_name langsung insert aja (Done)
+-Pesan mohon tunggu sebentar jika lebih dari 10 detik (Done)

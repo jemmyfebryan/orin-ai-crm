@@ -105,14 +105,20 @@ class Product(Base):
     sku = Column(String(100), unique=True, index=True)  # SKU/Code produk
     category = Column(String(50), nullable=False)  # TANAM, INSTAN, KAMERA, AKSESORIS
     subcategory = Column(String(50), nullable=True)  # OBU F, OBU V, OBU D, T1, T, TAG, SENSOR, CAMERA
-    vehicle_type = Column(String(50), nullable=True)  # mobil, motor, alat berat, truck
+    vehicle_type = Column(String(50), nullable=True)  # mobil, motor, alat berat, truck, semua aset
     description = Column(Text, nullable=True)  # Deskripsi singkat produk
     features = Column(Text, nullable=True)  # Fitur-fitur dalam JSON
     price = Column(String(100), nullable=True)  # Harga (format fleksibel: "25rb/bulan", "600rb/tahun", dll)
-    installation_type = Column(String(50), nullable=False)  # pasang_technisi, colok_sendiri
+    installation_type = Column(String(50), nullable=False)  # pasang_technisi, colok_sendiri, pasang_mandiri
     can_shutdown_engine = Column(Boolean, default=False)  # Bisa matikan mesin?
+    can_wiretap = Column(Boolean, default=False)  # Bisa sadap suara?
     is_realtime_tracking = Column(Boolean, default=True)  # Lacak real-time?
-    ecommerce_links = Column(Text, nullable=True)  # JSON links ke Tokopedia, Shopee, etc
+    portable = Column(Boolean, default=False)  # Bisa dipindah-pindah?
+    battery_life = Column(String(100), nullable=True)  # "3 minggu", "6 bulan", null
+    power_source = Column(String(100), nullable=True)  # "Battery", "Lighter port", "Vehicle battery", null
+    tracking_type = Column(String(100), nullable=True)  # "GPS Satelit", "Bluetooth", null
+    monthly_fee = Column(String(100), nullable=True)  # "25rb/bulan", null (untuk TAG tanpa biaya)
+    ecommerce_links = Column(Text, nullable=True)  # JSON links ke Tokopedia, Shopee, TikTokShop, etc
     images = Column(Text, nullable=True)  # JSON URLs gambar produk
     specifications = Column(Text, nullable=True)  # Spesifikasi teknis dalam JSON
     compatibility = Column(Text, nullable=True)  # JSON info kompatibilitas kendaraan

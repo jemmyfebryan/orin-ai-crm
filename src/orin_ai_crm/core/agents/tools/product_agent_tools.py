@@ -74,9 +74,38 @@ def format_products_for_llm(products: List[dict]) -> str:
         formatted += f"   Kategori: {p['category']}"
         if p.get('subcategory'):
             formatted += f" - {p['subcategory']}"
+
+        if p.get('vehicle_type'):
+            formatted += f"\n   Tipe Kendaraan: {p['vehicle_type']}"
+
         if p.get('price'):
             formatted += f"\n   Harga: {p['price']}"
+
         formatted += f"\n   Deskripsi: {p.get('description', '-')}\n"
+
+        # New fields display
+        if p.get('can_shutdown_engine'):
+            formatted += "   ✅ Bisa Matikan Mesin Jarak Jauh\n"
+
+        if p.get('can_wiretap'):
+            formatted += "   ✅ Bisa Sadap Suara\n"
+
+        if p.get('portable'):
+            formatted += "   ✅ Portable (bisa dipindah-pindah)\n"
+
+        if p.get('battery_life'):
+            formatted += f"   ⏱️ Ketahanan Baterai: {p['battery_life']}\n"
+
+        if p.get('power_source'):
+            formatted += f"   🔌 Sumber Daya: {p['power_source']}\n"
+
+        if p.get('tracking_type'):
+            formatted += f"   📡 Tipe Tracking: {p['tracking_type']}\n"
+
+        if p.get('monthly_fee'):
+            formatted += f"   💰 Biaya Bulanan: {p['monthly_fee']}\n"
+        else:
+            formatted += "   💰 Biaya Bulanan: Tidak ada\n"
 
         if p.get('features'):
             features = p['features']
@@ -487,7 +516,13 @@ async def get_all_active_products() -> dict:
                 "price": p.price,
                 "installation_type": p.installation_type,
                 "can_shutdown_engine": p.can_shutdown_engine,
+                "can_wiretap": p.can_wiretap,
                 "is_realtime_tracking": p.is_realtime_tracking,
+                "portable": p.portable,
+                "battery_life": p.battery_life,
+                "power_source": p.power_source,
+                "tracking_type": p.tracking_type,
+                "monthly_fee": p.monthly_fee,
                 "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {},
                 "images": json.loads(p.images) if p.images else [],
                 "specifications": json.loads(p.specifications) if p.specifications else {},
@@ -554,6 +589,13 @@ async def search_products(
                 'description': p.description,
                 'price': p.price,
                 'features': json.loads(p.features) if p.features else {},
+                'vehicle_type': p.vehicle_type,
+                'can_wiretap': p.can_wiretap,
+                'portable': p.portable,
+                'battery_life': p.battery_life,
+                'power_source': p.power_source,
+                'tracking_type': p.tracking_type,
+                'monthly_fee': p.monthly_fee,
             })
 
         return {
@@ -911,7 +953,14 @@ async def get_products_by_category(category: str) -> dict:
                 "subcategory": p.subcategory,
                 "description": p.description,
                 "price": p.price,
-                "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {}
+                "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {},
+                "vehicle_type": p.vehicle_type,
+                "can_wiretap": p.can_wiretap,
+                "portable": p.portable,
+                "battery_life": p.battery_life,
+                "power_source": p.power_source,
+                "tracking_type": p.tracking_type,
+                "monthly_fee": p.monthly_fee,
             })
 
         logger.info(f"Retrieved {len(product_list)} products for category: {category}")
@@ -944,7 +993,13 @@ async def get_products_by_vehicle_type(vehicle_type: str) -> dict:
                 "category": p.category,
                 "vehicle_type": p.vehicle_type,
                 "description": p.description,
-                "features": json.loads(p.features) if p.features else {}
+                "features": json.loads(p.features) if p.features else {},
+                "can_wiretap": p.can_wiretap,
+                "portable": p.portable,
+                "battery_life": p.battery_life,
+                "power_source": p.power_source,
+                "tracking_type": p.tracking_type,
+                "monthly_fee": p.monthly_fee,
             })
 
         logger.info(f"Retrieved {len(product_list)} products for vehicle: {vehicle_type}")
@@ -987,7 +1042,13 @@ async def get_ecommerce_product(product_identifier: str) -> dict:
             "price": product.price,
             "installation_type": product.installation_type,
             "can_shutdown_engine": product.can_shutdown_engine,
+            "can_wiretap": product.can_wiretap,
             "is_realtime_tracking": product.is_realtime_tracking,
+            "portable": product.portable,
+            "battery_life": product.battery_life,
+            "power_source": product.power_source,
+            "tracking_type": product.tracking_type,
+            "monthly_fee": product.monthly_fee,
             "ecommerce_links": json.loads(product.ecommerce_links) if product.ecommerce_links else {},
             "images": json.loads(product.images) if product.images else [],
             "specifications": json.loads(product.specifications) if product.specifications else {},
@@ -1042,7 +1103,13 @@ async def reset_products_to_default() -> dict:
                         price=product_data.get("price"),
                         installation_type=product_data.get("installation_type", "pasang_technisi"),
                         can_shutdown_engine=product_data.get("can_shutdown_engine", False),
+                        can_wiretap=product_data.get("can_wiretap", False),
                         is_realtime_tracking=product_data.get("is_realtime_tracking", True),
+                        portable=product_data.get("portable", False),
+                        battery_life=product_data.get("battery_life"),
+                        power_source=product_data.get("power_source"),
+                        tracking_type=product_data.get("tracking_type"),
+                        monthly_fee=product_data.get("monthly_fee"),
                         ecommerce_links=ecommerce_links_json,
                         images=images_json,
                         specifications=specifications_json,

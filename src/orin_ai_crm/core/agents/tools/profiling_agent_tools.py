@@ -34,7 +34,7 @@ ATURAN PRODUK GPS MOBIL:
 @tool
 async def extract_customer_info_from_message(
     message: str,
-    current_profile: dict
+    current_profile: dict = {}
 ) -> dict:
     """
     Extract customer information from a message using LLM.
@@ -52,7 +52,7 @@ async def extract_customer_info_from_message(
 
     Args:
         message: The customer's message
-        current_profile: Current customer profile dict
+        current_profile: Current customer profile dict (optional, defaults to empty)
 
     Returns:
         dict with extracted fields (only fields found in message)

@@ -105,7 +105,7 @@ class Product(Base):
     sku = Column(String(100), unique=True, index=True)  # SKU/Code produk
     category = Column(String(50), nullable=False)  # TANAM, INSTAN, KAMERA, AKSESORIS
     subcategory = Column(String(50), nullable=True)  # OBU F, OBU V, OBU D, T1, T, TAG, SENSOR, CAMERA
-    vehicle_type = Column(String(50), nullable=True)  # mobil, motor, alat berat, truck, semua aset
+    vehicle_type = Column(String(255), nullable=True)  # mobil, motor, alat berat, truck, semua aset (comma-separated)
     description = Column(Text, nullable=True)  # Deskripsi singkat produk
     features = Column(Text, nullable=True)  # Fitur-fitur dalam JSON
     price = Column(String(100), nullable=True)  # Harga (format fleksibel: "25rb/bulan", "600rb/tahun", dll)

@@ -1203,19 +1203,18 @@ async def get_pending_inquiry(customer_id: int) -> dict:
 # ============================================================================
 
 PRODUCT_ECOMMERCE_TOOLS = [
-    # Universal intelligent query tool - handles most product questions
-    query_products_with_llm,
-    # Specific tools for more targeted use cases
     get_all_active_products,
-    # search_products,
     get_product_details,
-    # answer_product_question,
     get_ecommerce_links,
-    create_product_inquiry,
+    recommend_products_for_customer,
+    get_products_by_category,
+    get_products_by_vehicle_type,
+    # Universal intelligent query tool - handles most product questions
+    # query_products_with_llm,
+    # search_products,
+    # answer_product_question,
+    # create_product_inquiry,
     # get_pending_product_inquiry,
-    # recommend_products_for_customer,
-    # get_products_by_category,
-    # get_products_by_vehicle_type,
     # get_ecommerce_product,
     # reset_products_to_default,
     # initialize_default_products_if_empty,

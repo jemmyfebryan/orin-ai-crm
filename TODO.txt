@@ -1,5 +1,3 @@
--Hapus tools query db dari ecommerce_tools, terlalu lama dan tidak pernah berguna
--Pertimbangkan mengembalikan tools2 ecommerce_tools yang telah dihapus
 -Cek create_inquiry_product, mungkin butuh docstring change atau nama tools change karena agent mengira tools ini digunakan untuk memesankan customer barang, padahal ini hanya sbg internal tools untuk tracking minat user, maybe user_product_interested or something, buat tools ini bisa di call berkali-kali, setiap 1 call itu untuk 1 jenis barang, kalau bisa product_id yang merefer ke table products
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
 -Sales node -> Tawarkan meeting, jika tidak mau, share link e-commerce dan alihkan customer ke node Ecommerce
@@ -7,7 +5,6 @@
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message
 -Update products knowledge, tambahkan kolom apakah produk ini untuk motor atau bukan
 -Customize System Prompt, store prompt untuk PERSONA dan INSTRUCTION
-
 -Final messages ini aneh kadang gk nyambung dengan chat historis
 -Kirim Gambar, Kirim PDF produk
 -Kalau is_b2b langsung ke sales node aja tawarin meeting (btw ini works cuma mungkin perlu langsung routing ke sales_node), tapi malah stuck ke pertanyaan apakah mau meeting, ini dicoba 2-3x kali baru nawarin jadwal
@@ -19,3 +16,5 @@
 -Knowledge tentang ORIN (Done)
 -Field nama otomatis diambil dr contact_name langsung insert aja (Done)
 -Pesan mohon tunggu sebentar jika lebih dari 10 detik (Done)
+-Hapus tools query db dari ecommerce_tools, terlalu lama dan tidak pernah berguna (DOne)
+-Pertimbangkan mengembalikan tools2 ecommerce_tools yang telah dihapus (Done)

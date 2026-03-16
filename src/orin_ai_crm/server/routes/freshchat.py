@@ -220,15 +220,8 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 2.5. Start timeout timer (10 seconds)
-        # If processing takes longer, send "please wait" message
-        async def send_timeout_after_delay():
-            await asyncio.sleep(10)  # Wait 10 seconds
-            await send_timeout_message(conversation_id)
-
-        timeout_task = asyncio.create_task(send_timeout_after_delay())
-
-        # 2.6. TESTING: Check for "reset_chat" command (only for allowed numbers)
+        # 2.5. TESTING: Check for "reset_chat" command (only for allowed numbers)
+        # Check BEFORE creating timeout_task since reset_chat is just for testing
         if message_content.strip().lower() == "reset_chat":
             logger.info(f"Reset chat command detected for phone: {phone_number}")
 
@@ -249,6 +242,14 @@ async def process_freshchat_webhook_task(
 
             logger.info(f"Reset chat completed for {phone_number}: {result['message']}")
             return  # Stop processing, don't continue to AI
+
+        # 2.6. Start timeout timer (10 seconds) for normal messages
+        # If processing takes longer, send "please wait" message
+        async def send_timeout_after_delay():
+            await asyncio.sleep(10)  # Wait 10 seconds
+            await send_timeout_message(conversation_id)
+
+        timeout_task = asyncio.create_task(send_timeout_after_delay())
 
         # 3. Integrate with existing AI processing logic
         # Pass timeout_task so it can be cancelled before sending final messages

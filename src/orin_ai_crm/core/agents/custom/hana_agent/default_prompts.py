@@ -147,40 +147,18 @@ INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.""",
 Perusahaan teknologi yang berfokus pada solusi pelacakan GPS kendaraan untuk keamanan dan manajemen armada.
 
 **Tentang Kami:**
-ORIN GPS Tracker menyediakan sistem pelacakan GPS yang canggih untuk memantau posisi kendaraan secara realtime, mematikan mesin jarak jauh, dan menganalisis data perjalanan. Produk kami cocok untuk penggunaan pribadi, perusahaan logistik, fleet management, dan rental mobil.
+ORIN GPS Tracker by VASTEL adalah penyedia layanan GPS di Indonesia meliputi hardware, SIM card, software dan aplikasi serta layanan purna jual.
 
 **Alamat Kantor:**
 Jl. Teknologi No. 123, Jakarta Selatan, Indonesia 12345
 
 **Kontak:**
-- WhatsApp: +62 812-3456-7890
-- Email: info@oringpstracker.com
-- Website: www.oringpstracker.com
-
-**Jam Operasional:**
-Senin - Jumat: 08:00 - 17:00 WIB
-Sabtu: 09:00 - 14:00 WIB
-Minggu: Tutup
-
-**Produk Unggulan:**
-- OBU F: GPS tipe tanam dengan fitur lacak + matikan mesin, instalasi oleh teknisi
-- OBU V: GPS tipe tanam compact, tersembunyi, lacak + matikan mesin
-- OBU D: GPS tipe instan, colok OBD, plug & play, hanya lacak
-- T1: GPS tipe instan portable, colok lighter, mudah dipindah
-- T: GPS tipe instan basic, colok OBD, hemat biaya
+- WhatsApp: +62 811-3331-1188
+- Email: cs@vastel.co.id
+- Website: https://vastel.co.id/
 
 **Layanan Kami:**
-1. Penjualan perangkat GPS Tracker
-2. Instalasi profesional untuk tipe tanam
-3. Aktivasi dan subscription layanan
-4. Technical support via WhatsApp
-5. Konsultasi kebutuhan GPS untuk personal maupun perusahaan
-6. Diskon khusus untuk pembelian quantity (B2B/fleet)
-
-**Metode Pembelian:**
-- E-commerce: Tokopedia, Shopee, Lazada
-- Direct sales untuk pembelian quantity besar
-- Konsultasi dulu untuk kebutuhan B2B/fleet management
+Pelayanan meliputi penjualan, pemasangan, garansi dan layanan Transport Management System, Fuel Management System dan API ready solutions untuk retail dan bisnis.
 
 **Kenapa Memilih ORIN?**
 ✓ Teknologi terbaru dengan akurasi tinggi
@@ -188,7 +166,7 @@ Minggu: Tutup
 ✓ Support teknis responsif via WhatsApp
 ✓ Garansi produk 1 tahun
 ✓ Harga kompetitif
-✓ Bisa matikan mesin jarak jauh (untuk tipe tanam)""",
+✓ Bisa matikan mesin jarak jauh""",
         "description": "Company profile information for customer inquiries"
     }
 ]

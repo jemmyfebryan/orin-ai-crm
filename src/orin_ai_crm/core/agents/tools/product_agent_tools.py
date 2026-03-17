@@ -1275,8 +1275,9 @@ async def send_product_images(
     Send product images to customer.
     Before use this tools, make sure you've called get_all_active_products tools to get the sort_order of products you want to send the images.
 
-    The tool will automatically build image URLs based on Product.sort_order:
-    - Image filename: product_{sort_order}.png
+    Call this tool if customer ask about a specific product.
+    
+    Don't call this tool if we had sent the same product image in the chat history before. It's OK with different product sort_order.
 
     Returns JSON with update_state containing send_images list.
     """
@@ -1338,9 +1339,10 @@ async def send_catalog(
 ) -> str:
     """
     Send product catalog PDF to customer.
+    
     Call this tool if user want to see the catalog or the product is not specific. If the product interest specific, use send_product_images instead.
 
-    This tool sends the product catalog as a PDF file.
+    Don't call this tool if we had sent the catalog in the chat history before.
 
     Returns JSON with update_state containing send_pdfs list.
     """

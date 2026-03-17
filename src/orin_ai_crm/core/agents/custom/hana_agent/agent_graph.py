@@ -91,6 +91,53 @@ class OrchestratorDecision(BaseModel):
     )
 
 
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+async def apply_tool_state_updates(result: Dict) -> Dict:
+    """
+    Scan tool results for update_state and apply them to the agent result.
+
+    Tools can return JSON with {"update_state": {...}} to modify the agent state.
+    This function extracts those updates and applies them to the result.
+
+    Args:
+        result: The result dict from agent execution with "messages" key
+
+    Returns:
+        The updated result dict with state changes applied
+    """
+    import json
+    from langchain_core.messages import ToolMessage
+
+    new_messages = result.get("messages", [])
+    state_updates = {}
+
+    # Scan messages for tool results
+    for msg in new_messages:
+        # Only process ToolMessage types (results from tool execution)
+        if isinstance(msg, ToolMessage):
+            try:
+                # Tool outputs are usually JSON strings
+                data = json.loads(msg.content)
+                data_update_state = data.get("update_state")
+                if isinstance(data_update_state, dict):
+                    state_updates.update(data_update_state)
+                    logger.info(f"Tool: {msg.name} update states: {data_update_state}")
+            except (json.JSONDecodeError, TypeError) as e:
+                # Ignore non-JSON tool outputs
+                pass
+
+    # Apply state updates to result
+    if state_updates:
+        logger.info(f"Final tool state_updates: {state_updates}")
+        for k, v in state_updates.items():
+            result[k] = v
+
+    return result
+
+
 async def agent_entry_handler(state: AgentState) -> Dict:
     """
     Entry point handler - ensures customer_id exists and builds system prompt.
@@ -350,6 +397,9 @@ async def profiling_node(state: AgentState) -> Dict:
     # Invoke the agent
     result = await agent.ainvoke(state, recursion_limit=8)
 
+    # Apply tool state updates (e.g., send_images from send_product_images tool)
+    result = await apply_tool_state_updates(result)
+
     # Load fresh customer data after profiling
     if customer_id:
         try:
@@ -401,6 +451,9 @@ async def sales_node(state: AgentState) -> Dict:
     # Invoke the agent with current state
     result = await agent.ainvoke(state, recursion_limit=10)
 
+    # Apply tool state updates (e.g., send_images from send_product_images tool)
+    result = await apply_tool_state_updates(result)
+
     # Track that this agent was called
     agents_called = result.get("agents_called", [])
     agents_called.append("sales")
@@ -437,6 +490,9 @@ async def ecommerce_node(state: AgentState) -> Dict:
 
     # Invoke the agent with current state
     result = await agent.ainvoke(state, recursion_limit=10)
+
+    # Apply tool state updates (e.g., send_images from send_product_images tool)
+    result = await apply_tool_state_updates(result)
 
     # Track that this agent was called
     agents_called = result.get("agents_called", [])

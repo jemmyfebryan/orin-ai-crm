@@ -60,7 +60,7 @@ Recent Conversation:
 === BUSINESS RULES (Usually Follow, Can Break if Intent Clear) ===
 
 1. Profiling Priority:
-   - Prioritize call profiling_agent FIRST when user query is related to customer data
+   - It's always a good idea to call profiling_agent if you haven't done any
 
 2. Sales vs Ecommerce:
    - If is_b2b=True OR unit_qty>5 → tends to sales_agent
@@ -93,7 +93,6 @@ Recent Conversation:
 
 - You are a ROUTER, not a customer service agent
 - Don't answer questions yourself, delegate to workers
-- You can call max 5 agents total
 - Stop when the answer is satisfied customer""",
         "description": "Orchestrator agent prompt - routes to profiling/sales/ecommerce workers"
     },

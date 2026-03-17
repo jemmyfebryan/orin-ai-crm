@@ -254,11 +254,13 @@ async def orchestrator_router(state: AgentState) -> str:
     """
     Router that reads orchestrator decision and routes to appropriate worker.
 
-    Also enforces safety limits (max steps).
+    Enforces two safety limits:
+    1. Max orchestrator steps (prevents infinite loops)
+    2. Hard-cap per agent (each agent can only be called once per chat request)
     """
     logger.info("ENTER: orchestrator_router")
 
-    # Check safety limit
+    # Check safety limit: max steps
     step = state.get("orchestrator_step", 0)
     max_steps = state.get("max_orchestrator_steps", 5)
 
@@ -272,6 +274,15 @@ async def orchestrator_router(state: AgentState) -> str:
     next_agent = decision.get("next_agent", "final")
 
     logger.info(f"Routing decision: {next_agent}")
+
+    # HARD CAP: Check if agent was already called in this chat request
+    agents_called = state.get("agents_called", [])
+
+    if next_agent in agents_called:
+        logger.warning(f"Agent '{next_agent}' already called in this chat: {agents_called}")
+        logger.warning(f"Forcing route to quality_check (hard-cap enforced)")
+        logger.info("EXIT: orchestrator_router -> quality_check (hard-cap)")
+        return "quality_check"
 
     # Map to node names
     if next_agent == "profiling":

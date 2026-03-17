@@ -61,7 +61,8 @@ Recent Conversation:
 === BUSINESS RULES (Usually Follow, Can Break if Intent Clear) ===
 
 1. Profiling Priority:
-   - It's always a good idea to call profiling_agent if you haven't done any
+   - It's always a good idea to call profiling_agent first
+   - If the customer is fills or answer the data form, call profiling_agent to update customer data.
 
 2. Sales vs Ecommerce:
    - If is_b2b=True OR unit_qty>5 → tends to sales_agent

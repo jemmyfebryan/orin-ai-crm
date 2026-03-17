@@ -1338,9 +1338,9 @@ async def send_catalog(
 ) -> str:
     """
     Send product catalog PDF to customer.
+    Call this tool if user want to see the catalog or the product is not specific. If the product interest specific, use send_product_images instead.
 
     This tool sends the product catalog as a PDF file.
-    The PDF URL is built from ASSETS_URL environment variable.
 
     Returns JSON with update_state containing send_pdfs list.
     """

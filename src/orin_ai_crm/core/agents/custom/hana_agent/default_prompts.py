@@ -103,11 +103,16 @@ Recent Conversation:
 
 You MUST respond with valid JSON only. No markdown, no explanation, no additional text.
 
-{
+{{
   "next_agent": "profiling" | "sales" | "ecommerce" | "final",
   "reasoning": "Brief explanation of your decision",
   "plan": "What happens next"
-}
+}}
+
+IMPORTANT:
+- next_agent MUST be exactly one of: "profiling", "sales", "ecommerce", "final"
+- reasoning and plan must be strings
+- Return ONLY the JSON, nothing else
 
 === CRITICAL REMINDERS ===
 

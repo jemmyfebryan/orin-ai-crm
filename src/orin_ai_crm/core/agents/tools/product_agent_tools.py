@@ -1333,6 +1333,39 @@ async def send_product_images(
     })
 
 
+async def send_catalog(
+    state: Annotated[dict, InjectedState]
+) -> str:
+    """
+    Send product catalog PDF to customer.
+
+    This tool sends the product catalog as a PDF file.
+    The PDF URL is built from ASSETS_URL environment variable.
+
+    Returns JSON with update_state containing send_pdfs list.
+    """
+    logger.info("TOOL: send_catalog")
+
+    # Get ASSETS_URL from environment
+    assets_url = os.getenv("ASSETS_URL", "")
+    if not assets_url:
+        logger.warning("ASSETS_URL not set in environment variables")
+        return json.dumps({
+            "update_state": {"send_pdfs": []},
+            "error": "ASSETS_URL not configured"
+        })
+
+    # Build catalog PDF URL
+    catalog_url = f"{assets_url}/catalog.pdf"
+    logger.info(f"Generated catalog PDF URL: {catalog_url}")
+
+    # Return JSON with update_state for agent_node to process
+    return json.dumps({
+        "update_state": {"send_pdfs": [catalog_url]},
+        "url": catalog_url
+    })
+
+
 # ============================================================================
 # TOOL LISTS
 # ============================================================================
@@ -1344,6 +1377,7 @@ PRODUCT_ECOMMERCE_TOOLS = [
     get_products_by_category,
     get_products_by_vehicle_type,
     send_product_images,
+    send_catalog,
     # recommend_products_for_customer,
     # Universal intelligent query tool - handles most product questions
     # query_products_with_llm,

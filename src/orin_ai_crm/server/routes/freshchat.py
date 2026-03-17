@@ -14,7 +14,7 @@ from src.orin_ai_crm.server.schemas.freshchat import (
 from src.orin_ai_crm.server.security.auth import verify_bearer_token
 from src.orin_ai_crm.server.security.webhook import is_ip_allowed, verify_freshchat_signature
 from src.orin_ai_crm.server.config.settings import settings
-from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, get_freshchat_user_details
+from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 
 logger = get_logger(__name__)
@@ -52,7 +52,29 @@ async def process_freshchat_agent_task(
             is_new_chat=is_new_chat,
         )
 
-        # 2. Send images FIRST (before text messages)
+        # 2. CANCEL TIMEOUT TASK before sending final messages
+        # This prevents collision between "please wait" and final response bubbles
+        if timeout_task and not timeout_task.done():
+            timeout_task.cancel()
+            try:
+                await timeout_task
+            except asyncio.CancelledError:
+                logger.info("Timeout task cancelled before sending final messages")
+                pass  # Expected if task was cancelled
+
+        # 3. Send PDFs FIRST (before images and text messages)
+        send_pdfs = result.get("send_pdfs", [])
+        if send_pdfs:
+            logger.info(f"Sending {len(send_pdfs)} PDFs to Freshchat...")
+            for i, pdf_url in enumerate(send_pdfs):
+                logger.info(f"Sending PDF {i+1}/{len(send_pdfs)}: {pdf_url}")
+                success = await send_pdf_to_freshchat(conversation_id, pdf_url)
+                if not success:
+                    logger.error(f"Failed to send PDF {i+1} to Freshchat")
+                else:
+                    logger.info(f"Successfully sent PDF {i+1} to Freshchat")
+
+        # 4. Send images SECOND (before text messages)
         send_images = result.get("send_images", [])
         if send_images:
             logger.info(f"Sending {len(send_images)} images to Freshchat...")
@@ -64,17 +86,7 @@ async def process_freshchat_agent_task(
                 else:
                     logger.info(f"Successfully sent image {i+1} to Freshchat")
 
-        # 3. CANCEL TIMEOUT TASK before sending final messages
-        # This prevents collision between "please wait" and final response bubbles
-        if timeout_task and not timeout_task.done():
-            timeout_task.cancel()
-            try:
-                await timeout_task
-            except asyncio.CancelledError:
-                logger.info("Timeout task cancelled before sending final messages")
-                pass  # Expected if task was cancelled
-
-        # 4. Send each reply bubble as a separate message to Freshchat
+        # 5. Send each reply bubble as a separate message to Freshchat
         ai_replies = result["replies"]
         logger.info(f"Sending {len(ai_replies)} message bubbles to Freshchat...")
         for i, reply in enumerate(ai_replies):

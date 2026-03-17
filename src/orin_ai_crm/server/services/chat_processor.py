@@ -97,6 +97,9 @@ async def process_chat_request(
         "customer_data": customer_data,
         "send_form": send_form,
         "route": "DEFAULT",
+        # Initialize empty lists for images and PDFs
+        "send_images": [],
+        "send_pdfs": [],
         # Orchestrator tracking fields
         "orchestrator_step": 0,
         "max_orchestrator_steps": 5,
@@ -144,6 +147,13 @@ async def process_chat_request(
         logger.error("No AI reply found in final state!")
         ai_replies = ["Maaf, terjadi kesalahan sistem. Silakan coba lagi."]
 
+    # 10. Save AI PDFs to database (each PDF as separate row)
+    send_pdfs = final_state.get("send_pdfs", [])
+    if send_pdfs:
+        logger.info(f"Saving {len(send_pdfs)} PDFs to database")
+        for pdf_url in send_pdfs:
+            await save_message_to_db(customer_id, "ai", pdf_url, content_type="pdf")
+
     # 9. Save AI images to database (each image as separate row)
     send_images = final_state.get("send_images", [])
     if send_images:
@@ -151,7 +161,7 @@ async def process_chat_request(
         for image_url in send_images:
             await save_message_to_db(customer_id, "ai", image_url, content_type="image")
 
-    # 10. Save AI replies to database (each bubble as separate row)
+    # 11. Save AI replies to database (each bubble as separate row)
     for reply in ai_replies:
         await save_message_to_db(customer_id, "ai", reply, content_type="text")
 
@@ -167,5 +177,6 @@ async def process_chat_request(
         "replies": ai_replies,
         "tool_calls": tool_calls_used if tool_calls_used else None,
         "messages_count": len(messages),
-        "send_images": final_state.get("send_images", [])
+        "send_images": final_state.get("send_images", []),
+        "send_pdfs": final_state.get("send_pdfs", [])
     }

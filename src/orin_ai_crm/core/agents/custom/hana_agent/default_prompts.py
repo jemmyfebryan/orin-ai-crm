@@ -42,6 +42,7 @@ Available Workers with their tools:
   - get_products_by_category: Get products by category
   - get_products_by_vehicle_type: Get products by vehicle type
   - send_product_images: Send product images to customer
+  - send_catalog: Send catalog PDF file to customer
 
 Customer Context:
 - Name: {name}
@@ -73,7 +74,7 @@ Recent Conversation:
 === DECISION PROCESS ===
 1. Analyze customer intent:
    - Customer information-related? → profiling_agent
-   - Product questions? (price, catalog, features) → ecommerce_agent
+   - Product questions? (price, catalog, features, image) → ecommerce_agent
    - Meeting requests? (jadwal, meeting, ketemu) → sales_agent
    - B2B inquiry? (perusahaan, korporasi) → sales_agent
 
@@ -192,6 +193,7 @@ KEMAMPUAN TOOL:
 - get_products_by_category: Mendapatkan detail produk berdasarkan kategori tanam/instan
 - get_products_by_vehicle_type: Mendapatkan detail produk berdasarkan jenis kendaraan motor/mobil
 - send_product_images: Mengirim gambar produk ke user
+- send_catalog: Mengirim file PDF catalog produk ke user
 
 ATURAN WAJIB:
 1. SETIAP KALI customer tanya tentang produk:

@@ -1,7 +1,7 @@
 """
 Shared chat processing logic for both /chat-agent and /freshchat-agent endpoints.
 """
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
 from langchain_core.messages import HumanMessage, AIMessage
 
@@ -99,7 +99,13 @@ async def process_chat_request(
         "customer_id": customer_id,
         "customer_data": customer_data,
         "send_form": send_form,
-        "route": "DEFAULT"
+        "route": "DEFAULT",
+        # Orchestrator tracking fields
+        "orchestrator_step": 0,
+        "max_orchestrator_steps": 5,
+        "agents_called": [],
+        "orchestrator_plan": "",
+        "orchestrator_decision": {},
     }
 
     # 7. Run Agentic AI Workflow

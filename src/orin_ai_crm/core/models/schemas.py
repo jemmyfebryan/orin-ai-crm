@@ -30,6 +30,12 @@ class AgentState(TypedDict):
     final_messages: list[str]  # List of message strings to be sent as separate chat bubbles
     # Images to send before text messages
     send_images: list[str]  # List of image URLs to send before text messages
+    # Orchestrator tracking fields
+    orchestrator_step: int  # Current orchestrator iteration (0-based)
+    max_orchestrator_steps: int  # Safety limit (default: 5)
+    agents_called: list[str]  # List of agents already called (profiling, sales, ecommerce)
+    orchestrator_plan: str  # Current plan for debugging
+    orchestrator_decision: dict  # Latest routing decision from orchestrator
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

@@ -8,12 +8,13 @@ IMPORTANT: The LLM CAN and SHOULD call MULTIPLE tools in parallel to handle
 multi-intent messages. This is the power of the agentic approach!
 
 Tool Categories:
-1. CUSTOMER MANAGEMENT (2 tools)
-2. PROFILING (7 tools)
-3. SALES & MEETING (7 tools)
-4. PRODUCT & E-COMMERCE (8 tools)
-5. SUPPORT & COMPLAINTS (3 tools)
-6. GREETING & CONVERSATION (2 tools)
+1. ORCHESTRATOR (2 tools) - For routing decisions
+2. CUSTOMER MANAGEMENT (2 tools) - For profiling agent
+3. PROFILING (7 tools) - For profiling agent
+4. SALES & MEETING (7 tools) - For sales agent
+5. PRODUCT & E-COMMERCE (8 tools) - For ecommerce agent
+6. SUPPORT & COMPLAINTS (3 tools) - Reserved for future use
+7. GREETING & CONVERSATION (2 tools) - Reserved for future use
 
 Total: 30+ granular tools
 """
@@ -33,18 +34,21 @@ from src.orin_ai_crm.core.agents.tools.support_agent_tools import (
 )
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     PRODUCT_ECOMMERCE_TOOLS,
-    send_product_images,
-    get_all_active_products,
 )
 
 
 # ============================================================================
-# TOOL LIST FOR AGENT
+# TOOL LIST FOR ORCHESTRATOR-AGENT ARCHITECTURE
 # ============================================================================
 
-# Profiling Agent Tools (used by main agent_node for customer profiling)
-# Only includes customer management and profiling tools
-AGENT_TOOLS = (
+# Orchestrator Tools (minimal tools for routing decisions)
+ORCHESTRATOR_TOOLS = (
+    CUSTOMER_MANAGEMENT_TOOLS  # get_customer_profile, update_customer_data
+    + PROFILING_TOOLS  # check_profiling_completeness
+)
+
+# Profiling Agent Tools (used by profiling_node for customer data collection)
+PROFILING_AGENT_TOOLS = (
     CUSTOMER_MANAGEMENT_TOOLS
     + PROFILING_TOOLS
 )
@@ -55,8 +59,12 @@ SALES_AGENT_TOOLS = SALES_MEETING_TOOLS
 # Ecommerce Agent Tools (used by ecommerce_node for B2C/small orders)
 ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS
 
+# Legacy: Keep old names for backward compatibility
+AGENT_TOOLS = PROFILING_AGENT_TOOLS
+
 __all__ = [
-    'AGENT_TOOLS',
+    'ORCHESTRATOR_TOOLS',
+    'PROFILING_AGENT_TOOLS',
     'SALES_AGENT_TOOLS',
     'ECOMMERCE_AGENT_TOOLS',
     'CUSTOMER_MANAGEMENT_TOOLS',
@@ -64,4 +72,6 @@ __all__ = [
     'SALES_MEETING_TOOLS',
     'PRODUCT_ECOMMERCE_TOOLS',
     'SUPPORT_TOOLS',
+    # Legacy
+    'AGENT_TOOLS',
 ]

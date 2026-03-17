@@ -42,6 +42,7 @@ IMPORTANT ARCHITECTURAL CHANGE:
 """
 
 import os
+import json
 from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -215,11 +216,12 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
         logger.error("Using prompt without formatting")
         # Continue with unformatted prompt
 
-    # Create orchestrator agent with structured output (forced schema)
-    llm_with_structured_output = llm.with_structured_output(OrchestratorDecision)
+    # Create orchestrator agent with JSON mode (compatible with tool binding)
+    # Note: with_structured_output() doesn't work with create_agent's bind_tools
+    llm_json_mode = llm.bind(response_format={"type": "json_object"})
 
     agent = create_agent(
-        model=llm_with_structured_output,
+        model=llm_json_mode,
         tools=ORCHESTRATOR_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,
@@ -231,10 +233,13 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
     # Extract routing decision from last message
     last_message = result.get("messages", [])[-1]
 
-    # With structured_output, the content is already the OrchestratorDecision object
+    # Parse JSON and validate against OrchestratorDecision schema
     try:
-        # The last message content should be an OrchestratorDecision object
-        decision_dict = last_message.content if isinstance(last_message.content, dict) else last_message.content.model_dump()
+        decision_dict = json.loads(last_message.content)
+
+        # Validate against Pydantic schema to ensure correctness
+        validated_decision = OrchestratorDecision(**decision_dict)
+        decision_dict = validated_decision.model_dump()
 
         next_agent = decision_dict.get("next_agent", "final")
         reasoning = decision_dict.get("reasoning", "")
@@ -244,15 +249,20 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
         logger.info(f"Reasoning: {reasoning}")
         logger.info(f"Plan: {plan}")
 
-        # Update state with decision
+        # Update state with validated decision
         result["orchestrator_decision"] = decision_dict
         result["orchestrator_plan"] = plan
 
-    except (AttributeError, KeyError) as e:
-        logger.error(f"Failed to extract orchestrator decision: {e}")
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.error(f"Failed to parse orchestrator decision JSON: {e}")
         logger.error(f"Raw content: {last_message.content}")
         # Default to final if parsing fails
         result["orchestrator_decision"] = {"next_agent": "final", "reasoning": "Parse error", "plan": "End conversation"}
+    except Exception as e:
+        logger.error(f"Orchestrator decision validation failed: {e}")
+        logger.error(f"Raw content: {last_message.content}")
+        # Default to final if validation fails
+        result["orchestrator_decision"] = {"next_agent": "final", "reasoning": "Validation error", "plan": "End conversation"}
 
     logger.info("EXIT: orchestrator_node")
     return result

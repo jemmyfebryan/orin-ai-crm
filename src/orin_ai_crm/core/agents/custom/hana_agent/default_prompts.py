@@ -62,7 +62,7 @@ Recent Conversation:
 
 1. Profiling Priority:
    - It's always a good idea to call profiling_agent first
-   - If the customer is fills or answer the data form, call profiling_agent to update customer data.
+   - If the customer is fills or answer the form, call profiling_agent to update customer data.
 
 2. Sales vs Ecommerce:
    - If is_b2b=True OR unit_qty>5 → tends to sales_agent
@@ -74,7 +74,7 @@ Recent Conversation:
 
 === DECISION PROCESS ===
 1. Analyze customer intent:
-   - Customer information-related? → profiling_agent
+   - Customer information & form-related? → profiling_agent
    - Product questions? (price, catalog, features, image) → ecommerce_agent
    - Meeting requests? (jadwal, meeting, ketemu) → sales_agent
    - B2B inquiry? (perusahaan, korporasi) → sales_agent

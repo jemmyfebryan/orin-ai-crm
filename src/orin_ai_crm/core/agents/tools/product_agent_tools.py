@@ -1277,8 +1277,6 @@ async def send_product_images(
 
     Call this tool if customer ask about a specific product.
     
-    Don't call this tool if we had sent the same product image in the chat history before. It's OK with different product sort_order.
-
     Returns JSON with update_state containing send_images list.
     """
     logger.info(f"TOOL: send_product_images - sort_orders: {sort_orders}")

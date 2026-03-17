@@ -55,16 +55,13 @@ async def process_chat_request(
 
     # 2. Fetch chat history if not new chat
     history = []
-    if not is_new_chat:
-        logger.info(f"Fetching chat history for customer_id: {customer_id}")
-        history_rows = await get_chat_history(customer_id, limit=10)
-        for row in history_rows:
-            if row.message_role == "user":
-                history.append(HumanMessage(content=row.content))
-            else:
-                history.append(AIMessage(content=row.content))
-    else:
-        logger.info(f"Skipping chat history fetch (is_new_chat=True)")
+    logger.info(f"Fetching chat history for customer_id: {customer_id}")
+    history_rows = await get_chat_history(customer_id, limit=10)
+    for row in history_rows:
+        if row.message_role == "user":
+            history.append(HumanMessage(content=row.content))
+        else:
+            history.append(AIMessage(content=row.content))
 
     # 3. Load customer data
     customer_data = {

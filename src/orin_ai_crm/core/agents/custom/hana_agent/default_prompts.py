@@ -39,7 +39,6 @@ Available Workers with their tools:
   - get_all_active_products: Get all active products with full details
   - get_product_details: Get detailed info for a specific product
   - get_ecommerce_links: Get e-commerce links for a product
-  - recommend_products_for_customer: Recommend products based on customer profile
   - get_products_by_category: Get products by category
   - get_products_by_vehicle_type: Get products by vehicle type
   - send_product_images: Send product images to customer
@@ -209,7 +208,6 @@ KEMAMPUAN TOOL:
 - get_all_active_products: Melihat semua informasi lengkap dari semua produk
 - get_product_details: Mendapatkan informasi detail untuk satu produk tertentu
 - get_ecommerce_links: Mendapatkan link e-commerce untuk produk tertentu
-- recommend_products_for_customer: Mendapatkan rekomendasi produk untuk customer
 - get_products_by_category: Mendapatkan detail produk berdasarkan kategori tanam/instan
 - get_products_by_vehicle_type: Mendapatkan detail produk berdasarkan jenis kendaraan motor/mobil
 - send_product_images: Mengirim gambar produk ke user

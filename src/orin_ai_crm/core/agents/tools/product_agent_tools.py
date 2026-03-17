@@ -1341,10 +1341,10 @@ PRODUCT_ECOMMERCE_TOOLS = [
     get_all_active_products,
     get_product_details,
     get_ecommerce_links,
-    recommend_products_for_customer,
     get_products_by_category,
     get_products_by_vehicle_type,
     send_product_images,
+    # recommend_products_for_customer,
     # Universal intelligent query tool - handles most product questions
     # query_products_with_llm,
     # search_products,

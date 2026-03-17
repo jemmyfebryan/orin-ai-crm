@@ -28,6 +28,8 @@ class AgentState(TypedDict):
     next_route: Optional[str]  # Determined route after form (ecommerce_node or sales_node)
     # Final messages for user (multi-bubble chat response)
     final_messages: list[str]  # List of message strings to be sent as separate chat bubbles
+    # Images to send before text messages
+    send_images: list[str]  # List of image URLs to send before text messages
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

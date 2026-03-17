@@ -156,5 +156,6 @@ async def process_chat_request(
         "lid_number": lid_number,
         "replies": ai_replies,
         "tool_calls": tool_calls_used if tool_calls_used else None,
-        "messages_count": len(messages)
+        "messages_count": len(messages),
+        "send_images": final_state.get("send_images", [])
     }

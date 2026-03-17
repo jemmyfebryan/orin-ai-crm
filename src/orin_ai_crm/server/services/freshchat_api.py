@@ -116,3 +116,77 @@ async def get_freshchat_user_details(user_id: str) -> dict:
     except Exception as e:
         logger.error(f"Error fetching Freshchat user details: {str(e)}")
         return None
+
+
+async def send_image_to_freshchat(
+    conversation_id: str,
+    image_url: str,
+    retry_count: int = 0
+) -> bool:
+    """
+    Send an image message to Freshchat API with retry mechanism.
+
+    Args:
+        conversation_id: Freshchat conversation ID
+        image_url: The URL of the image to send
+        retry_count: Current retry attempt number
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    url = f"{settings.freshchat_url}/conversations/{conversation_id}/messages"
+
+    payload = {
+        "actor_type": "agent",
+        "actor_id": settings.agent_id_bot,
+        "message_type": "normal",
+        "message_parts": [
+            {
+                "image": {
+                    "url": image_url
+                }
+            }
+        ]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {settings.freshchat_api_token}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+
+            if response.status_code == 200:
+                logger.info(f"Successfully sent image to Freshchat conversation {conversation_id}: {image_url}")
+                return True
+            else:
+                logger.error(f"Failed to send image to Freshchat. Status: {response.status_code}, Response: {response.text}")
+
+                # Retry with exponential backoff
+                if retry_count < 3:
+                    wait_time = 2 ** retry_count  # 1s, 2s, 4s
+                    logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+                    await asyncio.sleep(wait_time)
+                    return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+                else:
+                    logger.error(f"Max retry attempts reached for image send to conversation {conversation_id}")
+                    return False
+
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while sending image to Freshchat for conversation {conversation_id}")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+        return False
+    except Exception as e:
+        logger.error(f"Error sending image to Freshchat: {str(e)}")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+        return False

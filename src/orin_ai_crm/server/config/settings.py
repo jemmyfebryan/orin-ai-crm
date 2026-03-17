@@ -38,6 +38,9 @@ class Settings:
             "+6285850434383",
         ]
 
+        # Assets URL for product images and public files
+        self.assets_url = os.getenv("ASSETS_URL", "")
+
 
 # Global settings instance
 settings = Settings()

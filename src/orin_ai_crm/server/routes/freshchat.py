@@ -14,7 +14,7 @@ from src.orin_ai_crm.server.schemas.freshchat import (
 from src.orin_ai_crm.server.security.auth import verify_bearer_token
 from src.orin_ai_crm.server.security.webhook import is_ip_allowed, verify_freshchat_signature
 from src.orin_ai_crm.server.config.settings import settings
-from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, get_freshchat_user_details
+from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, get_freshchat_user_details
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 
 logger = get_logger(__name__)
@@ -52,7 +52,19 @@ async def process_freshchat_agent_task(
             is_new_chat=is_new_chat,
         )
 
-        # 2. CANCEL TIMEOUT TASK before sending final messages
+        # 2. Send images FIRST (before text messages)
+        send_images = result.get("send_images", [])
+        if send_images:
+            logger.info(f"Sending {len(send_images)} images to Freshchat...")
+            for i, img_url in enumerate(send_images):
+                logger.info(f"Sending image {i+1}/{len(send_images)}: {img_url}")
+                success = await send_image_to_freshchat(conversation_id, img_url)
+                if not success:
+                    logger.error(f"Failed to send image {i+1} to Freshchat")
+                else:
+                    logger.info(f"Successfully sent image {i+1} to Freshchat")
+
+        # 3. CANCEL TIMEOUT TASK before sending final messages
         # This prevents collision between "please wait" and final response bubbles
         if timeout_task and not timeout_task.done():
             timeout_task.cancel()
@@ -62,7 +74,7 @@ async def process_freshchat_agent_task(
                 logger.info("Timeout task cancelled before sending final messages")
                 pass  # Expected if task was cancelled
 
-        # 3. Send each reply bubble as a separate message to Freshchat
+        # 4. Send each reply bubble as a separate message to Freshchat
         ai_replies = result["replies"]
         logger.info(f"Sending {len(ai_replies)} message bubbles to Freshchat...")
         for i, reply in enumerate(ai_replies):

@@ -1265,6 +1265,76 @@ async def get_pending_inquiry(customer_id: int) -> dict:
         }
 
 
+@tool
+async def send_product_images(
+    product_ids: Annotated[List[int], "List of product IDs to send images for"],
+    state: Annotated[dict, InjectedState]
+) -> str:
+    """
+    Send product images to customer.
+
+    IMPORTANT: Only use if number of products <= 3. If more than 3 products,
+    don't send any images (catalog feature will be implemented later).
+
+    The tool will automatically build image URLs based on Product.sort_order:
+    - Image filename: product_{sort_order}.png
+    - URL pattern: {ASSETS_URL}/products/product_{sort_order}.png
+
+    Returns JSON with update_state containing send_images list.
+    """
+    logger.info(f"TOOL: send_product_images - product_ids: {product_ids}")
+
+    # Check if we have too many products
+    if len(product_ids) > 3:
+        logger.info(f"Too many products ({len(product_ids)} > 3), not sending images")
+        return json.dumps({
+            "update_state": {"send_images": []},
+            "message": f"Produk terlalu banyak ({len(product_ids)} item). Katalog akan dikirimkan terpisah."
+        })
+
+    # Get ASSETS_URL from environment
+    assets_url = os.getenv("ASSETS_URL", "")
+    if not assets_url:
+        logger.warning("ASSETS_URL not set in environment variables")
+        return json.dumps({
+            "update_state": {"send_images": []},
+            "error": "ASSETS_URL not configured"
+        })
+
+    # Fetch products to get their sort_order
+    async with AsyncSessionLocal() as db:
+        query = select(Product).where(Product.id.in_(product_ids))
+        result = await db.execute(query)
+        products = result.scalars().all()
+
+    if not products:
+        logger.warning(f"No products found for IDs: {product_ids}")
+        return json.dumps({
+            "update_state": {"send_images": []},
+            "error": "No products found"
+        })
+
+    # Build image URLs using sort_order (not ID)
+    # sort_order is 1-9, so product_{sort_order}.png
+    image_urls = []
+    for product in products:
+        if product.sort_order and product.sort_order > 0:
+            image_url = f"{assets_url}/products/product_{product.sort_order}.png"
+            image_urls.append(image_url)
+            logger.info(f"Product {product.id} (sort_order={product.sort_order}) → {image_url}")
+        else:
+            logger.warning(f"Product {product.id} has invalid sort_order: {product.sort_order}")
+
+    logger.info(f"Generated {len(image_urls)} image URLs: {image_urls}")
+
+    # Return JSON with update_state for agent_node to process
+    return json.dumps({
+        "update_state": {"send_images": image_urls},
+        "count": len(image_urls),
+        "urls": image_urls
+    })
+
+
 # ============================================================================
 # TOOL LISTS
 # ============================================================================
@@ -1289,4 +1359,4 @@ PRODUCT_ECOMMERCE_TOOLS = [
     # get_pending_inquiry,
 ]
 
-__all__ = ['PRODUCT_ECOMMERCE_TOOLS']
+__all__ = ['PRODUCT_ECOMMERCE_TOOLS', 'send_product_images']

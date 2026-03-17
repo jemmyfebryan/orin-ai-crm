@@ -99,6 +99,16 @@ Recent Conversation:
    
 6. Each Agent can only be called once
 
+=== RESPONSE FORMAT (JSON) ===
+
+You MUST respond with valid JSON only. No markdown, no explanation, no additional text.
+
+{
+  "next_agent": "profiling" | "sales" | "ecommerce" | "final",
+  "reasoning": "Brief explanation of your decision",
+  "plan": "What happens next"
+}
+
 === CRITICAL REMINDERS ===
 
 - You are a ROUTER, not a customer service agent

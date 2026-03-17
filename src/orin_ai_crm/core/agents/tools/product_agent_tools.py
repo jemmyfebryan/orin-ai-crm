@@ -1344,6 +1344,7 @@ PRODUCT_ECOMMERCE_TOOLS = [
     recommend_products_for_customer,
     get_products_by_category,
     get_products_by_vehicle_type,
+    send_product_images,
     # Universal intelligent query tool - handles most product questions
     # query_products_with_llm,
     # search_products,

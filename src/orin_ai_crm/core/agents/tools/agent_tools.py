@@ -47,7 +47,6 @@ from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
 AGENT_TOOLS = (
     CUSTOMER_MANAGEMENT_TOOLS
     + PROFILING_TOOLS
-    + [send_product_images, get_all_active_products]  # Add product image sending tool
 )
 
 # Sales Agent Tools (used by sales_node for B2B/large orders)

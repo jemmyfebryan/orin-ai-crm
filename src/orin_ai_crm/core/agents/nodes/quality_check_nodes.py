@@ -535,7 +535,8 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 5. DON'T mention technical/backend operations
 6. Personalized with customer name when appropriate
 7. If this is your first message with customer (empty conversation history), introduce yourself
-8. No need to include the image url/name in the text if SEND IMAGE above == True"""
+8. No need to include the image url/name in the text if SEND IMAGE above == True
+9. Do not make up any information if it's not stated in the conversation history"""
 
     # Use LLM with structured output to generate multi-bubble response
     final_messages_llm = llm.with_structured_output(FinalMessagesResponse)

@@ -1328,8 +1328,8 @@ async def send_product_images(
     # Return JSON with update_state for agent_node to process
     return json.dumps({
         "update_state": {"send_images": image_urls},
-        "count": len(image_urls),
-        "urls": image_urls
+        # "count": len(image_urls),
+        # "urls": image_urls
     })
 
 

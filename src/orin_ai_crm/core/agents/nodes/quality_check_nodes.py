@@ -512,7 +512,8 @@ CUSTOMER PROFILE:
 - B2B: {customer_data.get('is_b2b', False)}
 {form_instructions}
 
-SEND IMAGE: {bool(state.get("send_images"))}
+IMAGES_SENT: {bool(state.get("send_images"))}
+PDFS_SENT: {bool(state.get("send_pdfs"))}
 
 CONVERSATION HISTORY:
 {conversation_summary if conversation_summary else "(No conversation history)"}
@@ -535,7 +536,7 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 5. DON'T mention technical/backend operations
 6. Personalized with customer name when appropriate
 7. If this is your first message with customer (empty conversation history), introduce yourself
-8. No need to include the image url/name in the text if SEND IMAGE above == True
+8. No need to include any image&pdf url/name in the text (see IMAGES_SENT & PDFS_SENT)
 9. Do not make up any information if it's not stated in the conversation history"""
 
     # Use LLM with structured output to generate multi-bubble response

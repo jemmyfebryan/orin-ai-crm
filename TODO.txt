@@ -1,9 +1,6 @@
--Cek create_inquiry_product, mungkin butuh docstring change atau nama tools change karena agent mengira tools ini digunakan untuk memesankan customer barang, padahal ini hanya sbg internal tools untuk tracking minat user, maybe user_product_interested or something, buat tools ini bisa di call berkali-kali, setiap 1 call itu untuk 1 jenis barang, kalau bisa product_id yang merefer ke table products
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
--Sales node -> Tawarkan meeting, jika tidak mau, share link e-commerce dan alihkan customer ke node Ecommerce
--Kalau is_b2b langsung ke sales node aja tawarin meeting (btw ini works cuma mungkin perlu langsung routing ke sales_node), tapi malah stuck ke pertanyaan apakah mau meeting, ini dicoba 2-3x kali baru nawarin jadwal
--After node nya agak aneh, mungkin butuh agent tambahan sebelum ke final message. Contoh setelah udah fix jadwal meeting, nanya2 tentang produk ini harusnya sales_node bisa kosongin tools paling nggak
--Masih bisa dihijack dengan prompt perintah ganti data di database
+-Sales node -> Tawarkan meeting, jika mau -> human_takeover, ubah tools yang persetujuan meeting
+-Masih jadi problem ini kenapa gk mau update customer data setelah formnya diisi, terpaksa force profiling_agent aja wajib dipanggil.
 
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)
@@ -19,3 +16,4 @@
 -Tambah kolom (intent_route) -> default, ecommerce, sales agar route bisa flexible. Akhirnya implement multi-agent orchestrator aja (Done)
 -Urutan router setelah base agent adalah: intent_route dari DB, route dari state, baru data-based, fallback ke LLM/Final Message. Akhirnya implement multi-agent orchestrator aja (Done)
 -Kirim PDF produk (Done)
+-Masih bisa dihijack dengan prompt perintah ganti data di database (Done)

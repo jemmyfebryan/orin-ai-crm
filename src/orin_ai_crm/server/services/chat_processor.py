@@ -86,10 +86,11 @@ async def process_chat_request(
     await save_message_to_db(customer_id, "user", message)
 
     # 6. Prepare state for agent
-    current_messages = history + [HumanMessage(content=message)]
+    current_messages = [HumanMessage(content=message)]
 
     initial_state = {
         "messages": current_messages,
+        "messages_history": history,
         "phone_number": phone_number,
         "lid_number": lid_number,
         "contact_name": contact_name,

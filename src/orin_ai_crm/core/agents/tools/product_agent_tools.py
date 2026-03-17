@@ -508,26 +508,26 @@ async def get_all_active_products() -> dict:
                 "id": p.id,
                 "sort_order": p.sort_order,
                 "name": p.name,
-                "sku": p.sku,
-                "category": p.category,
-                "subcategory": p.subcategory,
-                "vehicle_type": p.vehicle_type,
-                "description": p.description,
-                "features": json.loads(p.features) if p.features else {},
-                "price": p.price,
-                "installation_type": p.installation_type,
-                "can_shutdown_engine": p.can_shutdown_engine,
-                "can_wiretap": p.can_wiretap,
-                "is_realtime_tracking": p.is_realtime_tracking,
-                "portable": p.portable,
-                "battery_life": p.battery_life,
-                "power_source": p.power_source,
-                "tracking_type": p.tracking_type,
-                "monthly_fee": p.monthly_fee,
-                "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {},
-                "images": json.loads(p.images) if p.images else [],
-                "specifications": json.loads(p.specifications) if p.specifications else {},
-                "compatibility": json.loads(p.compatibility) if p.compatibility else {}
+                # "sku": p.sku,
+                # "category": p.category,
+                # "subcategory": p.subcategory,
+                # "vehicle_type": p.vehicle_type,
+                # "description": p.description,
+                # "features": json.loads(p.features) if p.features else {},
+                # "price": p.price,
+                # "installation_type": p.installation_type,
+                # "can_shutdown_engine": p.can_shutdown_engine,
+                # "can_wiretap": p.can_wiretap,
+                # "is_realtime_tracking": p.is_realtime_tracking,
+                # "portable": p.portable,
+                # "battery_life": p.battery_life,
+                # "power_source": p.power_source,
+                # "tracking_type": p.tracking_type,
+                # "monthly_fee": p.monthly_fee,
+                # "ecommerce_links": json.loads(p.ecommerce_links) if p.ecommerce_links else {},
+                # "images": json.loads(p.images) if p.images else [],
+                # "specifications": json.loads(p.specifications) if p.specifications else {},
+                # "compatibility": json.loads(p.compatibility) if p.compatibility else {}
             }
             product_list.append(product_dict)
 
@@ -973,12 +973,12 @@ async def get_products_by_category(category: str) -> dict:
 
 @tool
 async def get_products_by_vehicle_type(vehicle_type: str) -> dict:
-    """Get products by vehicle type (mobil, motor, alat berat, dll)"""
+    """Get products by vehicle type (mobil, motor, truk, alat berat, dll)"""
     logger.info(f"TOOL: get_products_by_vehicle_type - vehicle: {vehicle_type}")
 
     async with AsyncSessionLocal() as db:
         query = select(Product).where(
-            (Product.vehicle_type == vehicle_type) &
+            (Product.vehicle_type.ilike(f"%{vehicle_type}%")) &
             (Product.is_active == True)
         ).order_by(Product.sort_order.asc())
 

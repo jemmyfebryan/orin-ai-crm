@@ -42,7 +42,6 @@ IMPORTANT ARCHITECTURAL CHANGE:
 """
 
 import os
-import json
 from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -169,8 +168,6 @@ async def orchestrator_node(state: AgentState) -> Dict:
     This is the traffic controller of the multi-agent system.
     Uses LLM with structured output to make routing decisions.
     """
-    from langchain.agents import create_agent
-
     logger.info("ENTER: orchestrator_node")
 
     step = state.get("orchestrator_step", 0)
@@ -194,8 +191,7 @@ async def orchestrator_node(state: AgentState) -> Dict:
     system_prompt = await get_prompt_from_db("hana_orchestrator_agent")
     if not system_prompt:
         logger.error("Failed to load orchestrator prompt from DB! Using fallback.")
-        system_prompt = """You are a router. Decide next agent: profiling, sales, ecommerce, or final.
-Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...", "plan": "..."}"""
+        system_prompt = """You are a router. Decide next agent: profiling, sales, ecommerce, or final."""
 
     # Fill in context variables
     try:
@@ -216,53 +212,41 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
         logger.error("Using prompt without formatting")
         # Continue with unformatted prompt
 
-    # Create orchestrator agent with JSON mode (compatible with tool binding)
-    # Note: with_structured_output() doesn't work with create_agent's bind_tools
-    llm_json_mode = llm.bind(response_format={"type": "json_object"})
+    # Use structured output directly (no create_agent needed)
+    # Orchestrator doesn't need tools - just makes a routing decision
+    structured_llm = llm.with_structured_output(OrchestratorDecision)
 
-    agent = create_agent(
-        model=llm_json_mode,
-        tools=ORCHESTRATOR_TOOLS,
-        system_prompt=system_prompt,
-        state_schema=AgentState,
-    )
+    # Build messages for the LLM
+    from langchain_core.messages import SystemMessage, HumanMessage
 
-    # Invoke orchestrator
-    result = await agent.ainvoke(state, recursion_limit=3)
+    # Get the latest human message for context
+    latest_user_message = ""
+    for msg in reversed(messages):
+        if hasattr(msg, 'type') and msg.type == "human":
+            latest_user_message = msg.content
+            break
 
-    # Extract routing decision from last message
-    last_message = result.get("messages", [])[-1]
+    messages_for_llm = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=latest_user_message or "Hello")
+    ]
 
-    # Parse JSON and validate against OrchestratorDecision schema
-    try:
-        decision_dict = json.loads(last_message.content)
+    # Invoke the LLM with structured output
+    decision = await structured_llm.ainvoke(messages_for_llm)
 
-        # Validate against Pydantic schema to ensure correctness
-        validated_decision = OrchestratorDecision(**decision_dict)
-        decision_dict = validated_decision.model_dump()
+    # Extract decision from validated OrchestratorDecision object
+    next_agent = decision.next_agent
+    reasoning = decision.reasoning
+    plan = decision.plan
 
-        next_agent = decision_dict.get("next_agent", "final")
-        reasoning = decision_dict.get("reasoning", "")
-        plan = decision_dict.get("plan", "")
+    logger.info(f"Orchestrator decision: {next_agent}")
+    logger.info(f"Reasoning: {reasoning}")
+    logger.info(f"Plan: {plan}")
 
-        logger.info(f"Orchestrator decision: {next_agent}")
-        logger.info(f"Reasoning: {reasoning}")
-        logger.info(f"Plan: {plan}")
-
-        # Update state with validated decision
-        result["orchestrator_decision"] = decision_dict
-        result["orchestrator_plan"] = plan
-
-    except (json.JSONDecodeError, TypeError) as e:
-        logger.error(f"Failed to parse orchestrator decision JSON: {e}")
-        logger.error(f"Raw content: {last_message.content}")
-        # Default to final if parsing fails
-        result["orchestrator_decision"] = {"next_agent": "final", "reasoning": "Parse error", "plan": "End conversation"}
-    except Exception as e:
-        logger.error(f"Orchestrator decision validation failed: {e}")
-        logger.error(f"Raw content: {last_message.content}")
-        # Default to final if validation fails
-        result["orchestrator_decision"] = {"next_agent": "final", "reasoning": "Validation error", "plan": "End conversation"}
+    # Update state with decision
+    result = state.copy()
+    result["orchestrator_decision"] = decision.model_dump()
+    result["orchestrator_plan"] = plan
 
     logger.info("EXIT: orchestrator_node")
     return result
@@ -349,10 +333,10 @@ async def profiling_node(state: AgentState) -> Dict:
         except Exception as e:
             logger.error(f"Failed to load customer profile: {e}")
 
-    # Get profiling agent prompt from database (reuse hana_base_agent)
-    system_prompt = await get_prompt_from_db("hana_base_agent")
+    # Get profiling agent prompt from database (reuse hana_customer_agent)
+    system_prompt = await get_prompt_from_db("hana_customer_agent")
     if not system_prompt:
-        logger.warning("Failed to load hana_base_agent prompt from DB, using fallback")
+        logger.warning("Failed to load hana_customer_agent prompt from DB, using fallback")
         system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker. Collect customer data."
 
     # Create profiling agent with profiling tools

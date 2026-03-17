@@ -86,8 +86,6 @@ async def update_customer_data(
 
     Use this tool when:
     - Customer provides new or updated information
-    - After extracting customer info from messages
-    - Need to update profile in database
 
     Only provided fields will be updated. Others remain unchanged.
 

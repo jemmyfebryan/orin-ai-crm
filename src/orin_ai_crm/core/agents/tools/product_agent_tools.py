@@ -506,6 +506,7 @@ async def get_all_active_products() -> dict:
         for p in products:
             product_dict = {
                 "id": p.id,
+                "sort_order": p.sort_order,
                 "name": p.name,
                 "sku": p.sku,
                 "category": p.category,
@@ -1267,29 +1268,26 @@ async def get_pending_inquiry(customer_id: int) -> dict:
 
 @tool
 async def send_product_images(
-    product_ids: Annotated[List[int], "List of product IDs to send images for"],
+    sort_orders: Annotated[List[int], "List of product sort_order s to send images for"],
     state: Annotated[dict, InjectedState]
 ) -> str:
     """
     Send product images to customer.
-
-    IMPORTANT: Only use if number of products <= 3. If more than 3 products,
-    don't send any images (catalog feature will be implemented later).
+    Before use this tools, make sure you've called get_all_active_products tools to get the sort_order of products you want to send the images.
 
     The tool will automatically build image URLs based on Product.sort_order:
     - Image filename: product_{sort_order}.png
-    - URL pattern: {ASSETS_URL}/products/product_{sort_order}.png
 
     Returns JSON with update_state containing send_images list.
     """
-    logger.info(f"TOOL: send_product_images - product_ids: {product_ids}")
+    logger.info(f"TOOL: send_product_images - sort_orders: {sort_orders}")
 
     # Check if we have too many products
-    if len(product_ids) > 3:
-        logger.info(f"Too many products ({len(product_ids)} > 3), not sending images")
+    if len(sort_orders) > 3:
+        logger.info(f"Too many products ({len(sort_orders)} > 3), not sending images")
         return json.dumps({
             "update_state": {"send_images": []},
-            "message": f"Produk terlalu banyak ({len(product_ids)} item). Katalog akan dikirimkan terpisah."
+            "message": f"Produk terlalu banyak ({len(sort_orders)} item). Katalog akan dikirimkan terpisah."
         })
 
     # Get ASSETS_URL from environment
@@ -1303,12 +1301,12 @@ async def send_product_images(
 
     # Fetch products to get their sort_order
     async with AsyncSessionLocal() as db:
-        query = select(Product).where(Product.id.in_(product_ids))
+        query = select(Product).where(Product.sort_order.in_(sort_orders))
         result = await db.execute(query)
         products = result.scalars().all()
 
     if not products:
-        logger.warning(f"No products found for IDs: {product_ids}")
+        logger.warning(f"No products found for IDs: {sort_orders}")
         return json.dumps({
             "update_state": {"send_images": []},
             "error": "No products found"

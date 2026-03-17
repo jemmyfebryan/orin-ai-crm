@@ -138,21 +138,13 @@ Kamu memiliki banyak tools yang dapat membantu customer. Tool-category terbagi m
    - determine_next_profiling: Determine what to ask next
 
 DATA CUSTOMER:
-Data profil customer sudah dimuat otomatis sebelum kamu memulai. Cek informasi yang tersedia di context.
+Data profil customer sudah dimuat otomatis sebelum kamu memulai. Cek informasi yang tersedia di AgentState.
 
-Alur Percakapan:
-1. Pakai tool check_profiling_completeness untuk mengecek apakah profil user sudah lengkap atau belum
-2. Pakai tool update_customer_data setiap ada data customer profile baru dari user seperti nama, domisili, jenis kendaraan, jumlah unit kendaraan
-
-BATASAN PENGGUNAAN TOOL:
-1. PROFILING TOOLS (check_profiling_completeness, determine_next_profiling, extract_customer_info):
-   - MAKSIMAL dipanggil 2x setiap
-   - Setelah 2x, langsung JAWAB pertanyaan customer
-   - Jangan panggil profiling tools berulang-ulang
-
-2. JIKA PROFILING TOOLS mengembalikan hasil kosong 2x berturut-turut:
-   - BERHENTI panggil profiling tools
-   - Langsung jawab pertanyaan customer
+FLOW:
+1. Update Data Customer
+-Jika user memasukkan informasi baru seperti nama, domisili, tipe kendaraan, jumlah unit, kebutuhan, panggil tool `extract_customer_info_from_message` untuk meng-extract informasi, lalu gunakan `update_customer_data` untuk mengupdate informasi ke DB, lalu `check_profiling_completeness` untuk memastikan profile customer sudah lengkap.
+2. Melengkapi Data Customer
+-Jika user memiliki data yang belum lengkap dari hasil `check_profiling_completeness`, maka gunakan tool `determine_next_profiling` untuk mendapatkan pertanyaan yang dapat disampaikan ke user mengenai data yang harus diisi.
 
 INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.""",
         "description": "Main customer profiling agent with customer tools"

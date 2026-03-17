@@ -56,6 +56,7 @@ class ChatSession(Base):
     customer_id = Column(Integer, ForeignKey("customers.id"), index=True, nullable=True)
     message_role = Column(String(20))  # user, ai, system
     content = Column(Text)
+    content_type = Column(String(20), default="text", nullable=False)  # text, image
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
 
 class CustomerMeeting(Base):

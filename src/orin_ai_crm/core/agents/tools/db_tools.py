@@ -131,9 +131,9 @@ async def get_chat_history(customer_id: int, limit: int = 20):
     
 
 
-async def save_message_to_db(customer_id: Optional[int], role: str, content: str):
+async def save_message_to_db(customer_id: Optional[int], role: str, content: str, content_type: str = "text"):
     """Simpan pesan ke database dengan customer_id"""
-    logger.info(f"save_message_to_db called - customer_id: {customer_id}, role: {role}, content: {content[:100]}...")
+    logger.info(f"save_message_to_db called - customer_id: {customer_id}, role: {role}, content_type: {content_type}, content: {content[:100]}...")
 
     from src.orin_ai_crm.core.models.database import ChatSession
 
@@ -141,9 +141,10 @@ async def save_message_to_db(customer_id: Optional[int], role: str, content: str
         new_msg = ChatSession(
             customer_id=customer_id,
             message_role=role,
-            content=content
+            content=content,
+            content_type=content_type
         )
         db.add(new_msg)
         await db.commit()
         await db.refresh(new_msg)
-        logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}")
+        logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}, content_type: {new_msg.content_type}")

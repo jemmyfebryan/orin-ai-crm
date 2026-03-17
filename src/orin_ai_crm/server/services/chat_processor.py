@@ -144,9 +144,16 @@ async def process_chat_request(
         logger.error("No AI reply found in final state!")
         ai_replies = ["Maaf, terjadi kesalahan sistem. Silakan coba lagi."]
 
-    # 9. Save AI replies to database
-    ai_reply_for_db = "\n\n".join(ai_replies)
-    await save_message_to_db(customer_id, "ai", ai_reply_for_db)
+    # 9. Save AI images to database (each image as separate row)
+    send_images = final_state.get("send_images", [])
+    if send_images:
+        logger.info(f"Saving {len(send_images)} images to database")
+        for image_url in send_images:
+            await save_message_to_db(customer_id, "ai", image_url, content_type="image")
+
+    # 10. Save AI replies to database (each bubble as separate row)
+    for reply in ai_replies:
+        await save_message_to_db(customer_id, "ai", reply, content_type="text")
 
     logger.info(f"Tool calls used: {tool_calls_used}")
     logger.info(f"AI replies ({len(ai_replies)} bubbles):")

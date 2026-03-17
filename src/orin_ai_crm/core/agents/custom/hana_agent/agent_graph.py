@@ -42,8 +42,8 @@ IMPORTANT ARCHITECTURAL CHANGE:
 """
 
 import os
-import json
-from typing import Dict
+from typing import Dict, Literal
+from pydantic import BaseModel, Field
 
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
@@ -72,6 +72,23 @@ logger = get_logger(__name__)
 
 # Initialize LLM with tool calling support
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
+
+
+# ============================================================================
+# ORCHESTRATOR DECISION SCHEMA
+# ============================================================================
+
+class OrchestratorDecision(BaseModel):
+    """Orchestrator routing decision schema with forced output structure."""
+    next_agent: Literal["profiling", "sales", "ecommerce", "final"] = Field(
+        description="Next agent to call: profiling, sales, ecommerce, or final"
+    )
+    reasoning: str = Field(
+        description="Brief explanation of your decision"
+    )
+    plan: str = Field(
+        description="What happens next"
+    )
 
 
 async def agent_entry_handler(state: AgentState) -> Dict:
@@ -198,10 +215,8 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
         logger.error("Using prompt without formatting")
         # Continue with unformatted prompt
 
-    # Create orchestrator agent with structured output (JSON mode)
-    llm_with_structured_output = llm.bind(
-        response_format={"type": "json_object"}
-    )
+    # Create orchestrator agent with structured output (forced schema)
+    llm_with_structured_output = llm.with_structured_output(OrchestratorDecision)
 
     agent = create_agent(
         model=llm_with_structured_output,
@@ -216,24 +231,25 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
     # Extract routing decision from last message
     last_message = result.get("messages", [])[-1]
 
+    # With structured_output, the content is already the OrchestratorDecision object
     try:
-        # Parse JSON decision
-        decision = json.loads(last_message.content)
+        # The last message content should be an OrchestratorDecision object
+        decision_dict = last_message.content if isinstance(last_message.content, dict) else last_message.content.model_dump()
 
-        next_agent = decision.get("next_agent", "final")
-        reasoning = decision.get("reasoning", "")
-        plan = decision.get("plan", "")
+        next_agent = decision_dict.get("next_agent", "final")
+        reasoning = decision_dict.get("reasoning", "")
+        plan = decision_dict.get("plan", "")
 
         logger.info(f"Orchestrator decision: {next_agent}")
         logger.info(f"Reasoning: {reasoning}")
         logger.info(f"Plan: {plan}")
 
         # Update state with decision
-        result["orchestrator_decision"] = decision
+        result["orchestrator_decision"] = decision_dict
         result["orchestrator_plan"] = plan
 
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse orchestrator decision: {e}")
+    except (AttributeError, KeyError) as e:
+        logger.error(f"Failed to extract orchestrator decision: {e}")
         logger.error(f"Raw content: {last_message.content}")
         # Default to final if parsing fails
         result["orchestrator_decision"] = {"next_agent": "final", "reasoning": "Parse error", "plan": "End conversation"}

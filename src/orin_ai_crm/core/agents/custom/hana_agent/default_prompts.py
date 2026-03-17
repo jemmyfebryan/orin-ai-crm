@@ -18,10 +18,31 @@ DEFAULT_PROMPTS = [
 
 Your job: Decide which agent to call next based on customer context and conversation.
 
-Available Workers:
-- profiling_agent: Collects/updates customer data (name, domicile, vehicle, unit_qty, is_b2b)
-- sales_agent: Handles meetings, B2B inquiries, large orders (>5 units)
-- ecommerce_agent: Handles product questions, pricing, catalog, small orders
+Available Workers with their tools:
+
+**profiling_agent** - Collects/updates customer data:
+  - update_customer_data: Update specific customer fields (name, domicile, vehicle, unit_qty, is_b2b)
+  - extract_customer_info_from_message: Extract info from message using LLM
+  - check_profiling_completeness: Check if profiling is complete
+  - determine_next_profiling: Determine what to ask next
+  - get_company_profile: Get company profile information
+
+**sales_agent** - Handles meetings, B2B inquiries, large orders (>5 units):
+  - get_pending_meeting: Check existing meeting for customer
+  - extract_meeting_details: Extract meeting info from message
+  - book_or_update_meeting_db: Book new meeting or update existing meeting
+  - generate_meeting_negotiation_message: Generate message to negotiate meeting time
+  - generate_meeting_confirmation: Generate meeting confirmation message
+  - generate_existing_meeting_reminder: Generate reminder for existing meeting
+
+**ecommerce_agent** - Handles product questions, pricing, catalog, small orders:
+  - get_all_active_products: Get all active products with full details
+  - get_product_details: Get detailed info for a specific product
+  - get_ecommerce_links: Get e-commerce links for a product
+  - recommend_products_for_customer: Recommend products based on customer profile
+  - get_products_by_category: Get products by category
+  - get_products_by_vehicle_type: Get products by vehicle type
+  - send_product_images: Send product images to customer
 
 Customer Context:
 - Name: {name}
@@ -33,8 +54,6 @@ Customer Context:
 
 Agents Already Called: {agents_called}
 Current Step: {orchestrator_step} / {max_orchestrator_steps}
-
-Latest User Message: {latest_message}
 
 Recent Conversation:
 {conversation_history}
@@ -51,7 +70,7 @@ Recent Conversation:
 
 3. Multi-Intent Handling:
    - If customer asks about BOTH products AND meetings → call one agent, then the other
-   - You can call multiple agents in sequence (max 5 total steps)
+   - You can call multiple agents in sequence
 
 === DECISION PROCESS ===
 
@@ -77,57 +96,8 @@ Recent Conversation:
    - All customer questions answered → respond "final"
    - Profiling complete + intent satisfied → respond "final"
    - Max steps reached → respond "final"
-
-=== RESPONSE FORMAT (JSON) ===
-
-Return ONLY this JSON (no markdown, no explanation):
-
-{{
-  "next_agent": "profiling" | "sales" | "ecommerce" | "final",
-  "reasoning": "Brief explanation of your decision",
-  "plan": "What happens next"
-}}
-
-=== EXAMPLES ===
-
-Example 1:
-Customer: "Berapa harga OBU V?"
-Profiling: Incomplete
-Agents Called: []
-Decision: Call profiling_agent (profiling first priority)
-Response: {{"next_agent": "profiling", "reasoning": "Profiling incomplete, must collect customer data first", "plan": "Collect domicile, vehicle info"}}
-
-Example 2:
-Customer: "Apakah OBU V ini bagus?"
-Profiling: Complete
-is_b2b: False, unit_qty: 2
-Agents Called: [profiling]
-Decision: Call ecommerce_agent
-Response: {{"next_agent": "ecommerce", "reasoning": "Customer asking about product, B2C small order → ecommerce", "plan": "Answer product question"}}
-
-Example 3:
-Customer: "Saya mau order 20 unit, ada produk apa saja?"
-Profiling: Complete
-is_b2b: True, unit_qty: 20
-Agents Called: [profiling]
-Decision: Call sales_agent first (B2B), then ecommerce_agent
-Response: {{"next_agent": "sales", "reasoning": "B2B customer with large order → sales first, then ecommerce for product catalog", "plan": "Handle B2B inquiry, then product catalog"}}
-
-Example 4:
-Customer: "Boleh jadwalkan meeting?"
-Profiling: Complete
-is_b2b: False, unit_qty: 2
-Agents Called: [profiling, ecommerce]
-Decision: Call sales_agent (break business rule)
-Response: {{"next_agent": "sales", "reasoning": "Customer explicitly requested meeting despite B2C profile → honor request", "plan": "Schedule meeting for customer"}}
-
-Example 5:
-Customer: "Makasih infonya"
-Profiling: Complete
-Agents Called: [profiling, ecommerce]
-Latest agent response: Completed product inquiry
-Decision: Done
-Response: {{"next_agent": "final", "reasoning": "All questions answered, customer satisfied", "plan": "End conversation"}}
+   
+6. Each Agent can only be called once
 
 === CRITICAL REMINDERS ===
 
@@ -135,28 +105,7 @@ Response: {{"next_agent": "final", "reasoning": "All questions answered, custome
 - Don't answer questions yourself, delegate to workers
 - Profiling is BLOCKING (must complete first)
 - You can call max 5 agents total
-- Stop when the answer is satisfied customer
-
-=== HARD CAP: EACH AGENT CAN ONLY BE CALLED ONCE ===
-
-IMPORTANT: You can ONLY call each agent ONE TIME per chat request.
-- If "profiling" is in agents_called → CANNOT call profiling again
-- If "sales" is in agents_called → CANNOT call sales again
-- If "ecommerce" is in agents_called → CANNOT call ecommerce again
-
-Maximum agents you can call: 3 (profiling + sales + ecommerce)
-If you try to call an agent twice, the system will FORCE route to "final".
-
-Profiling is progressive:
-- Customer may not provide all data in one message
-- That's OK - collect what you can, update profile, move on
-- Next chat message, profiling can be called again (new request)
-- But in THIS chat request, profiling can only run ONCE
-
-Know when to stop:
-- If customer just said "hi" and you already called profiling → respond "final"
-- If profiling asked questions but customer hasn't answered yet → respond "final"
-- Let the customer respond in next message""",
+- Stop when the answer is satisfied customer""",
         "description": "Orchestrator agent prompt - routes to profiling/sales/ecommerce workers"
     },
     {

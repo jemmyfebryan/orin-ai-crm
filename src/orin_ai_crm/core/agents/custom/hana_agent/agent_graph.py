@@ -166,18 +166,11 @@ async def orchestrator_node(state: AgentState) -> Dict:
     customer_data = state.get('customer_data', {})
     messages = state.get('messages', [])
 
-    # Build conversation summary (last 5 messages for context)
+    # Build conversation summary (last 10 messages for context)
     conversation_summary = "\n".join([
         f"{msg.type}: {msg.content[:100]}..."
-        for msg in messages[-5:] if hasattr(msg, 'content')
+        for msg in messages[-10:] if hasattr(msg, 'content')
     ])
-
-    # Get latest user message
-    latest_message = ""
-    for msg in reversed(messages):
-        if hasattr(msg, 'type') and msg.type == "human":
-            latest_message = msg.content
-            break
 
     # Get orchestrator prompt from DB
     system_prompt = await get_prompt_from_db("hana_orchestrator_agent")
@@ -198,7 +191,6 @@ Return JSON: {"next_agent": "profiling|sales|ecommerce|final", "reasoning": "...
             agents_called=agents_called,
             orchestrator_step=step,
             max_orchestrator_steps=max_steps,
-            latest_message=latest_message,
             conversation_history=conversation_summary
         )
     except KeyError as e:

@@ -267,17 +267,18 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
     return account_type
 
 
-async def get_device_type_from_vps(phone_number: str) -> Optional[str]:
+async def get_device_type_from_vps(phone_number: str, device_name: Optional[str] = None) -> Optional[str]:
     """
     Get user's device type from VPS database by phone number.
 
     The device type is found by:
     1. Finding the user by phone_number
-    2. Getting their first device
+    2. Getting their device (first device if device_name not specified, or specific device by name)
     3. Looking up the device type's protocol or name
 
     Args:
         phone_number: Customer's phone number (can be in various formats)
+        device_name: Optional specific device name to look up. If None, returns first device.
 
     Returns:
         Device type string (from protocol or name column) or None if not found
@@ -353,16 +354,28 @@ async def get_device_type_from_vps(phone_number: str) -> Optional[str]:
     user_id = users[0].get("id")
     logger.info(f"Found user in VPS DB: user_id = {user_id}")
 
-    # Step 2: Get user's first device
-    device_query = f"""
-        SELECT device_type_id
-        FROM devices
-        WHERE user_id = {user_id}
-        AND deleted_at IS NULL
-        LIMIT 1
-    """
-
-    logger.info(f"VPS Device Query: {device_query}")
+    # Step 2: Get user's device (first device or specific device by name)
+    if device_name:
+        # Query for specific device by name
+        device_query = f"""
+            SELECT device_type_id
+            FROM devices
+            WHERE user_id = {user_id}
+            AND device_name = '{device_name.replace("'", "''")}'
+            AND deleted_at IS NULL
+            LIMIT 1
+        """
+        logger.info(f"VPS Device Query (by name '{device_name}'): {device_query}")
+    else:
+        # Query for first device (original behavior)
+        device_query = f"""
+            SELECT device_type_id
+            FROM devices
+            WHERE user_id = {user_id}
+            AND deleted_at IS NULL
+            LIMIT 1
+        """
+        logger.info(f"VPS Device Query (first device): {device_query}")
 
     device_result = await query_vps_db(device_query)
 
@@ -415,3 +428,122 @@ async def get_device_type_from_vps(phone_number: str) -> Optional[str]:
 
     logger.info(f"Found device type: {device_type}")
     return device_type
+
+
+async def get_customer_devices_from_vps(phone_number: str) -> List[dict]:
+    """
+    Get all devices for a customer from VPS database by phone number.
+
+    Args:
+        phone_number: Customer's phone number (can be in various formats)
+
+    Returns:
+        List of device dicts with device_name, device_type (protocol/name), or empty list if not found
+    """
+    logger.info(f"get_customer_devices_from_vps called - phone_number: {phone_number}")
+
+    if not phone_number:
+        logger.warning("Empty phone_number provided")
+        return []
+
+    # Generate phone number variations for matching
+    variations = []
+
+    # Original format
+    clean_phone = phone_number.strip()
+    variations.append(f"'{clean_phone}'")
+
+    # Generate variations based on the format
+    if clean_phone.startswith('+'):
+        # +6285123456789 -> 6285123456789, 085123456789
+        without_plus = clean_phone[1:]  # Remove +
+        variations.append(f"'{without_plus}'")
+        if without_plus.startswith('62'):
+            with_zero = '0' + without_plus[2:]  # 62 -> 0
+            variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('62'):
+        # 6285123456789 -> +6285123456789, 085123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        variations.append(f"'+{clean_phone}'")
+        with_zero = '0' + clean_phone[2:]  # 62 -> 0
+        variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('0'):
+        # 085123456789 -> +6285123456789, 6285123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        with_62 = '62' + clean_phone[1:]  # 0 -> 62
+        variations.append(f"'{with_62}'")
+        variations.append(f"'+{with_62}'")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_variations = []
+    for v in variations:
+        if v not in seen:
+            seen.add(v)
+            unique_variations.append(v)
+
+    logger.info(f"Phone number variations: {unique_variations}")
+
+    # Step 1: Find user by phone number
+    phone_conditions = " OR ".join([f"phone_number = {v}" for v in unique_variations])
+    user_query = f"""
+        SELECT id
+        FROM users
+        WHERE ({phone_conditions})
+        AND deleted_at IS NULL
+        LIMIT 1
+    """
+
+    logger.info(f"VPS User Query: {user_query}")
+
+    user_result = await query_vps_db(user_query)
+
+    if not user_result:
+        logger.warning(f"VPS DB returned invalid result for phone_number: {phone_number}")
+        return []
+
+    users = user_result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for phone_number: {phone_number}")
+        return []
+
+    user_id = users[0].get("id")
+    logger.info(f"Found user in VPS DB: user_id = {user_id}")
+
+    # Step 2: Get all devices for the user
+    device_query = f"""
+        SELECT d.device_name, dt.protocol, dt.name, dt.id as device_type_id
+        FROM devices d
+        LEFT JOIN device_types dt ON d.device_type_id = dt.id
+        WHERE d.user_id = {user_id}
+        AND d.deleted_at IS NULL
+        ORDER BY d.device_name ASC
+    """
+
+    logger.info(f"VPS All Devices Query: {device_query}")
+
+    device_result = await query_vps_db(device_query)
+
+    if not device_result:
+        logger.warning(f"VPS DB returned invalid result for user_id: {user_id}")
+        return []
+
+    devices = device_result.get("rows", [])
+
+    if not devices or len(devices) == 0:
+        logger.info(f"No devices found in VPS DB for user_id: {user_id}")
+        return []
+
+    # Format the result
+    formatted_devices = []
+    for device in devices:
+        device_type = device.get("protocol") or device.get("name")
+        formatted_devices.append({
+            'device_name': device.get('device_name'),
+            'device_type': device_type,
+            'device_type_id': device.get('device_type_id')
+        })
+
+    logger.info(f"Found {len(formatted_devices)} devices for user_id: {user_id}")
+    return formatted_devices

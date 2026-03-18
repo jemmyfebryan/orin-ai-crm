@@ -7,7 +7,7 @@ These tools are used by the LangGraph agent for support-related operations.
 
 import os
 import json
-from typing import Annotated
+from typing import Annotated, Optional
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -256,21 +256,28 @@ Terima kasih Kak! 🙏"""
 @tool
 async def device_troubleshooting(
     state: Annotated[dict, InjectedState],
+    device_name: Optional[str] = None,
 ) -> dict:
     """
     Get troubleshooting guide for offline GPS device.
+    Use tool list_customer_devices to get the List of device_name.
 
     Use this tool when:
     - Customer reports GPS device is offline
     - Customer says GPS not updating
     - Customer reports device not showing location
 
+    Args:
+        state: Agent state (contains customer_id)
+        device_name: Optional device name to troubleshoot specific device.
+                     If not provided, will use customer's first device.
+
     Returns:
         dict with: message (str), update_state (dict, optional), device_type (str)
     """
     from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
 
-    logger.info(f"TOOL: device_troubleshooting")
+    logger.info(f"TOOL: device_troubleshooting - device_name: {device_name}")
 
     # Get customer_id from state
     customer_id = state.get("customer_id")
@@ -286,7 +293,7 @@ async def device_troubleshooting(
         }
 
     # Get device type from database
-    device_type = await get_device_type(customer_id)
+    device_type = await get_device_type(customer_id, device_name)
     logger.info(f"Device type for customer {customer_id}: {device_type}")
 
     # Check if device_type is None (error case)
@@ -396,6 +403,53 @@ async def get_company_profile() -> dict:
         }
 
 
+@tool
+async def list_customer_devices(
+    state: Annotated[dict, InjectedState],
+) -> dict:
+    """
+    List all devices for the current customer.
+
+    Use this tool when:
+    - Customer has multiple devices and needs to specify which one
+    - You need to show the user their available devices
+    - Customer asks about their devices
+
+    Args:
+        state: Agent state (contains customer_id)
+
+    Returns:
+        dict with: devices (list of dict with device_name, device_type, device_type_id)
+    """
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_customer_devices
+
+    logger.info("TOOL: list_customer_devices")
+
+    # Get customer_id from state
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: list_customer_devices - No customer_id in state!")
+        return {
+            'devices': [],
+            'message': 'Maaf, belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
+        }
+
+    # Get all devices from database
+    devices = await get_customer_devices(customer_id)
+    logger.info(f"Found {len(devices)} devices for customer {customer_id}")
+
+    if not devices:
+        return {
+            'devices': [],
+            'message': 'Tidak ada device yang ditemukan untuk akun Kakak.'
+        }
+
+    return {
+        'devices': devices
+    }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     human_takeover,
@@ -403,6 +457,7 @@ SUPPORT_TOOLS = [
     license_extension,
     device_troubleshooting,
     get_company_profile,
+    list_customer_devices,
 ]
 
 # Export human_takeover separately for sales_agent

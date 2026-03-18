@@ -207,7 +207,7 @@ async def get_account_type(customer_id: int) -> Optional[str]:
     return account_type
 
 
-async def get_device_type(customer_id: int) -> Optional[str]:
+async def get_device_type(customer_id: int, device_name: Optional[str] = None) -> Optional[str]:
     """
     Get customer's device type from VPS database.
 
@@ -216,13 +216,14 @@ async def get_device_type(customer_id: int) -> Optional[str]:
 
     Args:
         customer_id: The customer's ID
+        device_name: Optional specific device name to look up. If None, returns first device.
 
     Returns:
         Optional[str]: Device type (from VPS device_types.protocol or name) or None if not found
     """
     from src.orin_ai_crm.core.agents.tools.vps_tools import get_device_type_from_vps
 
-    logger.info(f"get_device_type called - customer_id: {customer_id}")
+    logger.info(f"get_device_type called - customer_id: {customer_id}, device_name: {device_name}")
 
     async with AsyncSessionLocal() as db:
         # Fetch customer's phone number
@@ -240,10 +241,49 @@ async def get_device_type(customer_id: int) -> Optional[str]:
     logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
 
     # Query VPS database for device type
-    device_type = await get_device_type_from_vps(phone_number)
+    device_type = await get_device_type_from_vps(phone_number, device_name)
     logger.info(f"Device type for customer {customer_id}: {device_type}")
 
     return device_type
+
+
+async def get_customer_devices(customer_id: int) -> List[dict]:
+    """
+    Get all devices for a customer from VPS database.
+
+    Fetches the customer's phone number from the local database,
+    then queries the VPS database to get all devices.
+
+    Args:
+        customer_id: The customer's ID
+
+    Returns:
+        List[dict]: List of devices with device_name, device_type, device_type_id
+    """
+    from src.orin_ai_crm.core.agents.tools.vps_tools import get_customer_devices_from_vps
+
+    logger.info(f"get_customer_devices called - customer_id: {customer_id}")
+
+    async with AsyncSessionLocal() as db:
+        # Fetch customer's phone number
+        query = select(Customer.phone_number).where(
+            Customer.id == customer_id,
+            Customer.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        phone_number = result.scalar_one_or_none()
+
+    if not phone_number:
+        logger.warning(f"No phone_number found for customer_id: {customer_id}")
+        return []
+
+    logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
+
+    # Query VPS database for all devices
+    devices = await get_customer_devices_from_vps(phone_number)
+    logger.info(f"Found {len(devices)} devices for customer {customer_id}")
+
+    return devices
 
 
 async def soft_delete_customer(phone_number: str) -> dict:

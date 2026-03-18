@@ -59,6 +59,9 @@ SALES_AGENT_TOOLS = SALES_MEETING_TOOLS
 # Ecommerce Agent Tools (used by ecommerce_node for B2C/small orders)
 ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS
 
+# Support Agent Tools (used by support_node for complaints and technical support)
+SUPPORT_AGENT_TOOLS = SUPPORT_TOOLS
+
 # Legacy: Keep old names for backward compatibility
 AGENT_TOOLS = PROFILING_AGENT_TOOLS
 
@@ -67,6 +70,7 @@ __all__ = [
     'PROFILING_AGENT_TOOLS',
     'SALES_AGENT_TOOLS',
     'ECOMMERCE_AGENT_TOOLS',
+    'SUPPORT_AGENT_TOOLS',
     'CUSTOMER_MANAGEMENT_TOOLS',
     'PROFILING_TOOLS',
     'SALES_MEETING_TOOLS',

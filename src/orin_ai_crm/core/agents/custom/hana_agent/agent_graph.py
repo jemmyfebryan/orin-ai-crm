@@ -11,13 +11,14 @@ Architecture:
 3. profiling_node: Collects and updates customer data (name, domicile, vehicle, unit_qty, is_b2b)
 4. sales_node: Handles B2B inquiries, meeting scheduling, large orders (>5 units)
 5. ecommerce_node: Handles product questions, pricing, catalog, small orders (≤5 units)
-6. orchestrator_router: Routes from orchestrator to appropriate worker
-7. quality_check_node: Evaluates AI answer quality
-8. final_message_node: Adds form if needed and prepares final response
-9. human_takeover_node: Triggers human agent takeover
+6. support_node: Handles complaints, technical support, and issues
+7. orchestrator_router: Routes from orchestrator to appropriate worker
+8. quality_check_node: Evaluates AI answer quality
+9. final_message_node: Adds form if needed and prepares final response
+10. human_takeover_node: Triggers human agent takeover
 
 Flow:
-Entry → Orchestrator → Worker (profiling/sales/ecommerce) → Orchestrator → Worker → ...
+Entry → Orchestrator → Worker (profiling/sales/ecommerce/support) → Orchestrator → Worker → ...
                   ↓
              (loops until orchestrator says "final")
                   ↓
@@ -56,6 +57,7 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
     PROFILING_AGENT_TOOLS,
     SALES_AGENT_TOOLS,
     ECOMMERCE_AGENT_TOOLS,
+    SUPPORT_AGENT_TOOLS,
 )
 from src.orin_ai_crm.core.agents.tools.customer_agent_tools import (
     get_customer_profile,
@@ -80,8 +82,8 @@ llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_K
 
 class OrchestratorDecision(BaseModel):
     """Orchestrator routing decision schema with forced output structure."""
-    next_agent: Literal["profiling", "sales", "ecommerce", "final"] = Field(
-        description="Next agent to call: profiling, sales, ecommerce, or final"
+    next_agent: Literal["profiling", "sales", "ecommerce", "support", "final"] = Field(
+        description="Next agent to call: profiling, sales, ecommerce, support, or final"
     )
     reasoning: str = Field(
         description="Brief explanation of your decision"
@@ -343,6 +345,9 @@ async def orchestrator_router(state: AgentState) -> str:
     elif next_agent == "ecommerce":
         logger.info("EXIT: orchestrator_router -> ecommerce_node")
         return "ecommerce_node"
+    elif next_agent == "support":
+        logger.info("EXIT: orchestrator_router -> support_node")
+        return "support_node"
     else:  # "final" or unknown
         logger.info("EXIT: orchestrator_router -> quality_check")
         return "quality_check"
@@ -506,6 +511,46 @@ async def ecommerce_node(state: AgentState) -> Dict:
     return result
 
 
+async def support_node(state: AgentState) -> Dict:
+    """
+    Support node - handles complaints, technical support, and issues.
+    """
+    from langchain.agents import create_agent
+
+    logger.info("ENTER: support_node")
+
+    # Get support agent prompt from database
+    system_prompt = await get_prompt_from_db("hana_support_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_support_agent prompt from DB, using fallback")
+        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+
+    # Create support agent with support tools
+    agent = create_agent(
+        model=llm,
+        tools=SUPPORT_AGENT_TOOLS,
+        system_prompt=system_prompt,
+        state_schema=AgentState,
+    )
+
+    # Invoke the agent with current state
+    result = await agent.ainvoke(state, recursion_limit=10)
+
+    # Apply tool state updates
+    result = await apply_tool_state_updates(result)
+
+    # Track that this agent was called
+    agents_called = result.get("agents_called", [])
+    agents_called.append("support")
+    result["agents_called"] = list(set(agents_called))  # Remove duplicates
+
+    # Increment orchestrator step
+    result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
+
+    logger.info("EXIT: support_node")
+    return result
+
+
 # ============================================================================
 # BUILD THE GRAPH
 # ============================================================================
@@ -534,6 +579,7 @@ def build_hana_agent_graph():
     - profiling_agent: Collects/updates customer data
     - sales_agent: Handles B2B, meetings, large orders
     - ecommerce_agent: Handles products, pricing, small orders
+    - support_agent: Handles complaints, technical support, issues
     """
     logger.info("Building Hana Agent Graph with Orchestrator-Worker pattern...")
 
@@ -546,6 +592,7 @@ def build_hana_agent_graph():
     workflow.add_node("profiling_node", profiling_node)
     workflow.add_node("sales_node", sales_node)
     workflow.add_node("ecommerce_node", ecommerce_node)
+    workflow.add_node("support_node", support_node)
     workflow.add_node("quality_check", node_quality_check)
     workflow.add_node("final_message", node_final_message)
     workflow.add_node("human_takeover", node_human_takeover)
@@ -564,6 +611,7 @@ def build_hana_agent_graph():
             "profiling_node": "profiling_node",
             "sales_node": "sales_node",
             "ecommerce_node": "ecommerce_node",
+            "support_node": "support_node",
             "quality_check": "quality_check"
         }
     )
@@ -572,6 +620,7 @@ def build_hana_agent_graph():
     workflow.add_edge("profiling_node", "orchestrator")
     workflow.add_edge("sales_node", "orchestrator")
     workflow.add_edge("ecommerce_node", "orchestrator")
+    workflow.add_edge("support_node", "orchestrator")
 
     # Quality check → final message OR human takeover
     workflow.add_conditional_edges(
@@ -595,6 +644,7 @@ def build_hana_agent_graph():
     logger.info(f"Profiling agent tools: {len(PROFILING_AGENT_TOOLS)}")
     logger.info(f"Sales agent tools: {len(SALES_AGENT_TOOLS)}")
     logger.info(f"Ecommerce agent tools: {len(ECOMMERCE_AGENT_TOOLS)}")
+    logger.info(f"Support agent tools: {len(SUPPORT_AGENT_TOOLS)}")
     logger.info("Using LangChain's create_agent for agent loop handling")
     return hana_agent
 

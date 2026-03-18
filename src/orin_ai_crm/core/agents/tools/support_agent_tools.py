@@ -23,14 +23,6 @@ logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
-HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
-Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif.
-Jangan terlalu kaku, gunakan bahasa natural seperti chat WhatsApp asli.
-
-ATURAN PRODUK GPS MOBIL:
-- Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin).
-- Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)."""
-
 
 @tool
 async def classify_issue_type(message: str) -> dict:
@@ -106,9 +98,7 @@ async def generate_empathetic_response(
     else:
         task = "Customer sent a general message. Respond warmly and ask how you can help."
 
-    prompt = f"""{HANA_PERSONA}
-
-Customer: {customer_name}
+    prompt = f"""Customer: {customer_name}
 Message: "{message}"
 
 TASK:
@@ -139,7 +129,6 @@ async def set_human_takeover_flag(
     Use this tool when:
     - Issue is too complex for AI to handle
     - Customer explicitly asks for human agent
-    - Quality check fails repeatedly
 
     Returns:
         dict with: success (bool), message (str)

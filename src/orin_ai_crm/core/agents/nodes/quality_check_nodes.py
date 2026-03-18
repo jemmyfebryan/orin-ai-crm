@@ -533,6 +533,15 @@ CONTEXT:
 - Fokus pada apa yang user dapatkan/tahu
 - Gunakan bahasa yang natural dan ramah
 
+WHATSAPP MARKDOWN FORMATTING:
+Jika perlu menggunakan marksdawn, gunakan format markdown yang kompatibel dengan WhatsApp:
+- **bold** → gunakan **double asterisk** untuk tebal
+- *italic* → gunakan *single asterisk* untuk miring
+- JANGAN gunakan # untuk heading (WhatsApp tidak support)
+- JANGAN gunakan > untuk blockquote (WhatsApp tidak support)
+- JANGAN gunakan - atau * untuk bullet list (tidak terbaca dengan baik)
+- Untuk list, gunakan format: "1. Item pertama" atau "• Item pertama" (bullet unicode)
+
 RULES FOR MULTI-BUBBLE RESPONSE:
 1. Split response into multiple bubbles when:
    - Greeting + separate answer
@@ -546,7 +555,8 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 6. Personalized with customer name when appropriate
 7. If this is your first message with customer (empty conversation history), introduce yourself
 8. No need to include any image&pdf url/name in the text (see IMAGES_SENT & PDFS_SENT)
-9. Do not make up any information if it's not stated in the conversation history"""
+9. Do not make up any information if it's not stated in the conversation history
+10. Pastikan formatting markdown WhatsApp-compatible (lihat aturan di atas)"""
 
     # Use LLM with structured output to generate multi-bubble response
     final_messages_llm = llm.with_structured_output(FinalMessagesResponse)
@@ -566,13 +576,13 @@ RULES FOR MULTI-BUBBLE RESPONSE:
         logger.info("Appending review request message to final messages")
         review_message = """Bila Kakak puas dengan pelayanan kami di VASTEL / ORIN, kami harap Kakak berkenan meluangkan 30 detik saja untuk memberi kami bintang 5 di salah satu platform ini:
 
-Google Reviews
+*Google Reviews*
 https://g.page/r/CaKeWLJ0K6l4EB0/review
 
-Google Play Store
+*Google Play Store*
 https://play.google.com/store/apps/details?id=com.orin&hl=id&gl=US
 
-Apple App Store
+*Apple App Store*
 https://apps.apple.com/id/app/orin-gps-tracking/id1450590467
 
 Terimakasih ya Kak.

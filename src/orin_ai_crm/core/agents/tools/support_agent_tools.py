@@ -17,6 +17,7 @@ from langgraph.prebuilt import InjectedState
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -324,12 +325,54 @@ Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
     }
 
 
+@tool
+async def get_company_profile() -> dict:
+    """
+    Get company profile information from database.
+
+    Use this tool ONLY when:
+    - Customer EXPLICITLY asks about the company (ORIN GPS Tracker)
+    - Customer asks about company address, contact info, working hours
+    - Customer wants to know who we are and what we do
+    - Customer asks about payment methods or services
+
+    Args:
+        None
+
+    Returns:
+        dict with: profile (str) - company profile text
+    """
+    logger.info("TOOL: get_company_profile")
+
+    try:
+        # Fetch company profile from database
+        company_profile = await get_prompt_from_db("company_profile")
+
+        if not company_profile:
+            logger.warning("Company profile not found in database, return empty")
+            return {
+                'profile': ""
+            }
+        logger.info("TOOL: get_company_profile - Successfully retrieved company profile")
+        return {
+            'profile': company_profile
+        }
+
+    except Exception as e:
+        logger.error(f"TOOL: get_company_profile - ERROR: {str(e)}")
+        return {
+            'profile': 'Maaf, terjadi kesalahan saat mengambil profil perusahaan. Silakan hubungi customer service.',
+            'error': str(e)
+        }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     human_takeover,
     forgot_password,
     license_extension,
     device_troubleshooting,
+    get_company_profile,
 ]
 
 __all__ = ['SUPPORT_TOOLS']

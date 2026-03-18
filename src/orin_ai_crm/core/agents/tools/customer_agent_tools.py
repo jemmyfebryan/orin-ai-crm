@@ -11,7 +11,6 @@ from langchain_core.tools import tool
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
-from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -170,51 +169,9 @@ async def update_customer_data(
         }
 
 
-@tool
-async def get_company_profile() -> dict:
-    """
-    Get company profile information from database.
-
-    Use this tool ONLY when:
-    - Customer EXPLICITLY asks about the company (ORIN GPS Tracker)
-    - Customer asks about company address, contact info, working hours
-    - Customer wants to know who we are and what we do
-    - Customer asks about payment methods or services
-    
-    Args:
-        None
-
-    Returns:
-        dict with: profile (str) - company profile text
-    """
-    logger.info("TOOL: get_company_profile")
-
-    try:
-        # Fetch company profile from database
-        company_profile = await get_prompt_from_db("company_profile")
-
-        if not company_profile:
-            logger.warning("Company profile not found in database, return empty")
-            return {
-                'profile': ""
-            }
-        logger.info("TOOL: get_company_profile - Successfully retrieved company profile")
-        return {
-            'profile': company_profile
-        }
-
-    except Exception as e:
-        logger.error(f"TOOL: get_company_profile - ERROR: {str(e)}")
-        return {
-            'profile': 'Maaf, terjadi kesalahan saat mengambil profil perusahaan. Silakan hubungi customer service.',
-            'error': str(e)
-        }
-
-
 # List of customer management tools for easy import
 CUSTOMER_MANAGEMENT_TOOLS = [
     update_customer_data,
-    get_company_profile,
 ]
 
-__all__ = ['CUSTOMER_MANAGEMENT_TOOLS', 'get_customer_profile', 'update_customer_data', 'get_company_profile']
+__all__ = ['CUSTOMER_MANAGEMENT_TOOLS', 'get_customer_profile', 'update_customer_data']

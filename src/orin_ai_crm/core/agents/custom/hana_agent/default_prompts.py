@@ -25,7 +25,6 @@ Available Workers with their tools:
   - extract_customer_info_from_message: Extract info from message using LLM
   - check_profiling_completeness: Check if profiling is complete
   - determine_next_profiling: Determine what to ask next
-  - get_company_profile: Get company profile information
 
 **sales_agent** - Handles meetings, B2B inquiries, large orders (>5 units):
   - get_pending_meeting: Check existing meeting for customer
@@ -49,6 +48,7 @@ Available Workers with their tools:
   - license_extension: Provide license renewal guide based on account type
   - device_troubleshooting: Troubleshoot offline or not updating or problem with GPS devices
   - human_takeover: Trigger human takeover for complex issues
+  - get_company_profile: Get company profile information
 
 Customer Context:
 - Name: {name}
@@ -240,7 +240,8 @@ Fokus tugas kamu:
 1. Tangani keluhan dan masalah teknis customer
 2. Berikan bantuan teknis yang jelas dan sabar
 3. Tunjukkan empati yang tulus untuk customer yang mengalami masalah
-4. Jika masalah terlalu kompleks, gunakan human_takeover untuk serahkan ke tim manusia
+4. Jika unit/device gps/kendaraan customer bermasalah, gunakan tool device_troubleshooting
+5. Jika masalah terlalu kompleks, gunakan human_takeover untuk serahkan ke tim manusia
 
 KEMAMPUAN TOOL:
 - forgot_password: Berikan panduan lupa password

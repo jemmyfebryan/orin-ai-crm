@@ -91,7 +91,7 @@ async def evaluate_answer_quality(
     Returns:
         AnswerQualityEvaluation with score and reasoning
     """
-    logger.info(f"evaluate_answer_quality called - user_msg: {user_message[:50]}..., ai_answer: {ai_answer[:50]}...")
+    logger.info(f"evaluate_answer_quality called - user_msg: {user_message[:200]}..., ai_answer: {ai_answer[:50]}...")
 
     # Load persona from DB
     hana_persona = await get_hana_persona()

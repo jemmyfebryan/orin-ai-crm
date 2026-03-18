@@ -272,12 +272,36 @@ async def device_troubleshooting(
 
     logger.info(f"TOOL: device_troubleshooting")
 
+    # Get customer_id from state
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: device_troubleshooting - No customer_id in state!")
+        return {
+            'message': 'Device type error, call human_takeover tool',
+            'device_type': None,
+            'update_state': {
+                'human_takeover': True
+            }
+        }
+
     # Get device type from database
-    device_type = await get_device_type(state=state)
-    logger.info(f"Device type for: {device_type}")
+    device_type = await get_device_type(customer_id)
+    logger.info(f"Device type for customer {customer_id}: {device_type}")
+
+    # Check if device_type is None (error case)
+    if device_type is None:
+        message = "Device type error, call human_takeover tool"
+        return {
+            'message': message,
+            'device_type': device_type,
+            'update_state': {
+                'human_takeover': True
+            }
+        }
 
     # Generate message based on device type
-    sms_devices = ['GT06N', 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02']
+    sms_devices = ['gt06n', 'tr06', 't700', 't2', 't30', 'wetrack', 'moplus', 'tr02']
 
     if device_type.lower() in sms_devices:
         message = f"""Untuk kendala GPS offline Kakak, coba langkah ini ya 😊
@@ -308,7 +332,7 @@ Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
                 'human_takeover': True
             }
         }
-    else:  # OBU and other devices
+    else:  # OBU and other devices (any other valid device type)
         message = f"""Untuk kendala GPS offline Kakak, coba langkah ini ya 😊
 
 1️⃣ Coba hubungi nomor GSM di dalam unit lewat HP Kakak

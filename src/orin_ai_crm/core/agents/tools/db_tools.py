@@ -1,5 +1,4 @@
 from typing import Optional
-import random
 
 from sqlalchemy import select
 
@@ -191,26 +190,41 @@ async def get_account_type(customer_id: int) -> Optional[str]:
     return account_type
 
 
-async def get_device_type(state) -> str:
+async def get_device_type(customer_id: int) -> Optional[str]:
     """
-    Get device type based on device name.
+    Get customer's device type from VPS database.
 
-    For testing purposes, returns random device types.
-    In production, this would query the actual device type from the database.
+    Fetches the customer's phone number from the local database,
+    then queries the VPS database to get the device type.
 
     Args:
-        device_name: The device name/identifier
+        customer_id: The customer's ID
 
     Returns:
-        str: Device type - 'GT06N', 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02', 'postpaid', or other
+        Optional[str]: Device type (from VPS device_types.protocol or name) or None if not found
     """
-    logger.info(f"get_device_type called")
+    from src.orin_ai_crm.core.agents.tools.vps_tools import get_device_type_from_vps
 
-    # TODO: In production, query actual device_type from database based on device_name
-    # For testing, return random device types
-    device_types = ['GT06N', 'postpaid', 'OBU'] # 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02',
-    device_type = random.choice(device_types)
-    logger.info(f"Device type result: {device_type}")
+    logger.info(f"get_device_type called - customer_id: {customer_id}")
+
+    async with AsyncSessionLocal() as db:
+        # Fetch customer's phone number
+        query = select(Customer.phone_number).where(
+            Customer.id == customer_id,
+            Customer.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        phone_number = result.scalar_one_or_none()
+
+    if not phone_number:
+        logger.warning(f"No phone_number found for customer_id: {customer_id}")
+        return None
+
+    logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
+
+    # Query VPS database for device type
+    device_type = await get_device_type_from_vps(phone_number)
+    logger.info(f"Device type for customer {customer_id}: {device_type}")
 
     return device_type
 

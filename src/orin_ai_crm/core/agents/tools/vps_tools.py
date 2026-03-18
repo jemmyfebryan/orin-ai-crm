@@ -265,3 +265,153 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
         return 'plus'
 
     return account_type
+
+
+async def get_device_type_from_vps(phone_number: str) -> Optional[str]:
+    """
+    Get user's device type from VPS database by phone number.
+
+    The device type is found by:
+    1. Finding the user by phone_number
+    2. Getting their first device
+    3. Looking up the device type's protocol or name
+
+    Args:
+        phone_number: Customer's phone number (can be in various formats)
+
+    Returns:
+        Device type string (from protocol or name column) or None if not found
+    """
+    logger.info(f"get_device_type_from_vps called - phone_number: {phone_number}")
+
+    if not phone_number:
+        logger.warning("Empty phone_number provided")
+        return None
+
+    # Generate phone number variations for matching
+    variations = []
+
+    # Original format
+    clean_phone = phone_number.strip()
+    variations.append(f"'{clean_phone}'")
+
+    # Generate variations based on the format
+    if clean_phone.startswith('+'):
+        # +6285123456789 -> 6285123456789, 085123456789
+        without_plus = clean_phone[1:]  # Remove +
+        variations.append(f"'{without_plus}'")
+        if without_plus.startswith('62'):
+            with_zero = '0' + without_plus[2:]  # 62 -> 0
+            variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('62'):
+        # 6285123456789 -> +6285123456789, 085123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        variations.append(f"'+{clean_phone}'")
+        with_zero = '0' + clean_phone[2:]  # 62 -> 0
+        variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('0'):
+        # 085123456789 -> +6285123456789, 6285123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        with_62 = '62' + clean_phone[1:]  # 0 -> 62
+        variations.append(f"'{with_62}'")
+        variations.append(f"'+{with_62}'")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_variations = []
+    for v in variations:
+        if v not in seen:
+            seen.add(v)
+            unique_variations.append(v)
+
+    logger.info(f"Phone number variations: {unique_variations}")
+
+    # Step 1: Find user by phone number
+    phone_conditions = " OR ".join([f"phone_number = {v}" for v in unique_variations])
+    user_query = f"""
+        SELECT id
+        FROM users
+        WHERE ({phone_conditions})
+        AND deleted_at IS NULL
+        LIMIT 1
+    """
+
+    logger.info(f"VPS User Query: {user_query}")
+
+    user_result = await query_vps_db(user_query)
+
+    if not user_result:
+        logger.warning(f"VPS DB returned invalid result for phone_number: {phone_number}")
+        return None
+
+    users = user_result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for phone_number: {phone_number}")
+        return None
+
+    user_id = users[0].get("id")
+    logger.info(f"Found user in VPS DB: user_id = {user_id}")
+
+    # Step 2: Get user's first device
+    device_query = f"""
+        SELECT device_type_id
+        FROM devices
+        WHERE user_id = {user_id}
+        AND deleted_at IS NULL
+        LIMIT 1
+    """
+
+    logger.info(f"VPS Device Query: {device_query}")
+
+    device_result = await query_vps_db(device_query)
+
+    if not device_result:
+        logger.warning(f"VPS DB returned invalid result for user_id: {user_id}")
+        return None
+
+    devices = device_result.get("rows", [])
+
+    if not devices or len(devices) == 0:
+        logger.info(f"No devices found in VPS DB for user_id: {user_id}")
+        return None
+
+    device_type_id = devices[0].get("device_type_id")
+
+    if not device_type_id:
+        logger.warning(f"Device found but device_type_id is NULL for user_id: {user_id}")
+        return None
+
+    logger.info(f"Found device_type_id: {device_type_id}")
+
+    # Step 3: Get device type protocol/name
+    device_type_query = f"""
+        SELECT protocol, name
+        FROM device_types
+        WHERE id = {device_type_id}
+        LIMIT 1
+    """
+
+    logger.info(f"VPS Device Type Query: {device_type_query}")
+
+    device_type_result = await query_vps_db(device_type_query)
+
+    if not device_type_result:
+        logger.warning(f"VPS DB returned invalid result for device_type_id: {device_type_id}")
+        return None
+
+    device_types = device_type_result.get("rows", [])
+
+    if not device_types or len(device_types) == 0:
+        logger.info(f"No device_type found in VPS DB for id: {device_type_id}")
+        return None
+
+    # Check protocol first, then name
+    device_type = device_types[0].get("protocol") or device_types[0].get("name")
+
+    if not device_type:
+        logger.warning(f"Device type found but both protocol and name are NULL for device_type_id: {device_type_id}")
+        return None
+
+    logger.info(f"Found device type: {device_type}")
+    return device_type

@@ -256,9 +256,6 @@ async def device_troubleshooting(
     - Customer says GPS not updating
     - Customer reports device not showing location
 
-    Args:
-        device_name: The device name/identifier (e.g., "B1234ABC", "GPS-01", etc.)
-
     Returns:
         dict with: message (str), update_state (dict, optional), device_type (str)
     """

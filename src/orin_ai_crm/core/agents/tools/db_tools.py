@@ -442,9 +442,16 @@ async def update_chat_log(
             chat_log.status = status
             chat_log.completed_at = datetime.now(WIB)
 
-            # Calculate duration
+            # Calculate duration (ensure both datetimes are timezone-aware)
             if chat_log.started_at:
-                duration = chat_log.completed_at - chat_log.started_at
+                # Ensure started_at is timezone-aware (WIB)
+                if chat_log.started_at.tzinfo is None:
+                    # If naive, assume it's WIB
+                    started_at_aware = chat_log.started_at.replace(tzinfo=WIB)
+                else:
+                    started_at_aware = chat_log.started_at
+
+                duration = chat_log.completed_at - started_at_aware
                 chat_log.processing_duration_ms = int(duration.total_seconds() * 1000)
 
             # Update references to chat_sessions

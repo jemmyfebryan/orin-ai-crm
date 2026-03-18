@@ -174,7 +174,7 @@ async def get_account_type(customer_id: int) -> str:
     return account_type
 
 
-async def get_device_type(device_name: str) -> str:
+async def get_device_type(state) -> str:
     """
     Get device type based on device name.
 
@@ -187,13 +187,13 @@ async def get_device_type(device_name: str) -> str:
     Returns:
         str: Device type - 'GT06N', 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02', 'postpaid', or other
     """
-    logger.info(f"get_device_type called - device_name: {device_name}")
+    logger.info(f"get_device_type called")
 
     # TODO: In production, query actual device_type from database based on device_name
     # For testing, return random device types
     device_types = ['GT06N', 'postpaid', 'OBU'] # 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02',
     device_type = random.choice(device_types)
-    logger.info(f"Device type for {device_name}: {device_type}")
+    logger.info(f"Device type result: {device_type}")
 
     return device_type
 

@@ -1,4 +1,5 @@
 from typing import Optional
+import random
 
 from sqlalchemy import select
 
@@ -148,3 +149,26 @@ async def save_message_to_db(customer_id: Optional[int], role: str, content: str
         await db.commit()
         await db.refresh(new_msg)
         logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}, content_type: {new_msg.content_type}")
+
+
+async def get_account_type(customer_id: int) -> str:
+    """
+    Get customer's account type.
+
+    For testing purposes, returns 'free' or 'plus' with 50% random chance.
+    In production, this would query the actual account type from the database.
+
+    Args:
+        customer_id: The customer's ID
+
+    Returns:
+        str: Account type - 'free', 'lite', 'promo', 'pro', or 'plus'
+    """
+    logger.info(f"get_account_type called - customer_id: {customer_id}")
+
+    # TODO: In production, query actual account_type from database
+    # For now, return random 'free' or 'plus' for testing
+    account_type = random.choice(['free', 'plus'])
+    logger.info(f"Account type for customer {customer_id}: {account_type}")
+
+    return account_type

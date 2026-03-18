@@ -176,12 +176,80 @@ Nanti Hana bantu cek lebih lanjut ya 🙏"""
     }
 
 
+@tool
+async def license_extension(
+    state: Annotated[dict, InjectedState],
+) -> dict:
+    """
+    Get license extension guide based on customer's account type.
+
+    Use this tool when:
+    - Customer asks about license renewal/extension
+    - Customer wants to extend their ORIN subscription
+    - Customer asks about perpanjangan lisensi
+
+    Returns:
+        dict with: message (str) - License extension guide based on account type
+    """
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_account_type
+
+    logger.info("TOOL: license_extension")
+
+    # Get customer_id from state
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: license_extension - No customer_id in state!")
+        return {
+            'message': 'Maaf Kak, Hana belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
+        }
+
+    # Get account type from database
+    account_type = await get_account_type(customer_id)
+    logger.info(f"Account type for customer {customer_id}: {account_type}")
+
+    # Generate message based on account type
+    if account_type in ['free', 'lite', 'promo', 'pro']:
+        message = """Untuk perpanjangan lisensi ORIN, Kakak bisa lakukan online dari browser kok 😊
+
+Caranya gampang banget:
+1️⃣ Login ke akun ORIN di https://app.orin.id
+2️⃣ Buka link ini: https://app.orin.id/license/renew/
+3️⃣ Pilih unit yang mau diperpanjang
+4️⃣ Pilih jenis akun (Pro/Plus/Lite) dan periode (bulanan/tahunan)
+5️⃣ Bayar via BCA Virtual Account atau metode lain yang tersedia
+
+Silahkan dicoba ya Kak! Kalau ada kendala, hubungi Hana lagi 🙏"""
+    else:  # account_type == 'plus'
+        message = """Untuk perpanjangan HALO ORIN (free lisensi ORIN PLUS), Kakak bisa transfer ke:
+
+🏦 **Bank BCA**
+PT Vastel Telematika Integrasi
+612-1001818
+
+💰 **Harga:**
+• Rp 300.000 untuk 6 bulan
+• Rp 600.000 untuk 12 bulan
+
+⚠️ Jangan lupa tulis **nomor polisi kendaraan** di kolom pesan ya Kak!
+
+Setelah transfer, kirim bukti transfer ke Hana. Proses reaktivasi biasanya 2-3 hari kerja kalau terlambat bayar.
+
+Terima kasih Kak! 🙏"""
+
+    return {
+        'message': message,
+        'account_type': account_type
+    }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     classify_issue_type,
     generate_empathetic_response,
     human_takeover,
     forgot_password,
+    license_extension,
 ]
 
 __all__ = ['SUPPORT_TOOLS']

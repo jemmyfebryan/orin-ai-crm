@@ -47,7 +47,10 @@ Available Workers with their tools:
 **support_agent** - Handles complaints, technical support, and issues:
   - classify_issue_type: Classify customer issue type (complaint vs support question)
   - generate_empathetic_response: Generate empathetic response for customer issues
-  - set_human_takeover_flag: Set human takeover flag for complex issues
+  - forgot_password: Provide password reset guide
+  - license_extension: Provide license renewal guide based on account type
+  - device_troubleshooting: Troubleshoot offline GPS devices
+  - human_takeover: Trigger human takeover for complex issues
 
 Customer Context:
 - Name: {name}
@@ -83,6 +86,9 @@ Recent Conversation:
    - Product questions? (price, catalog, features, image) → ecommerce_agent
    - Meeting requests? (jadwal, meeting, ketemu) → sales_agent
    - B2B inquiry? (perusahaan, korporasi) → sales_agent
+   - Forgot password? (lupa password, login) → support_agent
+   - License renewal? (perpanjangan, renew, lisensi) → support_agent
+   - GPS offline? (offline, tidak update, tidak ada lokasi) → support_agent
    - Complaints, issues, technical support? → support_agent
 
 2. Check business rules:
@@ -237,6 +243,8 @@ KEMAMPUAN TOOL:
 - classify_issue_type: Klasifikasikan jenis masalah customer (complaint/support/general)
 - generate_empathetic_response: Generate respon empatik untuk customer yang bermasalah
 - forgot_password: Berikan panduan lupa password
+- license_extension: Berikan panduan perpanjangan lisensi berdasarkan tipe akun
+- device_troubleshooting: Berikan panduan troubleshooting GPS offline
 - human_takeover: Trigger human takeover untuk eskalasi ke tim manusia
 
 ATURAN PRODUK GPS MOBIL:

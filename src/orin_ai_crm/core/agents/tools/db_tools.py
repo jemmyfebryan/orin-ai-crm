@@ -172,3 +172,27 @@ async def get_account_type(customer_id: int) -> str:
     logger.info(f"Account type for customer {customer_id}: {account_type}")
 
     return account_type
+
+
+async def get_device_type(device_name: str) -> str:
+    """
+    Get device type based on device name.
+
+    For testing purposes, returns random device types.
+    In production, this would query the actual device type from the database.
+
+    Args:
+        device_name: The device name/identifier
+
+    Returns:
+        str: Device type - 'GT06N', 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02', 'postpaid', or other
+    """
+    logger.info(f"get_device_type called - device_name: {device_name}")
+
+    # TODO: In production, query actual device_type from database based on device_name
+    # For testing, return random device types
+    device_types = ['GT06N', 'postpaid', 'OBU'] # 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02', 
+    device_type = random.choice(device_types)
+    logger.info(f"Device type for {device_name}: {device_type}")
+
+    return device_type

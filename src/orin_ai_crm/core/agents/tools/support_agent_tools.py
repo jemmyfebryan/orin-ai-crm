@@ -243,6 +243,88 @@ Terima kasih Kak! 🙏"""
     }
 
 
+@tool
+async def device_troubleshooting(
+    device_name: str,
+    state: Annotated[dict, InjectedState],
+) -> dict:
+    """
+    Get troubleshooting guide for offline GPS device.
+
+    Use this tool when:
+    - Customer reports GPS device is offline
+    - Customer says GPS not updating
+    - Customer reports device not showing location
+
+    Args:
+        device_name: The device name/identifier (e.g., "B1234ABC", "GPS-01", etc.)
+
+    Returns:
+        dict with: message (str), update_state (dict, optional), device_type (str)
+    """
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
+
+    logger.info(f"TOOL: device_troubleshooting - device: {device_name}")
+
+    # Get device type from database
+    device_type = await get_device_type(device_name)
+    logger.info(f"Device type for {device_name}: {device_type}")
+
+    # Generate message based on device type
+    sms_devices = ['GT06N', 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02']
+
+    if device_type in sms_devices:
+        message = f"""Untuk kendala GPS offline Kakak, coba langkah ini ya 😊
+
+1️⃣ Coba hubungi nomor GSM di dalam unit lewat HP Kakak
+   → Kalau **tidak ada nada sambung** atau langsung ke voicemail, berarti alat **OFFLINE**
+   → Harap ke **installer terdekat** untuk cek fisik GPS
+
+2️⃣ Kalau ada nada sambung, coba kirim SMS dengan format:
+   **STATUS#** (jangan lupa tanda pagar di belakang, tanpa spasi)
+   → Kirim ke nomor GSM di dalam unit GPS
+
+3️⃣ Kalau unit **tidak membalas SMS**:
+   → Coba isi pulsa **ALL data** (2G & 4G) Rp 25.000 ya Kak
+
+4️⃣ Kalau unit **membalas SMS**:
+   → Tolong kirimkan balasan SMS dari unit ke Hana untuk kami telaah lebih lanjut
+
+💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
+    elif device_type == 'postpaid':
+        message = """Maaf Kak, untuk jenis kartu pascabayar ini perlu bantuan langsung dari tim kami ya 🙏
+
+Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
+        return {
+            'message': message,
+            'device_type': device_type,
+            'update_state': {
+                'human_takeover': True
+            }
+        }
+    else:  # OBU and other devices
+        message = f"""Untuk kendala GPS offline Kakak, coba langkah ini ya 😊
+
+1️⃣ Coba hubungi nomor GSM di dalam unit lewat HP Kakak
+   → Kalau **tidak ada nada sambung** atau langsung ke voicemail, berarti alat **OFFLINE**
+   → Harap ke **installer terdekat** untuk cek fisik GPS
+
+2️⃣ Kalau ada nada sambung, coba refresh unit:
+   → Buka browser, masuk ke https://app.orin.id
+   → Login dan pilih unit yang offline
+   → Tekan tombol **REFRESH UNIT**
+
+3️⃣ Kalau setelah isi pulsa dan refresh unit masih belum update:
+   → Hubungi Hana lagi ya untuk bantu cek lebih lanjut
+
+💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
+
+    return {
+        'message': message,
+        'device_type': device_type
+    }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     classify_issue_type,
@@ -250,6 +332,7 @@ SUPPORT_TOOLS = [
     human_takeover,
     forgot_password,
     license_extension,
+    device_troubleshooting,
 ]
 
 __all__ = ['SUPPORT_TOOLS']

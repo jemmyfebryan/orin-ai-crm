@@ -136,10 +136,18 @@ async def _process_with_lock(
         lock: Asyncio lock for this conversation
         timeout_task: Optional timeout task to cancel after processing completes
     """
-    async with lock:
-        try:
+    processing_successful = False
+    try:
+        async with lock:
             await process_message_batch(user_id, conversation_id, messages, timeout_task)
-        finally:
+            processing_successful = True
+    except asyncio.CancelledError:
+        # Task was cancelled - don't clean up anything, new task will overwrite references
+        logger.info(f"Task cancelled for conversation {conversation_id} - preserving all state for new task")
+        raise
+    finally:
+        # Only clean up if processing was successful (not cancelled)
+        if processing_successful:
             # Clean up resources after processing completes
             message_buffers.pop(conversation_id, None)
             pending_tasks.pop(conversation_id, None)

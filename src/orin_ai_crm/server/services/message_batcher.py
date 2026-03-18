@@ -11,6 +11,7 @@ Features:
 - Cancels in-flight processing if new message arrives
 - Individual messages saved to DB immediately
 - Concatenated message used for AI processing only (NOT saved to DB)
+- Comprehensive chat logging for debugging
 """
 import asyncio
 from collections import deque
@@ -95,9 +96,13 @@ async def process_message_batch(
     # Concatenate messages with double newline separator
     concatenated = "\n\n".join(accumulated_messages)
 
+    # Calculate batch stats
+    batch_message_count = len(accumulated_messages)
+    batch_total_chars = len(concatenated)
+
     logger.info(
         f"Processing batched messages for conversation {conversation_id}: "
-        f"{len(accumulated_messages)} messages, {len(concatenated)} characters"
+        f"{batch_message_count} messages, {batch_total_chars} characters"
     )
     logger.info(f"Concatenated message preview: {concatenated[:200]}...")
 
@@ -108,7 +113,9 @@ async def process_message_batch(
         message_content=concatenated,
         conversation_id=conversation_id,
         skip_db_save=True,  # Don't save concatenated message to DB
-        timeout_task=timeout_task  # Pass timeout task for cancellation
+        timeout_task=timeout_task,  # Pass timeout task for cancellation
+        batch_message_count=batch_message_count,  # Pass batch info for logging
+        batch_total_chars=batch_total_chars,
     )
 
     logger.info(
@@ -280,3 +287,11 @@ def queue_or_batch_webhook(
         "char_count": new_chars,
         "ignored": False
     }
+
+
+__all__ = [
+    'MAX_BUFFER_SIZE',
+    'MAX_CHAR_COUNT',
+    'queue_or_batch_webhook',
+    'pending_timeouts',
+]

@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime
 
 from sqlalchemy import select
 
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, ChatSession, Customer
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, ChatSession, ChatLog, Customer, WIB
 from src.orin_ai_crm.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -132,23 +133,39 @@ async def get_chat_history(customer_id: int, limit: int = 20):
     
 
 
-async def save_message_to_db(customer_id: Optional[int], role: str, content: str, content_type: str = "text"):
-    """Simpan pesan ke database dengan customer_id"""
+async def save_message_to_db(customer_id: Optional[int], role: str, content: str, content_type: str = "text") -> Optional[int]:
+    """
+    Simpan pesan ke database dengan customer_id.
+
+    Args:
+        customer_id: Customer ID
+        role: Message role ('user', 'ai', 'system')
+        content: Message content
+        content_type: Content type ('text', 'image', 'pdf')
+
+    Returns:
+        int: The ID of the created message, or None if failed
+    """
     logger.info(f"save_message_to_db called - customer_id: {customer_id}, role: {role}, content_type: {content_type}, content: {content[:100]}...")
 
     from src.orin_ai_crm.core.models.database import ChatSession
 
-    async with AsyncSessionLocal() as db:
-        new_msg = ChatSession(
-            customer_id=customer_id,
-            message_role=role,
-            content=content,
-            content_type=content_type
-        )
-        db.add(new_msg)
-        await db.commit()
-        await db.refresh(new_msg)
-        logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}, content_type: {new_msg.content_type}")
+    try:
+        async with AsyncSessionLocal() as db:
+            new_msg = ChatSession(
+                customer_id=customer_id,
+                message_role=role,
+                content=content,
+                content_type=content_type
+            )
+            db.add(new_msg)
+            await db.commit()
+            await db.refresh(new_msg)
+            logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}, content_type: {new_msg.content_type}")
+            return new_msg.id
+    except Exception as e:
+        logger.error(f"Error saving message to DB: {str(e)}")
+        return None
 
 
 async def get_account_type(customer_id: int) -> Optional[str]:
@@ -302,4 +319,190 @@ async def soft_delete_customer(phone_number: str) -> dict:
             'success': False,
             'message': f'Error: {str(e)}',
             'customer_id': None
+        }
+
+
+async def create_chat_log(
+    customer_id: Optional[int],
+    conversation_id: str,
+    user_id: str,
+    phone_number: str,
+    contact_name: Optional[str],
+    batch_message_count: int = 1,
+    batch_total_chars: int = 0,
+) -> int:
+    """
+    Create a new chat log entry for background task tracking.
+
+    Args:
+        customer_id: Customer ID
+        conversation_id: Freshchat conversation ID
+        user_id: Freshchat user ID
+        phone_number: Customer phone number
+        contact_name: Customer contact name
+        batch_message_count: Number of messages in batch
+        batch_total_chars: Total character count of batch
+
+    Returns:
+        int: The ID of the created chat log
+    """
+    logger.info(
+        f"create_chat_log - conversation_id: {conversation_id}, "
+        f"customer_id: {customer_id}, batch_count: {batch_message_count}"
+    )
+
+    async with AsyncSessionLocal() as db:
+        chat_log = ChatLog(
+            customer_id=customer_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            phone_number=phone_number,
+            contact_name=contact_name,
+            batch_message_count=batch_message_count,
+            batch_total_chars=batch_total_chars,
+            started_at=datetime.now(WIB),
+            status="in_progress"
+        )
+        db.add(chat_log)
+        await db.commit()
+        await db.refresh(chat_log)
+
+        logger.info(f"Chat log created with ID: {chat_log.id}")
+        return chat_log.id
+
+
+async def update_chat_log(
+    chat_log_id: int,
+    status: str,
+    user_message_ids: Optional[List[int]] = None,
+    ai_reply_ids: Optional[List[int]] = None,
+    timeout_triggered: bool = False,
+    human_takeover_triggered: bool = False,
+    ai_model: Optional[str] = None,
+    ai_reply_count: int = 0,
+    tool_calls: Optional[List[str]] = None,
+    images_sent: int = 0,
+    pdfs_sent: int = 0,
+    agent_route: Optional[str] = None,
+    agents_called: Optional[List[str]] = None,
+    orchestrator_step: Optional[int] = None,
+    max_orchestrator_steps: Optional[int] = None,
+    orchestrator_plan: Optional[str] = None,
+    orchestrator_decision: Optional[str] = None,
+    error_stage: Optional[str] = None,
+    error_message: Optional[str] = None,
+    error_traceback: Optional[str] = None,
+) -> dict:
+    """
+    Update a chat log entry with processing results.
+
+    Args:
+        chat_log_id: Chat log ID to update
+        status: Final status (success, failed, cancelled, timeout)
+        user_message_ids: List of chat_session IDs for user messages
+        ai_reply_ids: List of chat_session IDs for AI replies
+        timeout_triggered: Whether timeout message was sent
+        human_takeover_triggered: Whether human takeover was triggered
+        ai_model: AI model used
+        ai_reply_count: Number of AI reply bubbles
+        tool_calls: List of tool names used
+        images_sent: Number of images sent
+        pdfs_sent: Number of PDFs sent
+        agent_route: Final agent route
+        agents_called: List of agent names called
+        orchestrator_step: Orchestrator step reached
+        max_orchestrator_steps: Max orchestrator steps
+        orchestrator_plan: Orchestrator plan
+        orchestrator_decision: Orchestrator decision JSON
+        error_stage: Stage where error occurred
+        error_message: Error message
+        error_traceback: Full error traceback
+
+    Returns:
+        dict with: success (bool), message (str), chat_log_id (int)
+    """
+    logger.info(f"update_chat_log - chat_log_id: {chat_log_id}, status: {status}")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            # Fetch the chat log
+            query = select(ChatLog).where(ChatLog.id == chat_log_id)
+            result = await db.execute(query)
+            chat_log = result.scalars().first()
+
+            if not chat_log:
+                logger.error(f"Chat log not found: {chat_log_id}")
+                return {
+                    'success': False,
+                    'message': f'Chat log not found: {chat_log_id}',
+                    'chat_log_id': chat_log_id
+                }
+
+            # Update basic fields
+            chat_log.status = status
+            chat_log.completed_at = datetime.now(WIB)
+
+            # Calculate duration
+            if chat_log.started_at:
+                duration = chat_log.completed_at - chat_log.started_at
+                chat_log.processing_duration_ms = int(duration.total_seconds() * 1000)
+
+            # Update references to chat_sessions
+            if user_message_ids:
+                chat_log.user_message_ids = ",".join(map(str, user_message_ids))
+            if ai_reply_ids:
+                chat_log.ai_reply_ids = ",".join(map(str, ai_reply_ids))
+
+            # Update flags
+            chat_log.timeout_triggered = timeout_triggered
+            chat_log.human_takeover_triggered = human_takeover_triggered
+
+            # Update AI processing results
+            if ai_model:
+                chat_log.ai_model = ai_model
+            chat_log.ai_reply_count = ai_reply_count
+            if tool_calls:
+                import json
+                chat_log.tool_calls = json.dumps(tool_calls)
+            chat_log.images_sent = images_sent
+            chat_log.pdfs_sent = pdfs_sent
+
+            # Update orchestrator details
+            if agent_route:
+                chat_log.agent_route = agent_route
+            if agents_called:
+                import json
+                chat_log.agents_called = json.dumps(agents_called)
+            if orchestrator_step is not None:
+                chat_log.orchestrator_step = orchestrator_step
+            if max_orchestrator_steps is not None:
+                chat_log.max_orchestrator_steps = max_orchestrator_steps
+            if orchestrator_plan:
+                chat_log.orchestrator_plan = orchestrator_plan
+            if orchestrator_decision:
+                chat_log.orchestrator_decision = orchestrator_decision
+
+            # Update error information
+            if error_stage:
+                chat_log.error_stage = error_stage
+            if error_message:
+                chat_log.error_message = error_message
+            if error_traceback:
+                chat_log.error_traceback = error_traceback
+
+            await db.commit()
+
+            logger.info(f"Chat log {chat_log_id} updated successfully with status: {status}")
+            return {
+                'success': True,
+                'message': f'Chat log updated successfully',
+                'chat_log_id': chat_log_id
+            }
+
+    except Exception as e:
+        logger.error(f"Error updating chat log {chat_log_id}: {str(e)}")
+        return {
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'chat_log_id': chat_log_id
         }

@@ -16,9 +16,9 @@ from src.orin_ai_crm.server.security.webhook import is_ip_allowed, verify_freshc
 from src.orin_ai_crm.server.config.settings import settings
 from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
-from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT
+from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT, pending_timeouts
 from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
-from src.orin_ai_crm.core.models.database import Customer
+from src.orin_ai_crm.core.models.database import Customer, AsyncSessionLocal
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -33,7 +33,8 @@ async def process_freshchat_agent_task(
     conversation_id: str,
     user_id: str,
     timeout_task: Optional[asyncio.Task] = None,
-    skip_user_save: bool = False
+    skip_user_save: bool = False,
+    chat_log_id: Optional[int] = None,
 ):
     """
     Background task to process chat and send replies to Freshchat.
@@ -44,6 +45,22 @@ async def process_freshchat_agent_task(
         timeout_task: Optional asyncio task that sends timeout message.
                      Will be cancelled before sending final messages to prevent collision.
         skip_user_save: If True, skip saving user message to DB (used for batched messages).
+        chat_log_id: Optional chat log ID for tracking.
+
+    Returns:
+        dict with processing results for chat log update:
+            - ai_reply_ids: List of AI reply chat_session IDs
+            - ai_reply_count: Number of AI reply bubbles
+            - tool_calls: List of tool names used
+            - images_sent: Number of images sent
+            - pdfs_sent: Number of PDFs sent
+            - human_takeover_triggered: Whether human takeover was triggered
+            - agent_route: Final agent route
+            - agents_called: List of agents called
+            - orchestrator_step: Orchestrator step reached
+            - max_orchestrator_steps: Max orchestrator steps
+            - orchestrator_plan: Orchestrator plan
+            - orchestrator_decision: Orchestrator decision JSON
     """
     try:
         logger.info(f"Processing Freshchat agent task for conversation {conversation_id}")
@@ -95,6 +112,9 @@ async def process_freshchat_agent_task(
         # 5. Send each reply bubble as a separate message to Freshchat
         ai_replies = result["replies"]
         logger.info(f"Sending {len(ai_replies)} message bubbles to Freshchat...")
+
+        # Track AI reply IDs for chat log
+        ai_reply_ids = []
         for i, reply in enumerate(ai_replies):
             logger.info(f"Sending bubble {i+1}/{len(ai_replies)}: {reply[:50]}...")
             success = await send_message_to_freshchat(conversation_id, reply)
@@ -103,7 +123,50 @@ async def process_freshchat_agent_task(
             else:
                 logger.info(f"Successfully sent bubble {i+1} to Freshchat")
 
+        # 6. Get AI reply IDs from chat_sessions table (for chat log)
+        if chat_log_id and ai_replies:
+            from sqlalchemy import select, desc
+            from src.orin_ai_crm.core.models.database import ChatSession
+
+            # Get customer_id from result
+            customer_id = result.get("customer_id")
+            if customer_id:
+                async with AsyncSessionLocal() as db:
+                    # Query the most recent N AI messages for this customer
+                    # N = number of ai_replies
+                    query = (
+                        select(ChatSession.id)
+                        .where(
+                            ChatSession.customer_id == customer_id,
+                            ChatSession.message_role == "ai"
+                        )
+                        .order_by(desc(ChatSession.created_at))
+                        .limit(len(ai_replies))
+                    )
+                    db_result = await db.execute(query)
+                    rows = db_result.scalars().all()
+                    # Reverse to get oldest->newest order
+                    ai_reply_ids = list(reversed(rows))
+
+                logger.info(f"Found {len(ai_reply_ids)} AI reply IDs for chat log")
+
         logger.info(f"Freshchat agent task completed for conversation {conversation_id}")
+
+        # 7. Return result data for chat log update
+        return {
+            "ai_reply_ids": ai_reply_ids,
+            "ai_reply_count": len(ai_replies),
+            "tool_calls": result.get("tool_calls", []),
+            "images_sent": len(send_images),
+            "pdfs_sent": len(send_pdfs),
+            "human_takeover_triggered": False,  # Will be updated if human takeover occurs
+            "agent_route": result.get("agent_route"),
+            "agents_called": result.get("agents_called", []),
+            "orchestrator_step": result.get("orchestrator_step"),
+            "max_orchestrator_steps": result.get("max_orchestrator_steps"),
+            "orchestrator_plan": result.get("orchestrator_plan"),
+            "orchestrator_decision": result.get("orchestrator_decision"),
+        }
 
     except asyncio.CancelledError:
         logger.info(f"Freshchat agent task cancelled for conversation {conversation_id} - stopping immediately")
@@ -117,6 +180,21 @@ async def process_freshchat_agent_task(
         logger.error(f"Error in Freshchat agent background task: {str(e)}")
         import traceback
         traceback.print_exc()
+        # Return error result for chat log update
+        return {
+            "ai_reply_ids": [],
+            "ai_reply_count": 0,
+            "tool_calls": [],
+            "images_sent": 0,
+            "pdfs_sent": 0,
+            "human_takeover_triggered": False,
+            "agent_route": None,
+            "agents_called": [],
+            "orchestrator_step": None,
+            "max_orchestrator_steps": None,
+            "orchestrator_plan": None,
+            "orchestrator_decision": None,
+        }
 
 
 @router.post("/freshchat-agent", response_model=FreshchatAgentResponse)
@@ -219,7 +297,9 @@ async def process_freshchat_webhook_task(
     message_content: str,
     conversation_id: str,
     skip_db_save: bool = False,
-    timeout_task: Optional[asyncio.Task] = None
+    timeout_task: Optional[asyncio.Task] = None,
+    batch_message_count: int = 1,
+    batch_total_chars: int = 0,
 ):
     """
     Background task to process Freshchat webhook payload.
@@ -235,7 +315,19 @@ async def process_freshchat_webhook_task(
         conversation_id: Freshchat conversation ID
         skip_db_save: If True, skip saving message to DB (used for batched messages)
         timeout_task: Optional timeout task (created by message_batcher)
+        batch_message_count: Number of messages in this batch
+        batch_total_chars: Total character count of this batch
     """
+    from src.orin_ai_crm.core.agents.tools.db_tools import (
+        get_or_create_customer,
+        create_chat_log,
+        update_chat_log,
+    )
+    from src.orin_ai_crm.core.agents.config import llm_config
+
+    chat_log_id = None
+    timeout_triggered = False
+
     try:
         logger.info(f"Processing webhook task: conversation={conversation_id}, user_id={user_id}")
 
@@ -262,9 +354,61 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 3. Integrate with existing AI processing logic
+        # 3. Get or Create Customer (for chat log creation)
+        customer_data = await get_or_create_customer(
+            phone_number=phone_number,
+            lid_number=None,
+            contact_name=contact_name
+        )
+        customer_id = customer_data.get('customer_id')
+
+        # 4. Get recent user message IDs from DB (for chat log)
+        # We need to query the most recent N messages to get their IDs
+        user_message_ids = []
+        if not skip_db_save and batch_message_count > 0:
+            from sqlalchemy import select, desc
+            from src.orin_ai_crm.core.models.database import ChatSession
+
+            async with AsyncSessionLocal() as db:
+                # Query the most recent N user messages for this customer
+                query = (
+                    select(ChatSession.id)
+                    .where(
+                        ChatSession.customer_id == customer_id,
+                        ChatSession.message_role == "user"
+                    )
+                    .order_by(desc(ChatSession.created_at))
+                    .limit(batch_message_count)
+                )
+                result = await db.execute(query)
+                rows = result.scalars().all()
+                # Reverse to get oldest->newest order
+                user_message_ids = list(reversed(rows))
+
+            logger.info(f"Found {len(user_message_ids)} user message IDs for chat log")
+
+        # 5. Create Chat Log
+        chat_log_id = await create_chat_log(
+            customer_id=customer_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            phone_number=phone_number,
+            contact_name=contact_name,
+            batch_message_count=batch_message_count,
+            batch_total_chars=batch_total_chars,
+        )
+        logger.info(f"Chat log created with ID: {chat_log_id}")
+
+        # 6. Check if timeout was triggered (timeout task is still running after 10s)
+        if timeout_task and not timeout_task.done() and timeout_task in pending_timeouts.values():
+            # Check if 10 seconds have passed since task creation
+            # We can't easily check this, so we'll mark it as potentially triggered
+            # and let the update_chat_log set it properly if needed
+            pass
+
+        # 7. Integrate with existing AI processing logic
         # Pass timeout_task so it can be cancelled before sending final messages
-        await process_freshchat_agent_task(
+        result = await process_freshchat_agent_task(
             phone_number=phone_number,
             lid_number=None,  # Webhook only provides phone_number
             message=message_content,
@@ -273,20 +417,78 @@ async def process_freshchat_webhook_task(
             conversation_id=conversation_id,
             user_id=user_id,
             timeout_task=timeout_task,  # Pass timeout task to cancel before sending messages
-            skip_user_save=skip_db_save  # Skip DB save if this is a batched message
+            skip_user_save=skip_db_save,  # Skip DB save if this is a batched message
+            chat_log_id=chat_log_id,  # Pass chat_log_id for tracking
         )
 
-        logger.info(f"Webhook processing completed for conversation {conversation_id}")
+        # 8. Update Chat Log with success
+        # Get AI reply IDs from result
+        ai_reply_ids = result.get("ai_reply_ids", [])
+
+        # Check if timeout was triggered (timeout task completed)
+        timeout_triggered = (
+            timeout_task is not None and
+            timeout_task.done() and
+            not timeout_task.cancelled()
+        )
+
+        await update_chat_log(
+            chat_log_id=chat_log_id,
+            status="success",
+            user_message_ids=user_message_ids,
+            ai_reply_ids=ai_reply_ids,
+            timeout_triggered=timeout_triggered,
+            human_takeover_triggered=result.get("human_takeover_triggered", False),
+            ai_model=llm_config.DEFAULT_MODEL,
+            ai_reply_count=result.get("ai_reply_count", 0),
+            tool_calls=result.get("tool_calls", []),
+            images_sent=result.get("images_sent", 0),
+            pdfs_sent=result.get("pdfs_sent", 0),
+            agent_route=result.get("agent_route"),
+            agents_called=result.get("agents_called", []),
+            orchestrator_step=result.get("orchestrator_step"),
+            max_orchestrator_steps=result.get("max_orchestrator_steps"),
+            orchestrator_plan=result.get("orchestrator_plan"),
+            orchestrator_decision=result.get("orchestrator_decision"),
+        )
+
+        logger.info(f"Webhook processing completed for conversation {conversation_id}, chat_log_id: {chat_log_id}")
 
     except asyncio.CancelledError:
         logger.info(f"Webhook task cancelled for conversation {conversation_id} - stopping immediately")
+
+        # Update chat log with cancelled status
+        if chat_log_id:
+            try:
+                await update_chat_log(
+                    chat_log_id=chat_log_id,
+                    status="cancelled",
+                    timeout_triggered=timeout_triggered,
+                )
+            except Exception as e:
+                logger.error(f"Failed to update chat log on cancellation: {str(e)}")
+
         # Re-raise to ensure task is properly cancelled
         raise
 
     except Exception as e:
         logger.error(f"Error in webhook background task: {str(e)}")
         import traceback
-        traceback.print_exc()
+        error_traceback = traceback.format_exc()
+
+        # Update chat log with error status
+        if chat_log_id:
+            try:
+                await update_chat_log(
+                    chat_log_id=chat_log_id,
+                    status="failed",
+                    error_stage="ai_processing",
+                    error_message=str(e),
+                    error_traceback=error_traceback,
+                    timeout_triggered=timeout_triggered,
+                )
+            except Exception as log_error:
+                logger.error(f"Failed to update chat log on error: {str(log_error)}")
 
 
 @router.post("/freshchat-webhook", response_model=FreshchatWebhookResponse)

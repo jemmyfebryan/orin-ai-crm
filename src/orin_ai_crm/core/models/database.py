@@ -154,3 +154,54 @@ class Prompt(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))
+
+class ChatLog(Base):
+    """Table untuk logging background task execution - comprehensive logging untuk debugging"""
+    __tablename__ = "chat_logs"
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Request Context (Foreign Keys & Indexes for fast queries)
+    customer_id = Column(Integer, ForeignKey("customers.id"), index=True, nullable=True)
+    conversation_id = Column(String(100), index=True)  # Freshchat conversation ID
+    user_id = Column(String(100), index=True)  # Freshchat user ID
+    phone_number = Column(String(20), index=True)
+    contact_name = Column(String(100))
+
+    # References to chat_sessions table
+    user_message_ids = Column(Text, nullable=True)  # Comma-separated chat_session IDs for user messages
+    ai_reply_ids = Column(Text, nullable=True)  # Comma-separated chat_session IDs for AI replies
+
+    # Batch Information (for debugging batching behavior)
+    batch_message_count = Column(Integer, default=1)  # Number of messages in this batch
+    batch_total_chars = Column(Integer)  # Total character count of batch
+
+    # Processing Metadata (timestamps)
+    started_at = Column(DateTime, index=True)
+    completed_at = Column(DateTime, index=True)
+    processing_duration_ms = Column(Integer)  # Duration in milliseconds
+    timeout_triggered = Column(Boolean, default=False)  # Was timeout message sent?
+    human_takeover_triggered = Column(Boolean, default=False)  # Was human takeover triggered?
+
+    # AI Processing Results
+    ai_model = Column(String(100), nullable=True)  # Model used (e.g., "gpt-4o-mini")
+    ai_reply_count = Column(Integer, default=0)  # Number of reply bubbles sent
+    tool_calls = Column(Text, nullable=True)  # JSON array of tool names used
+    images_sent = Column(Integer, default=0)
+    pdfs_sent = Column(Integer, default=0)
+
+    # Orchestrator Details (for debugging agent routing)
+    agent_route = Column(String(50), nullable=True)  # Final route: SALES, ECOMMERCE, SUPPORT
+    agents_called = Column(Text, nullable=True)  # JSON array of agent names
+    orchestrator_step = Column(Integer, nullable=True)
+    max_orchestrator_steps = Column(Integer, nullable=True)
+    orchestrator_plan = Column(Text, nullable=True)
+    orchestrator_decision = Column(Text, nullable=True)  # JSON decision object
+
+    # Status & Errors (CRITICAL for debugging)
+    status = Column(String(50), index=True)  # in_progress, success, failed, cancelled, timeout
+    error_stage = Column(String(100), nullable=True)  # Where error occurred
+    error_message = Column(Text, nullable=True)  # Error message
+    error_traceback = Column(Text, nullable=True)  # Full traceback
+
+    # Metadata
+    created_at = Column(DateTime, default=lambda: datetime.now(WIB))

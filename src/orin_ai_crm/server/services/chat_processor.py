@@ -199,6 +199,20 @@ async def process_chat_request(
     for i, reply in enumerate(ai_replies):
         logger.info(f"  Bubble {i+1}: {reply[:100]}...")
 
+    # 12. Extract orchestrator data for chat log
+    agents_called = final_state.get("agents_called", [])
+    orchestrator_decision = final_state.get("orchestrator_decision", {})
+    agent_route = orchestrator_decision.get("selected_agent") if orchestrator_decision else None
+
+    # Serialize orchestrator_decision to JSON for storage
+    orchestrator_decision_json = None
+    if orchestrator_decision:
+        import json
+        try:
+            orchestrator_decision_json = json.dumps(orchestrator_decision, default=str)
+        except Exception as e:
+            logger.warning(f"Failed to serialize orchestrator_decision: {e}")
+
     return {
         "customer_id": customer_id,
         "phone_number": phone_number,
@@ -207,5 +221,12 @@ async def process_chat_request(
         "tool_calls": tool_calls_used if tool_calls_used else None,
         "messages_count": len(messages),
         "send_images": final_state.get("send_images", []),
-        "send_pdfs": final_state.get("send_pdfs", [])
+        "send_pdfs": final_state.get("send_pdfs", []),
+        # Orchestrator data for chat log
+        "agent_route": agent_route,
+        "agents_called": agents_called,
+        "orchestrator_step": final_state.get("orchestrator_step"),
+        "max_orchestrator_steps": final_state.get("max_orchestrator_steps"),
+        "orchestrator_plan": final_state.get("orchestrator_plan"),
+        "orchestrator_decision": orchestrator_decision_json,
     }

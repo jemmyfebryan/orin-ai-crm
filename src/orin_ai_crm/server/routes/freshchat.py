@@ -463,8 +463,18 @@ async def freshchat_webhook_endpoint(
             contact_name=contact_name
         )
         customer_id = customer_data.get('customer_id')
+        human_takeover = customer_data.get('human_takeover', False)
 
-        # 12. Save individual message to DB immediately (before batching)
+        # 12. Check human_takeover flag - if True, skip AI processing
+        if human_takeover:
+            logger.info(f"Human takeover is active for customer_id={customer_id}. Skipping AI processing and leaving for human agents.")
+            # Still save message to DB for record keeping
+            await save_message_to_db(customer_id, "user", message_content, content_type="text")
+            logger.info(f"Message saved to DB (human takeover mode): customer_id={customer_id}, message={message_content[:50]}...")
+            # Return immediately without AI processing
+            return FreshchatWebhookResponse(status="success")
+
+        # 13. Save individual message to DB immediately (before batching)
         await save_message_to_db(customer_id, "user", message_content, content_type="text")
         logger.info(f"Individual message saved to DB: customer_id={customer_id}, message={message_content[:50]}...")
 

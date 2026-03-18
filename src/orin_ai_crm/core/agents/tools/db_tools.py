@@ -93,7 +93,8 @@ async def get_or_create_customer(
         'unit_qty': customer.unit_qty if customer.unit_qty else 0,
         'is_b2b': customer.is_b2b if customer.is_b2b else False,
         'is_onboarded': customer.is_onboarded if customer.is_onboarded else False,
-        'contact_name': customer.contact_name or ''
+        'contact_name': customer.contact_name or '',
+        'human_takeover': customer.human_takeover if customer.human_takeover else False
     }
 
 

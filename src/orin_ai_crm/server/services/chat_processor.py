@@ -53,7 +53,29 @@ async def process_chat_request(
         contact_name=contact_name
     )
     customer_id = customer['customer_id']
-    logger.info(f"customer_id resolved: {customer_id}")
+    human_takeover = customer.get('human_takeover', False)
+    logger.info(f"customer_id resolved: {customer_id}, human_takeover: {human_takeover}")
+
+    # 1.5. Check human_takeover flag - if True, skip AI processing
+    if human_takeover:
+        logger.info(f"Human takeover is active for customer_id={customer_id}. Skipping AI processing and leaving for human agents.")
+
+        # Save user message to database for record keeping
+        if not skip_user_save:
+            await save_message_to_db(customer_id, "user", message)
+            logger.info(f"User message saved to DB (human takeover mode): customer_id={customer_id}")
+
+        # Return early without AI processing
+        return {
+            "customer_id": customer_id,
+            "phone_number": phone_number,
+            "lid_number": lid_number,
+            "replies": [],  # No AI replies
+            "tool_calls": None,  # No tool calls
+            "messages_count": 0,
+            "send_images": [],
+            "send_pdfs": [],
+        }
 
     # 2. Fetch chat history if not new chat
     history = []

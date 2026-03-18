@@ -221,7 +221,7 @@ Caranya gampang banget:
 5️⃣ Bayar via BCA Virtual Account atau metode lain yang tersedia
 
 Silahkan dicoba ya Kak! Kalau ada kendala, hubungi Hana lagi 🙏"""
-    else:  # account_type == 'plus'
+    elif account_type == 'plus':
         message = """Untuk perpanjangan HALO ORIN dengan lisensi ORIN PLUS, Kakak bisa transfer ke:
 
 🏦 **Bank BCA**
@@ -237,6 +237,15 @@ PT Vastel Telematika Integrasi
 Setelah transfer, kirim bukti transfer ke Hana. Proses reaktivasi biasanya 2-3 hari kerja kalau terlambat bayar.
 
 Terima kasih Kak! 🙏"""
+    else:  # account_type is None or unknown
+        message = "Account type error, call human_takeover tool"
+        return {
+            'message': message,
+            'account_type': account_type,
+            'update_state': {
+                'human_takeover': True
+            }
+        }
 
     return {
         'message': message,

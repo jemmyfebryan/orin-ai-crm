@@ -175,3 +175,93 @@ async def get_all_vehicles() -> List[dict]:
     vehicles = result.get("rows", [])
     logger.info(f"Retrieved {len(vehicles)} vehicles from VPS DB")
     return vehicles
+
+
+async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
+    """
+    Get user's account type from VPS database by phone number.
+
+    Args:
+        phone_number: Customer's phone number (can be in various formats)
+
+    Returns:
+        Account type string: 'free', 'basic', 'premium' (mapped to 'plus'), 'lite', 'promo', or None if not found
+    """
+    logger.info(f"get_account_type_from_vps called - phone_number: {phone_number}")
+
+    if not phone_number:
+        logger.warning("Empty phone_number provided")
+        return None
+
+    # Generate phone number variations for matching
+    variations = []
+
+    # Original format
+    clean_phone = phone_number.strip()
+    variations.append(f"'{clean_phone}'")
+
+    # Generate variations based on the format
+    if clean_phone.startswith('+'):
+        # +6285123456789 -> 6285123456789, 085123456789
+        without_plus = clean_phone[1:]  # Remove +
+        variations.append(f"'{without_plus}'")
+        if without_plus.startswith('62'):
+            with_zero = '0' + without_plus[2:]  # 62 -> 0
+            variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('62'):
+        # 6285123456789 -> +6285123456789, 085123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        variations.append(f"'+{clean_phone}'")
+        with_zero = '0' + clean_phone[2:]  # 62 -> 0
+        variations.append(f"'{with_zero}'")
+    elif clean_phone.startswith('0'):
+        # 085123456789 -> +6285123456789, 6285123456789
+        variations.append(f"'{clean_phone}'")  # Already added
+        with_62 = '62' + clean_phone[1:]  # 0 -> 62
+        variations.append(f"'{with_62}'")
+        variations.append(f"'+{with_62}'")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_variations = []
+    for v in variations:
+        if v not in seen:
+            seen.add(v)
+            unique_variations.append(v)
+
+    logger.info(f"Phone number variations: {unique_variations}")
+
+    # Build OR query
+    phone_conditions = " OR ".join([f"phone_number = {v}" for v in unique_variations])
+    sql_query = f"""
+        SELECT account_type
+        FROM users
+        WHERE ({phone_conditions})
+        AND deleted_at IS NULL
+        LIMIT 1
+    """
+
+    logger.info(f"VPS Query: {sql_query}")
+
+    result = await query_vps_db(sql_query)
+
+    if not result:
+        logger.warning(f"VPS DB returned invalid result for phone_number: {phone_number}")
+        return None
+
+    # VPS DB API returns data in "rows" key
+    users = result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for phone_number: {phone_number}")
+        return None
+
+    account_type = users[0].get("account_type")
+    logger.info(f"Found account_type in VPS DB: {account_type}")
+
+    # Map 'premium' to 'plus'
+    if account_type == 'premium':
+        logger.info(f"Mapping 'premium' to 'plus'")
+        return 'plus'
+
+    return account_type

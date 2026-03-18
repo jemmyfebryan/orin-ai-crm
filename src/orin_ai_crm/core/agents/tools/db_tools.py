@@ -152,24 +152,40 @@ async def save_message_to_db(customer_id: Optional[int], role: str, content: str
         logger.info(f"Message saved to DB - id: {new_msg.id}, customer_id: {new_msg.customer_id}, content_type: {new_msg.content_type}")
 
 
-async def get_account_type(customer_id: int) -> str:
+async def get_account_type(customer_id: int) -> Optional[str]:
     """
-    Get customer's account type.
+    Get customer's account type from VPS database.
 
-    For testing purposes, returns 'free' or 'plus' with 50% random chance.
-    In production, this would query the actual account type from the database.
+    Fetches the customer's phone number from the local database,
+    then queries the VPS database to get the account type.
 
     Args:
         customer_id: The customer's ID
 
     Returns:
-        str: Account type - 'free', 'lite', 'promo', 'pro', or 'plus'
+        Optional[str]: Account type ('free', 'basic', 'lite', 'promo', 'plus') or None if not found
     """
+    from src.orin_ai_crm.core.agents.tools.vps_tools import get_account_type_from_vps
+
     logger.info(f"get_account_type called - customer_id: {customer_id}")
 
-    # TODO: In production, query actual account_type from database
-    # For now, return random 'free' or 'plus' for testing
-    account_type = random.choice(['free', 'plus'])
+    async with AsyncSessionLocal() as db:
+        # Fetch customer's phone number
+        query = select(Customer.phone_number).where(
+            Customer.id == customer_id,
+            Customer.deleted_at.is_(None)
+        )
+        result = await db.execute(query)
+        phone_number = result.scalar_one_or_none()
+
+    if not phone_number:
+        logger.warning(f"No phone_number found for customer_id: {customer_id}")
+        return None
+
+    logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
+
+    # Query VPS database for account type
+    account_type = await get_account_type_from_vps(phone_number)
     logger.info(f"Account type for customer {customer_id}: {account_type}")
 
     return account_type

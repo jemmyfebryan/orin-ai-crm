@@ -191,8 +191,63 @@ async def get_device_type(device_name: str) -> str:
 
     # TODO: In production, query actual device_type from database based on device_name
     # For testing, return random device types
-    device_types = ['GT06N', 'postpaid', 'OBU'] # 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02', 
+    device_types = ['GT06N', 'postpaid', 'OBU'] # 'TR06', 'T700', 'T2', 'T30', 'Wetrack', 'moplus', 'TR02',
     device_type = random.choice(device_types)
     logger.info(f"Device type for {device_name}: {device_type}")
 
     return device_type
+
+
+async def soft_delete_customer(phone_number: str) -> dict:
+    """
+    Soft delete a customer by setting their deleted_at timestamp.
+
+    This is a testing feature that allows resetting a customer's chat history.
+    The customer record is not actually deleted from the database, just marked
+    as deleted. A new customer record will be created on the next message.
+
+    Args:
+        phone_number: The customer's phone number
+
+    Returns:
+        dict with:
+            - success: bool - whether the soft delete was successful
+            - customer_id: int - the ID of the deleted customer (if successful)
+            - message: str - status message
+
+    Example:
+        Input: phone_number="628123456789"
+        Output: {success: True, customer_id: 123, message: "Customer soft deleted"}
+    """
+    from datetime import datetime
+    from src.orin_ai_crm.core.models.database import WIB
+
+    logger.info(f"soft_delete_customer called - phone_number: {phone_number}")
+
+    async with AsyncSessionLocal() as db:
+        # Find customer by phone_number (including soft-deleted ones)
+        query = select(Customer).where(Customer.phone_number == phone_number)
+        result = await db.execute(query)
+        customer = result.scalars().first()
+
+        if not customer:
+            logger.warning(f"Customer not found for phone_number: {phone_number}")
+            return {
+                "success": False,
+                "customer_id": None,
+                "message": "Customer not found"
+            }
+
+        # Soft delete by setting deleted_at
+        customer_id = customer.id
+        customer.deleted_at = datetime.now(WIB)
+        await db.commit()
+        await db.refresh(customer)
+
+        logger.info(f"Customer soft deleted - id: {customer_id}, phone_number: {phone_number}")
+
+        return {
+            "success": True,
+            "customer_id": customer_id,
+            "message": f"Customer {customer_id} soft deleted successfully"
+        }

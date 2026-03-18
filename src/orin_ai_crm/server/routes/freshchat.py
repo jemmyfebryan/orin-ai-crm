@@ -17,7 +17,7 @@ from src.orin_ai_crm.server.config.settings import settings
 from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT
-from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
+from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
 from src.orin_ai_crm.core.models.database import Customer
 
 logger = get_logger(__name__)
@@ -252,30 +252,7 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 2.5. TESTING: Check for "reset_chat" command (only for allowed numbers)
-        # Check BEFORE creating timeout_task since reset_chat is just for testing
-        if message_content.strip().lower() == "reset_chat":
-            logger.info(f"Reset chat command detected for phone: {phone_number}")
-
-            # Import the delete function
-            from src.orin_ai_crm.server.routes.admin import soft_delete_customer_by_phone
-
-            # Delete the customer
-            result = await soft_delete_customer_by_phone(phone_number)
-
-            # Send confirmation message back to user
-            if result['success']:
-                confirmation_msg = f"✅ Chat reset successful! Customer ID: {result['customer_id']}. Starting fresh chat."
-            else:
-                confirmation_msg = f"❌ Failed to reset chat: {result['message']}"
-
-            # Send message to Freshchat
-            await send_message_to_freshchat(conversation_id, confirmation_msg)
-
-            logger.info(f"Reset chat completed for {phone_number}: {result['message']}")
-            return  # Stop processing, don't continue to AI
-
-        # 2.6. Start timeout timer (10 seconds) for normal messages
+        # 2.5. Start timeout timer (10 seconds) for normal messages
         # If processing takes longer, send "please wait" message
         async def send_timeout_after_delay():
             await asyncio.sleep(10)  # Wait 10 seconds
@@ -441,7 +418,36 @@ async def freshchat_webhook_endpoint(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 10. Get or Create Customer (for DB save)
+        # 10. Testing Feature: reset_chat command
+        # If user sends "reset_chat", soft delete the customer immediately
+        # This is a testing feature to reset chat history
+        if message_content.strip() == "reset_chat":
+            logger.info(f"reset_chat command detected for phone_number: {phone_number}")
+
+            # Soft delete the customer in background
+            async def reset_chat_task():
+                result = await soft_delete_customer(phone_number)
+                if result.get("success"):
+                    logger.info(f"Customer soft deleted successfully: {result.get('customer_id')}")
+                    # Send confirmation message to Freshchat
+                    await send_message_to_freshchat(
+                        conversation_id=conversation_id,
+                        message_content=f"✅ Chat history reset successfully. Customer ID: {result.get('customer_id')}"
+                    )
+                else:
+                    logger.error(f"Failed to soft delete customer: {result.get('message')}")
+                    await send_message_to_freshchat(
+                        conversation_id=conversation_id,
+                        message_content=f"❌ Failed to reset chat: {result.get('message')}"
+                    )
+
+            # Queue background task for soft delete
+            background_tasks.add_task(reset_chat_task)
+
+            # Return immediately without saving to DB or batching
+            return FreshchatWebhookResponse(status="success")
+
+        # 11. Get or Create Customer (for DB save)
         from src.orin_ai_crm.core.agents.tools.db_tools import get_or_create_customer
 
         customer_data = await get_or_create_customer(
@@ -451,11 +457,11 @@ async def freshchat_webhook_endpoint(
         )
         customer_id = customer_data.get('customer_id')
 
-        # 11. Save individual message to DB immediately (before batching)
+        # 12. Save individual message to DB immediately (before batching)
         await save_message_to_db(customer_id, "user", message_content, content_type="text")
         logger.info(f"Individual message saved to DB: customer_id={customer_id}, message={message_content[:50]}...")
 
-        # 12. Queue or Batch webhook (message batching logic)
+        # 13. Queue or Batch webhook (message batching logic)
         # This will either add to buffer and restart AI processing, or ignore if buffer is full
         batch_result = queue_or_batch_webhook(
             user_id=user_id,
@@ -470,7 +476,7 @@ async def freshchat_webhook_endpoint(
                 f"{batch_result['char_count']}/{MAX_CHAR_COUNT} chars"
             )
 
-        # 13. Instant Response (CRITICAL - must be within 3 seconds)
+        # 14. Instant Response (CRITICAL - must be within 3 seconds)
         return FreshchatWebhookResponse(status="success")
 
     except Exception as e:

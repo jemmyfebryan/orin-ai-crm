@@ -6,7 +6,7 @@ import os
 from datetime import timedelta, timezone
 from typing import Optional
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
@@ -268,70 +268,47 @@ async def node_quality_check(state: AgentState):
     Quality Check Node - Evaluates AI answer and triggers human takeover if needed.
 
     This node is the FINAL GATEKEEPER before END. All responses pass through this node.
-    It evaluates the answer quality and:
-    - For certain steps (profiling, greeting, etc.): Just passes through without evaluation
-    - For other steps: Evaluates quality and either passes through or triggers human takeover
+    It evaluates the answer quality using LLM and routes accordingly:
+    - If answer is satisfactory → route to final_message
+    - If answer is NOT satisfactory → route to human_takeover
+
+    The LLM evaluator is smart enough to understand:
+    - Conversational context (profiling questions vs answers)
+    - Form flow (acknowledgment vs full answer)
+    - Session ending (user satisfaction detection)
+
+    NOTE: Uses REAL WhatsApp conversation history from database (not internal workflow messages).
 
     Args:
         state: Current agent state (LangGraph standard)
 
     Returns:
-        Updated state with final answer (either original or handover message)
+        Updated state with routing decision and session_ending_detected flag
     """
-    # NOTE: Temporary disable quality check
-    return {
-        "step": "final_message",
-        "route": "FINAL_MESSAGE"
-    }
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
+
     logger.info("=" * 50)
     logger.info("ENTER: node_quality_check")
 
     messages = state.get('messages', [])
     customer_id = state.get('customer_id')
     customer_data = state.get('customer_data', {})
-    step = state.get('step', '')
 
-    # Get the AI's last message (the answer to evaluate)
+    # Basic validation: must have messages
     if not messages:
-        logger.warning("No messages in state - returning empty state")
+        logger.warning("No messages in state - passing through to final_message")
+        logger.info(f"EXIT: node_quality_check -> final_message (no messages)")
+        logger.info("=" * 50)
         return {
             "step": "final_message",
             "route": "FINAL_MESSAGE"
         }
 
+    # Extract AI's last message (the answer to evaluate)
     last_message = messages[-1]
     ai_answer = last_message.content if hasattr(last_message, 'content') else ""
 
-    # Steps that should skip quality evaluation (just pass through)
-    # Skip profiling questions since they're part of normal conversational flow
-    SKIP_QUALITY_CHECK_STEPS = {
-        "profiling",  # Profiling questions are conversational and don't need quality check
-        "greeting",  # Simple greetings from existing customers
-        "human_takeover",  # Already a handover message
-        "handle_reschedule",  # Specific flow, pass through
-        "no_meeting_found",  # Specific flow, pass through
-        "need_identifier",  # Specific flow, pass through
-        "order_guidance",  # Specific flow, pass through
-        "vehicle_id",  # Part of profiling flow, asking about vehicle
-        "vehicle_clarification",  # Part of profiling flow, asking for vehicle model clarification
-    }
-    # Note: Profiling questions should always pass through quality check
-    # They're natural conversational questions, not answers to user queries
-
-    # Skip quality evaluation for certain steps - just pass through
-    if step in SKIP_QUALITY_CHECK_STEPS:
-        logger.info(f"Step '{step}' is in skip list - passing through without quality check")
-        logger.info(f"EXIT: node_quality_check -> pass through")
-        logger.info("=" * 50)
-
-        # Return state as-is (pass through the original answer)
-        return {
-            "step": "final_message",
-            "route": "FINAL_MESSAGE"
-        }
-
-    # Get user's last message for quality evaluation
-    # Find the last human message (before the AI's response)
+    # Extract user's last message (before the AI's response)
     user_message = ""
     for msg in reversed(messages[:-1]):  # Look at messages before the last one
         if hasattr(msg, 'type') and msg.type == 'human':
@@ -342,38 +319,50 @@ async def node_quality_check(state: AgentState):
             user_message = msg.content
             break
 
-    # Get customer name
+    # Get customer name for context
     customer_name = customer_data.get('name') or state.get('contact_name')
 
-    logger.info(f"Quality check - customer_id: {customer_id}, step: {step}, user_msg: {user_message[:50] if user_message else 'N/A'}...")
+    logger.info(f"Quality check - customer_id: {customer_id}, user_msg: {user_message[:50] if user_message else 'N/A'}...")
 
-    # Only evaluate if we have both user message and AI answer
+    # Validate we have both user message and AI answer
     if not user_message or not ai_answer:
         logger.info("Missing user_message or ai_answer - passing through without evaluation")
-        logger.info(f"EXIT: node_quality_check -> pass through")
+        logger.info(f"EXIT: node_quality_check -> final_message (incomplete data)")
         logger.info("=" * 50)
         return {
             "step": "final_message",
             "route": "FINAL_MESSAGE"
         }
 
-    # Evaluate answer quality with conversation history (last 5 messages)
+    # Fetch REAL WhatsApp conversation history from database for context
+    conversation_history = []
+    if customer_id:
+        try:
+            chat_history = await get_chat_history(customer_id, limit=8)  # Last 8 messages
+            logger.info(f"Fetched {len(chat_history)} real messages from database for customer {customer_id}")
+            conversation_history = chat_history
+        except Exception as e:
+            logger.error(f"Error fetching chat history from DB: {e}")
+            # Fallback to empty history if DB fetch fails
+            conversation_history = []
+
+    # Run LLM evaluation with REAL conversation context
     evaluation = await evaluate_answer_quality(
         user_message=user_message,
         ai_answer=ai_answer,
         customer_name=customer_name,
-        conversation_history=messages  # Pass full message history for context
+        conversation_history=conversation_history  # Pass real WhatsApp history, not internal workflow
     )
 
-    logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score}, session_ending={evaluation.session_ending}")
+    logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score:.2f}, session_ending={evaluation.session_ending}")
 
-    # Check if answer is satisfactory
+    # Route based on evaluation result
     if evaluation.is_satisfactory and evaluation.confidence_score >= 0.5:
-        logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score}) - proceeding with original answer")
-        logger.info(f"EXIT: node_quality_check -> use original answer")
+        # Answer is good - proceed to final message
+        logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score:.2f}) - proceeding with original answer")
+        logger.info(f"EXIT: node_quality_check -> final_message")
         logger.info("=" * 50)
 
-        # Return state as-is (keep the original answer) + session_ending flag
         return {
             "step": "final_message",
             "route": "FINAL_MESSAGE",
@@ -381,10 +370,11 @@ async def node_quality_check(state: AgentState):
         }
     else:
         # Answer is not satisfactory - trigger human takeover
-        logger.info(f"Answer is NOT satisfactory (score: {evaluation.confidence_score}) - triggering human takeover")
+        logger.info(f"Answer is NOT satisfactory (score: {evaluation.confidence_score:.2f}) - triggering human takeover")
         logger.info(f"Reasoning: {evaluation.reasoning}")
+        logger.info(f"EXIT: node_quality_check -> human_takeover")
+        logger.info("=" * 50)
 
-        # Trigger human takeover
         return {
             "step": "human_takeover",
             "route": "HUMAN_TAKEOVER"

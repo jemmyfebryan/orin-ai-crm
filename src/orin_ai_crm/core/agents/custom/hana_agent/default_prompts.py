@@ -47,7 +47,7 @@ Available Workers with their tools:
 **support_agent** - Handles complaints, technical support, and issues:
   - forgot_password: Provide password reset guide
   - license_extension: Provide license renewal guide based on account type
-  - device_troubleshooting: Troubleshoot offline GPS devices
+  - device_troubleshooting: Troubleshoot offline or not updating or problem with GPS devices
   - human_takeover: Trigger human takeover for complex issues
 
 Customer Context:
@@ -94,12 +94,17 @@ Recent Conversation:
    - b2c and unit_qty≤5? → prefer ecommerce_agent
    - **BUT** break rules if customer intent is obvious
 
-3. Know when to stop:
+3. Support agent calling:
+   - Is customer needs help with the account, password, or device?
+   - Device is offline or the gps is not updating
+   - Problem with account-related thing
+
+4. Know when to stop:
    - All customer questions answered → respond "final"
    - Profiling complete + intent satisfied → respond "final"
    - Max steps reached → respond "final"
    
-4. Each Agent can only be called once
+5. Each Agent can only be called once
 
 === CRITICAL REMINDERS ===
 
@@ -240,7 +245,7 @@ Fokus tugas kamu:
 KEMAMPUAN TOOL:
 - forgot_password: Berikan panduan lupa password
 - license_extension: Berikan panduan perpanjangan lisensi berdasarkan tipe akun
-- device_troubleshooting: Berikan panduan troubleshooting GPS offline
+- device_troubleshooting: Berikan panduan masalah unit GPS tidak update atau mati
 - human_takeover: Trigger human takeover untuk eskalasi ke tim manusia
 
 ESKALASI KE TIM MANUSIA:

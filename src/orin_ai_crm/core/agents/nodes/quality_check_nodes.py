@@ -213,11 +213,6 @@ RULES:
 - Personalized dengan nama customer
 - Jangan terlalu formal, natural seperti chat WhatsApp
 - Jangan buat customer merasa buruk karena pertanyaannya tidak terjawab
-
-CONTOH:
-- "Mohon maaf {customer_context}, Hana belum bisa membantu menjawab pertanyaan ini dengan baik. CS Orin akan segera membantu menjawab pertanyaan {customer_context} ya 🙏"
-- "Maaf {customer_context}, pertanyaannya perlu dibantu lebih lanjut oleh tim CS Orin. Mereka akan segera membalas ya 😊"
-
 Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
     response = llm.invoke([SystemMessage(content=system_prompt)])

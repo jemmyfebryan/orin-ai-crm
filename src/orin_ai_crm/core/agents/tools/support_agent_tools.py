@@ -120,48 +120,26 @@ RULES:
 
 
 @tool
-async def set_human_takeover_flag(
-    state: Annotated[dict, InjectedState],
-) -> dict:
+def human_takeover() -> dict:
     """
-    Set human_takeover flag to true for a customer.
+    Trigger human takeover for the customer.
 
     Use this tool when:
     - Issue is too complex for AI to handle
     - Customer explicitly asks for human agent
+    - Customer sends username & email after forgot password guide
 
     Returns:
-        dict with: success (bool), message (str)
+        dict with: message (str), update_state (dict)
     """
-    # Get customer_id from state (prevents LLM from using wrong customer_id)
-    customer_id = state.get("customer_id")
+    logger.info("TOOL: human_takeover")
 
-    if not customer_id:
-        logger.error("TOOL: set_human_takeover_flag - No customer_id in state!")
-        return {'success': False, 'message': 'No customer_id in state'}
-
-    logger.info(f"TOOL: set_human_takeover_flag - customer_id: {customer_id} (from state)")
-
-    async with AsyncSessionLocal() as db:
-        query = select(Customer).where(Customer.id == customer_id)
-        result = await db.execute(query)
-        customer = result.scalars().first()
-
-        if not customer:
-            return {
-                'success': False,
-                'message': f'Customer {customer_id} not found'
-            }
-
-        customer.human_takeover = True
-        await db.commit()
-
-        logger.info(f"Human takeover flag SET for customer {customer_id}")
-
-        return {
-            'success': True,
-            'message': 'Human takeover flag set'
+    return {
+        'message': 'Tim kami akan segera membantu ya 🙏',
+        'update_state': {
+            'human_takeover': True
         }
+    }
 
 
 @tool
@@ -202,7 +180,7 @@ Nanti Hana bantu cek lebih lanjut ya 🙏"""
 SUPPORT_TOOLS = [
     classify_issue_type,
     generate_empathetic_response,
-    set_human_takeover_flag,
+    human_takeover,
     forgot_password,
 ]
 

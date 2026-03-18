@@ -200,6 +200,8 @@ async def agent_entry_handler(state: AgentState) -> Dict:
         state['orchestrator_plan'] = ""
     if 'orchestrator_decision' not in state:
         state['orchestrator_decision'] = {}
+    if 'human_takeover' not in state:
+        state['human_takeover'] = False
 
     logger.info("EXIT: agent_entry_handler")
     logger.info(f"current state: {state}")
@@ -308,8 +310,15 @@ async def orchestrator_router(state: AgentState) -> str:
     Enforces two safety limits:
     1. Max orchestrator steps (prevents infinite loops)
     2. Hard-cap per agent (each agent can only be called once per chat request)
+    3. Human takeover flag (bypasses orchestrator and goes directly to human takeover)
     """
     logger.info("ENTER: orchestrator_router")
+
+    # Check if human takeover is triggered (highest priority)
+    if state.get("human_takeover", False):
+        logger.warning("Human takeover flag detected - routing directly to human_takeover node")
+        logger.info("EXIT: orchestrator_router -> human_takeover")
+        return "human_takeover"
 
     # Check safety limit: max steps
     step = state.get("orchestrator_step", 0)
@@ -562,18 +571,20 @@ def build_hana_agent_graph():
     Graph Structure:
     1. Entry → orchestrator_node (decides first agent)
     2. orchestrator_node → orchestrator_router (routes to worker)
-    3. Worker (profiling/sales/ecommerce) → orchestrator_node (back to orchestrator)
+    3. Worker (profiling/sales/ecommerce/support) → orchestrator_node (back to orchestrator)
     4. Loop: orchestrator → worker → orchestrator → worker → ...
     5. When orchestrator says "final" → quality_check
-    6. quality_check → final_message OR human_takeover
-    7. final_message → END
-    8. human_takeover → END
+    6. When human_takeover flag is set → human_takeover (bypasses quality_check)
+    7. quality_check → final_message OR human_takeover
+    8. final_message → END
+    9. human_takeover → END
 
     The orchestrator:
     - Analyzes customer context and conversation intent
     - Decides which worker agent to call next
     - Can call multiple agents in sequence
     - Knows when conversation is complete
+    - Checks for human_takeover flag to bypass quality_check
 
     Worker agents:
     - profiling_agent: Collects/updates customer data
@@ -612,7 +623,8 @@ def build_hana_agent_graph():
             "sales_node": "sales_node",
             "ecommerce_node": "ecommerce_node",
             "support_node": "support_node",
-            "quality_check": "quality_check"
+            "quality_check": "quality_check",
+            "human_takeover": "human_takeover"
         }
     )
 

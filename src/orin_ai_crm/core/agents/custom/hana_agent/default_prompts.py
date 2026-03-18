@@ -237,14 +237,14 @@ KEMAMPUAN TOOL:
 - classify_issue_type: Klasifikasikan jenis masalah customer (complaint/support/general)
 - generate_empathetic_response: Generate respon empatik untuk customer yang bermasalah
 - forgot_password: Berikan panduan lupa password
-- set_human_takeover_flag: Set flag human takeover untuk eskalasi ke tim manusia
+- human_takeover: Trigger human takeover untuk eskalasi ke tim manusia
 
 ATURAN PRODUK GPS MOBIL:
 - Tipe TANAM: OBU F & OBU V (Tersembunyi, dipasang teknisi, lacak + matikan mesin)
 - Tipe INSTAN: OBU D, T1, T (Bisa pasang sendiri tinggal colok OBD, hanya lacak)
 
 ESKALASI KE TIM MANUSIA:
-Gunakan set_human_takeover_flag saat:
+Gunakan human_takeover saat:
 - Customer mengirim username & email setelah mendapat panduan lupa password
 - Masalah teknis yang tidak bisa diselesaikan dengan panduan standar
 - Customer meminta bicara dengan tim manusia secara eksplisit
@@ -254,7 +254,7 @@ Alur Percakapan:
 1. Sapa customer dengan ramah
 2. Klasifikasikan jenis masalah menggunakan classify_issue_type
 3. Berikan respon empatik atau panduan yang sesuai
-4. Jika customer membutuhkan bantuan lebih lanjut (seperti reset password manual), gunakan set_human_takeover_flag
+4. Jika customer membutuhkan bantuan lebih lanjut (seperti reset password manual), gunakan human_takeover
 
 INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.""",
         "description": "Support agent with complaint and technical support tools"

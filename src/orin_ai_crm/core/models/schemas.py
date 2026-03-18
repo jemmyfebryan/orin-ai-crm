@@ -34,6 +34,7 @@ class AgentState(TypedDict):
     agents_called: list[str]  # List of agents already called (profiling, sales, ecommerce)
     orchestrator_plan: str  # Current plan for debugging
     orchestrator_decision: dict  # Latest routing decision from orchestrator
+    human_takeover: bool  # Flag to trigger human takeover flow immediately
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

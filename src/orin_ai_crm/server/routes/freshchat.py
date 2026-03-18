@@ -105,6 +105,14 @@ async def process_freshchat_agent_task(
 
         logger.info(f"Freshchat agent task completed for conversation {conversation_id}")
 
+    except asyncio.CancelledError:
+        logger.info(f"Freshchat agent task cancelled for conversation {conversation_id} - stopping immediately")
+        # Cancel timeout task if it exists
+        if timeout_task and not timeout_task.done():
+            timeout_task.cancel()
+        # Re-raise to ensure task is properly cancelled
+        raise
+
     except Exception as e:
         logger.error(f"Error in Freshchat agent background task: {str(e)}")
         import traceback
@@ -210,7 +218,8 @@ async def process_freshchat_webhook_task(
     user_id: str,
     message_content: str,
     conversation_id: str,
-    skip_db_save: bool = False
+    skip_db_save: bool = False,
+    timeout_task: Optional[asyncio.Task] = None
 ):
     """
     Background task to process Freshchat webhook payload.
@@ -225,6 +234,7 @@ async def process_freshchat_webhook_task(
         message_content: Message text content
         conversation_id: Freshchat conversation ID
         skip_db_save: If True, skip saving message to DB (used for batched messages)
+        timeout_task: Optional timeout task (created by message_batcher)
     """
     try:
         logger.info(f"Processing webhook task: conversation={conversation_id}, user_id={user_id}")
@@ -252,14 +262,6 @@ async def process_freshchat_webhook_task(
 
         logger.info(f"Allowlist check passed for phone_number: {phone_number}")
 
-        # 2.5. Start timeout timer (10 seconds) for normal messages
-        # If processing takes longer, send "please wait" message
-        async def send_timeout_after_delay():
-            await asyncio.sleep(10)  # Wait 10 seconds
-            await send_timeout_message(conversation_id)
-
-        timeout_task = asyncio.create_task(send_timeout_after_delay())
-
         # 3. Integrate with existing AI processing logic
         # Pass timeout_task so it can be cancelled before sending final messages
         await process_freshchat_agent_task(
@@ -275,6 +277,11 @@ async def process_freshchat_webhook_task(
         )
 
         logger.info(f"Webhook processing completed for conversation {conversation_id}")
+
+    except asyncio.CancelledError:
+        logger.info(f"Webhook task cancelled for conversation {conversation_id} - stopping immediately")
+        # Re-raise to ensure task is properly cancelled
+        raise
 
     except Exception as e:
         logger.error(f"Error in webhook background task: {str(e)}")

@@ -27,6 +27,8 @@ MAX_CHAR_COUNT = 2000  # Maximum character count per batch
 # Global state tracking
 # Maps conversation_id -> asyncio.Task (the AI processing task)
 pending_tasks: dict[str, asyncio.Task] = {}
+# Maps conversation_id -> asyncio.Task (the timeout task)
+pending_timeouts: dict[str, asyncio.Task] = {}
 # Maps conversation_id -> deque of message strings (accumulated messages)
 message_buffers: dict[str, deque[str]] = {}
 # Maps conversation_id -> asyncio.Lock (for thread safety per conversation)
@@ -70,7 +72,8 @@ def _can_add_to_buffer(buffer: deque[str], new_message: str) -> bool:
 async def process_message_batch(
     user_id: str,
     conversation_id: str,
-    accumulated_messages: list[str]
+    accumulated_messages: list[str],
+    timeout_task: Optional[asyncio.Task] = None
 ):
     """
     Process batched messages as a single AI request.
@@ -85,6 +88,7 @@ async def process_message_batch(
         user_id: Freshchat user ID
         conversation_id: Freshchat conversation ID
         accumulated_messages: List of accumulated message strings
+        timeout_task: Optional timeout task to pass to processor
     """
     from src.orin_ai_crm.server.routes.freshchat import process_freshchat_webhook_task
 
@@ -97,13 +101,14 @@ async def process_message_batch(
     )
     logger.info(f"Concatenated message preview: {concatenated[:200]}...")
 
-    # Call the existing processor with skip_db_save=True
+    # Call the existing processor with skip_db_save=True and timeout task
     # (individual messages were already saved when webhooks arrived)
     await process_freshchat_webhook_task(
         user_id=user_id,
         message_content=concatenated,
         conversation_id=conversation_id,
-        skip_db_save=True  # Don't save concatenated message to DB
+        skip_db_save=True,  # Don't save concatenated message to DB
+        timeout_task=timeout_task  # Pass timeout task for cancellation
     )
 
     logger.info(
@@ -116,27 +121,38 @@ async def _process_with_lock(
     user_id: str,
     conversation_id: str,
     messages: list[str],
-    lock: asyncio.Lock
+    lock: asyncio.Lock,
+    timeout_task: Optional[asyncio.Task] = None
 ):
     """
     Execute batch processing with a lock to prevent race conditions.
 
-    Releases the conversation's resources (buffer, task, lock) after processing.
+    Releases the conversation's resources (buffer, task, lock, timeout) after processing.
 
     Args:
         user_id: Freshchat user ID
         conversation_id: Freshchat conversation ID
         messages: List of messages to process
         lock: Asyncio lock for this conversation
+        timeout_task: Optional timeout task to cancel after processing completes
     """
     async with lock:
         try:
-            await process_message_batch(user_id, conversation_id, messages)
+            await process_message_batch(user_id, conversation_id, messages, timeout_task)
         finally:
             # Clean up resources after processing completes
             message_buffers.pop(conversation_id, None)
             pending_tasks.pop(conversation_id, None)
             processing_locks.pop(conversation_id, None)
+
+            # Cancel and clean up timeout task if it's still running
+            if conversation_id in pending_timeouts:
+                existing_timeout = pending_timeouts[conversation_id]
+                if not existing_timeout.done():
+                    existing_timeout.cancel()
+                    logger.info(f"Cancelled timeout task for conversation {conversation_id}")
+                pending_timeouts.pop(conversation_id, None)
+
             logger.info(f"Cleaned up resources for conversation {conversation_id}")
 
 
@@ -219,17 +235,30 @@ def queue_or_batch_webhook(
                 f"Cancelling previous AI task for conversation {conversation_id}"
             )
             existing_task.cancel()
-            try:
-                # Wait a bit for cancellation to complete
-                # (don't await fully, just give it a chance)
-                pass
-            except asyncio.CancelledError:
-                logger.info("Previous task cancelled successfully")
+
+    # Cancel existing timeout task if still running
+    if conversation_id in pending_timeouts:
+        existing_timeout = pending_timeouts[conversation_id]
+        if not existing_timeout.done():
+            logger.info(
+                f"Cancelling previous timeout task for conversation {conversation_id}"
+            )
+            existing_timeout.cancel()
+
+    # Create new timeout task (10 seconds)
+    async def send_timeout_after_delay():
+        await asyncio.sleep(10)  # Wait 10 seconds
+        from src.orin_ai_crm.server.routes.freshchat import send_timeout_message
+        await send_timeout_message(conversation_id)
+
+    timeout_task = asyncio.create_task(send_timeout_after_delay())
+    pending_timeouts[conversation_id] = timeout_task
+    logger.info(f"Started timeout task for conversation {conversation_id}")
 
     # Create new AI processing task with accumulated messages
     # (start immediately - no timer!)
     task = asyncio.create_task(
-        _process_with_lock(user_id, conversation_id, list(buffer), lock)
+        _process_with_lock(user_id, conversation_id, list(buffer), lock, timeout_task)
     )
     pending_tasks[conversation_id] = task
 

@@ -164,11 +164,46 @@ async def set_human_takeover_flag(
         }
 
 
+@tool
+def forgot_password() -> dict:
+    """
+    Get the forgot password guide for customers.
+
+    Use this tool when:
+    - Customer asks about forgot password
+    - Customer cannot login to their account
+    - Customer needs password reset instructions
+
+    Returns:
+        dict with: message (str) - Password reset guide
+    """
+    logger.info("TOOL: forgot_password")
+
+    message = """Halo Kak, maaf ya kendalanya 😔
+
+Kalau Kakak lupa password, gampang banget kok caranya:
+
+1️⃣ Buka website https://app.orin.id
+2️⃣ Pilih menu "Lupa Password"
+3️⃣ Ikuti langkah-langkahnya di sana
+
+Kalau udah dicoba tapi masih belum bisa juga, tolong infoin ke Hana:
+- Username untuk login
+- Email yang dipakai
+
+Nanti Hana bantu cek lebih lanjut ya 🙏"""
+
+    return {
+        'message': message
+    }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     classify_issue_type,
     generate_empathetic_response,
     set_human_takeover_flag,
+    forgot_password,
 ]
 
 __all__ = ['SUPPORT_TOOLS']

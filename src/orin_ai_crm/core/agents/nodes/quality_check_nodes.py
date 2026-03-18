@@ -57,6 +57,10 @@ class AnswerQualityEvaluation(BaseModel):
         default=[],
         description="List informasi yang hilang atau kurang dari jawaban (jika ada)"
     )
+    session_ending: bool = Field(
+        default=False,
+        description="True jika user menunjukkan kepuasan/tanda-tanda ingin mengakhiri percakapan (ucapan terima kasih, puas, dll)"
+    )
 
 
 class FinalMessagesResponse(BaseModel):
@@ -155,6 +159,25 @@ Dalam kasus form flow:
   * "Siap kak, noted ya!"
   * "Oke kak, domisili: Jakarta. Ada yang bisa dibantu?"
 - JANGAN anggap jawaban ini buruk hanya karena singkat!
+
+**PENTING - SESSION ENDING DETECTION:**
+Cek apakah user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan:
+- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
+- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
+- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
+- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
+
+Jika user menunjukkan tanda-tanda session ending:
+- Set session_ending = True
+- Ini adalah behavior BAIK (user puas dengan pelayanan)
+- Tetap set is_satisfactory = True (ini bukan masalah, ini adalah sukses!)
+CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
+- "Baik terima kasih kak"
+- "Sangat membantu, thanks"
+- "Oke kak terima kasih"
+- "Makasih ya Hana"
+- "Sudah jelas, terima kasih"
+- "Puas sama pelayanannya, thanks"
 
 CONTOH JAWABAN BURUK (is_satisfactory=False, confidence<0.6):
 - Jawaban yang mengatakan "saya tidak bisa membantu" tanpa alternatif
@@ -335,12 +358,14 @@ async def node_quality_check(state: AgentState):
         }
 
     # Evaluate answer quality with conversation history (last 5 messages)
-    evaluation = evaluate_answer_quality(
+    evaluation = await evaluate_answer_quality(
         user_message=user_message,
         ai_answer=ai_answer,
         customer_name=customer_name,
         conversation_history=messages  # Pass full message history for context
     )
+
+    logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score}, session_ending={evaluation.session_ending}")
 
     # Check if answer is satisfactory
     if evaluation.is_satisfactory and evaluation.confidence_score >= 0.5:
@@ -348,16 +373,17 @@ async def node_quality_check(state: AgentState):
         logger.info(f"EXIT: node_quality_check -> use original answer")
         logger.info("=" * 50)
 
-        # Return state as-is (keep the original answer)
+        # Return state as-is (keep the original answer) + session_ending flag
         return {
             "step": "final_message",
-            "route": "FINAL_MESSAGE"
+            "route": "FINAL_MESSAGE",
+            "session_ending_detected": evaluation.session_ending
         }
     else:
         # Answer is not satisfactory - trigger human takeover
         logger.info(f"Answer is NOT satisfactory (score: {evaluation.confidence_score}) - triggering human takeover")
         logger.info(f"Reasoning: {evaluation.reasoning}")
-        
+
         # Trigger human takeover
         return {
             "step": "human_takeover",
@@ -541,6 +567,33 @@ RULES FOR MULTI-BUBBLE RESPONSE:
     logger.info(f"Generated {len(result.messages)} message bubbles")
     logger.info(f"Reasoning: {result.reasoning}")
 
+    # Check if session ending is detected (user expressed satisfaction)
+    session_ending_detected = state.get("session_ending_detected", False)
+    logger.info(f"Session ending detected: {session_ending_detected}")
+
+    final_messages = result.messages
+
+    # If session ending detected, append review request message
+    if session_ending_detected:
+        logger.info("Appending review request message to final messages")
+        review_message = """Bila Kakak puas dengan pelayanan kami di VASTEL / ORIN, kami harap Kakak berkenan meluangkan 30 detik saja untuk memberi kami bintang 5 di salah satu platform ini:
+
+Google Reviews
+https://g.page/r/CaKeWLJ0K6l4EB0/review
+
+Google Play Store
+https://play.google.com/store/apps/details?id=com.orin&hl=id&gl=US
+
+Apple App Store
+https://apps.apple.com/id/app/orin-gps-tracking/id1450590467
+
+Terimakasih ya Kak.
+#SobatVASTEL
+follow https://instagram.com/vastel.co.id"""
+
+        final_messages.append(review_message)
+        logger.info(f"Total messages after appending review: {len(final_messages)}")
+
     # Set is_onboarded = True if send_form was triggered
     if send_form and customer_id:
         try:
@@ -558,7 +611,7 @@ RULES FOR MULTI-BUBBLE RESPONSE:
     logger.info("=" * 50)
 
     return {
-        "final_messages": result.messages
+        "final_messages": final_messages
     }
 
 async def node_human_takeover(state: AgentState):

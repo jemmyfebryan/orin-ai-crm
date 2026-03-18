@@ -35,6 +35,7 @@ class AgentState(TypedDict):
     orchestrator_plan: str  # Current plan for debugging
     orchestrator_decision: dict  # Latest routing decision from orchestrator
     human_takeover: bool  # Flag to trigger human takeover flow immediately
+    session_ending_detected: bool  # Flag to indicate user expressed satisfaction/closing (triggers review request)
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

@@ -222,7 +222,7 @@ Caranya gampang banget:
 
 Silahkan dicoba ya Kak! Kalau ada kendala, hubungi Hana lagi 🙏"""
     else:  # account_type == 'plus'
-        message = """Untuk perpanjangan HALO ORIN (free lisensi ORIN PLUS), Kakak bisa transfer ke:
+        message = """Untuk perpanjangan HALO ORIN dengan lisensi ORIN PLUS, Kakak bisa transfer ke:
 
 🏦 **Bank BCA**
 PT Vastel Telematika Integrasi

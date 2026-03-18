@@ -355,7 +355,7 @@ async def node_quality_check(state: AgentState):
     logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score:.2f}, session_ending={evaluation.session_ending}")
 
     # Route based on evaluation result
-    if evaluation.is_satisfactory and evaluation.confidence_score >= 0.1:
+    if evaluation.is_satisfactory or evaluation.confidence_score >= 0.1:
         # Answer is good - proceed to final message
         logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score:.2f}) - proceeding with original answer")
         logger.info(f"EXIT: node_quality_check -> final_message")

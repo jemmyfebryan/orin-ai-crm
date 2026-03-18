@@ -372,4 +372,7 @@ SUPPORT_TOOLS = [
     get_company_profile,
 ]
 
-__all__ = ['SUPPORT_TOOLS']
+# Export human_takeover separately for sales_agent
+HUMAN_TAKEOVER_TOOL = [human_takeover]
+
+__all__ = ['SUPPORT_TOOLS', 'HUMAN_TAKEOVER_TOOL']

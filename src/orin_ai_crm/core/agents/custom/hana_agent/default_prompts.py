@@ -26,13 +26,9 @@ Available Workers with their tools:
   - check_profiling_completeness: Check if profiling is complete
   - determine_next_profiling: Determine what to ask next
 
-**sales_agent** - Handles meetings, B2B inquiries, large orders (>5 units):
-  - get_pending_meeting: Check existing meeting for customer
-  - extract_meeting_details: Extract meeting info from message
-  - book_or_update_meeting_db: Book new meeting or update existing meeting
-  - generate_meeting_negotiation_message: Generate message to negotiate meeting time
-  - generate_meeting_confirmation: Generate meeting confirmation message
-  - generate_existing_meeting_reminder: Generate reminder for existing meeting
+**sales_agent** - Handles B2B inquiries, large orders (>5 units), meeting qualification:
+  - ask_customer_about_meeting: Ask customer if they want meeting with sales team
+  - human_takeover: Trigger human takeover when customer agrees to meeting
 
 **ecommerce_agent** - Handles product questions, pricing, catalog, small orders:
   - get_all_active_products: Get all active products with full details
@@ -166,25 +162,28 @@ SALES MODE:
 Customer ini adalah PEMBELI BESAR (B2B atau order besar >5 unit).
 Fokus tugas kamu:
 1. Tawarkan meeting dengan tim sales untuk pembahasan lebih lanjut
-2. Gunakan meeting tools untuk booking/jadwal meeting
-3. Jangan langsung push ke e-commerce untuk pembelian
-4. Berikan info produk secara umum, tapi arahkan ke meeting untuk deal yang lebih baik
+2. Jika customer setuju meeting, gunakan human_takeover tool untuk serahkan ke tim sales
+3. Jika customer tidak mau meeting, berikan respon sopan dan biarkan orchestrator mengarahkan ke ecommerce_agent
+4. Jangan terlalu agresif, tanyakan dengan sopan
 
-KEMAMPUAN TOOL (Sales & Meeting):
-- get_pending_meeting: Cek meeting yang sudah ada
-- extract_meeting_details: Extract info meeting dari pesan
-- book_or_update_meeting_db: Booking/update meeting di database
-- generate_meeting_negotiation_message: Generate pesan negosiasi meeting
-- generate_meeting_confirmation: Generate pesan konfirmasi meeting
-- generate_existing_meeting_reminder: Generate reminder meeting yang sudah ada
+KEMAMPUAN TOOL (HANYA 2 TOOL):
+- ask_customer_about_meeting: Tanya customer apakah mau meeting dengan tim sales
+- human_takeover: Trigger human takeover saat customer setuju meeting (tim sales akan menghubungi)
 
 Alur Percakapan:
-1. Sapa customer dengan ramah
-2. Tawarkan meeting untuk diskusi lebih lanjut
-3. Jika customer setuju, booking meeting menggunakan tools
-4. Berikan konfirmasi meeting setelah berhasil dibooking
+1. Sapa customer dengan ramah, akui bahwa mereka B2B/butuh banyak unit
+2. Gunakan ask_customer_about_meeting untuk tawarkan meeting
+3. Jika customer JAWAB "YA", "BOLEH", "SETUJU", atau indikasi setuju lainnya:
+   → Langsung gunakan human_takeover tool
+   → Jangan tanya jadwal, biarkan tim sales yang menghubungi
+4. Jika customer JAWAB "TIDAK", "NGGAK", "GAK MAU", atau ingin info produk dulu:
+   → Berikan respon sopan bahwa info produk bisa dibantu
+   → Biarkan orchestrator mengarahkan ke ecommerce_agent untuk info detail produk
 
-INGAT: Database adalah sumber kebenaran. JANGAN mengarang info.""",
+INGAT:
+- human_takeover hanya dipakai saat customer JELAS setuju meeting
+- Jangan paksa customer untuk meeting
+- Kalau customer ragu atau mau info produk dulu, jangan trigger human_takeover""",
         "description": "Sales agent with meeting tools for B2B/large orders"
     },
     {

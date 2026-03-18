@@ -1,14 +1,8 @@
 """
 Meeting Tools - Meeting extraction, booking, and rescheduling
 
-**DEPRECATED**: This module is deprecated as of 2026-03-19.
-
-The sales node has been simplified to use LLM-based classification instead of
-meeting management tools. All meeting-related operations are now handled by
-live human agents via the human_takeover flow.
-
-These functions are kept for backward compatibility but are no longer used in
-the active agent workflow. They may be removed in a future release.
+Legacy meeting management functions. These are still used by the meeting agent tools
+for extracting meeting information from conversations.
 """
 
 import os

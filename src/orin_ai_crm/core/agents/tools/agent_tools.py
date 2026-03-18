@@ -11,9 +11,9 @@ Tool Categories:
 1. ORCHESTRATOR (2 tools) - For routing decisions
 2. CUSTOMER MANAGEMENT (2 tools) - For profiling agent
 3. PROFILING (7 tools) - For profiling agent
-4. SALES (0 tools) - Sales node simplified, uses LLM-based classification only
+4. SALES (2 tools) - For sales agent (ask_customer_about_meeting + human_takeover)
 5. PRODUCT & E-COMMERCE (8 tools) - For ecommerce agent
-6. SUPPORT & COMPLAINTS (3 tools) - Reserved for future use
+6. SUPPORT (5 tools) - For support agent (includes human_takeover, forgot_password, etc.)
 7. GREETING & CONVERSATION (2 tools) - Reserved for future use
 
 Total: 30+ granular tools
@@ -31,6 +31,7 @@ from src.orin_ai_crm.core.agents.tools.meeting_agent_tools import (
 )
 from src.orin_ai_crm.core.agents.tools.support_agent_tools import (
     SUPPORT_TOOLS,
+    HUMAN_TAKEOVER_TOOL,
 )
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     PRODUCT_ECOMMERCE_TOOLS,
@@ -54,9 +55,8 @@ PROFILING_AGENT_TOOLS = (
 )
 
 # Sales Agent Tools (used by sales_node for B2B/large orders)
-# DEPRECATED: Sales node now uses LLM-based classification without tools
-# Meeting tools are no longer used - live agents handle all meetings
-SALES_AGENT_TOOLS = ()  # Empty tuple - simplified sales node doesn't use tools
+# ONLY includes meeting tools + human_takeover tool
+SALES_AGENT_TOOLS = SALES_MEETING_TOOLS + HUMAN_TAKEOVER_TOOL
 
 # Ecommerce Agent Tools (used by ecommerce_node for B2C/small orders)
 ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS

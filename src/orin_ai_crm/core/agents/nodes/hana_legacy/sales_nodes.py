@@ -1,16 +1,12 @@
 """
 Sales Nodes - Simplified B2B/High-Volume Sales Flow
 
-This node handles customers who are:
-- B2B customers (is_b2b == True)
-- Large volume orders (unit_qty > 5)
+**DEPRECATED**: This file is NOT being used in the current architecture.
 
-Flow:
-1. Greet customer and acknowledge B2B/high-volume context
-2. Ask if they want a meeting with sales team
-3. LLM classifies response as "wants meeting" or "doesn't want meeting"
-4. If YES → Trigger human takeover (live agents handle meetings)
-5. If NO → Return to orchestrator (routes to ecommerce_node for product recommendations)
+The active sales_node is defined locally in `agent_graph.py` and uses the
+tool-calling approach with create_agent.
+
+This file is kept for reference but may be removed in the future.
 """
 
 import os

@@ -69,8 +69,6 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_final_message,
     node_human_takeover
 )
-from src.orin_ai_crm.core.agents.nodes.hana_legacy.sales_nodes import node_sales
-from src.orin_ai_crm.core.agents.nodes.hana_legacy.ecommerce_nodes import node_ecommerce
 
 logger = get_logger(__name__)
 
@@ -439,6 +437,106 @@ async def profiling_node(state: AgentState) -> Dict:
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
     logger.info("EXIT: profiling_node")
+    return result
+
+
+async def sales_node(state: AgentState) -> Dict:
+    """
+    Sales node - handles B2B and large order sales flow.
+
+    Simplified approach:
+    1. Ask if customer wants meeting with sales team
+    2. If YES → trigger human takeover (live agents handle meetings)
+    3. If NO → continue to ecommerce for product recommendations
+    """
+    from langchain.agents import create_agent
+
+    logger.info("ENTER: sales_node")
+
+    # Get sales agent prompt from database
+    system_prompt = await get_prompt_from_db("hana_sales_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_sales_agent prompt from DB, using fallback")
+        system_prompt = """You are Hana from ORIN GPS Tracker.
+
+You are handling B2B or high-volume customers (5+ units).
+
+Your task:
+1. Greet the customer warmly
+2. Ask if they want a meeting with our sales team for special pricing
+3. If they agree to meeting → use the trigger_human_takeover tool
+4. If they don't want meeting → let them know you can provide product information
+
+Important:
+- Be friendly and helpful
+- Don't pressure them
+- If they want meeting, trigger human takeover immediately
+- If they don't, acknowledge and let them know product info is available
+"""
+
+    # Create sales agent with meeting tools
+    agent = create_agent(
+        model=llm,
+        tools=SALES_AGENT_TOOLS,
+        system_prompt=system_prompt,
+        state_schema=AgentState,
+    )
+
+    # Invoke the agent with current state
+    result = await agent.ainvoke(state, recursion_limit=10)
+
+    # Apply tool state updates (e.g., human_takeover flag)
+    result = await apply_tool_state_updates(result)
+
+    # Track that this agent was called
+    agents_called = result.get("agents_called", [])
+    agents_called.append("sales")
+    result["agents_called"] = list(set(agents_called))  # Remove duplicates
+
+    # Increment orchestrator step
+    result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
+
+    logger.info("EXIT: sales_node")
+    return result
+
+
+async def ecommerce_node(state: AgentState) -> Dict:
+    """
+    Ecommerce node - handles B2C and small order product inquiries.
+    """
+    from langchain.agents import create_agent
+
+    logger.info("ENTER: ecommerce_node")
+
+    # Get ecommerce agent prompt from database
+    system_prompt = await get_prompt_from_db("hana_ecommerce_agent")
+    if not system_prompt:
+        logger.warning("Failed to load hana_ecommerce_agent prompt from DB, using fallback")
+        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+
+    # Create ecommerce agent with product tools
+    agent = create_agent(
+        model=llm,
+        tools=ECOMMERCE_AGENT_TOOLS,
+        system_prompt=system_prompt,
+        state_schema=AgentState,
+    )
+
+    # Invoke the agent with current state
+    result = await agent.ainvoke(state, recursion_limit=10)
+
+    # Apply tool state updates (e.g., send_images from send_product_images tool)
+    result = await apply_tool_state_updates(result)
+
+    # Track that this agent was called
+    agents_called = result.get("agents_called", [])
+    agents_called.append("ecommerce")
+    result["agents_called"] = list(set(agents_called))  # Remove duplicates
+
+    # Increment orchestrator step
+    result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
+
+    logger.info("EXIT: ecommerce_node")
     return result
 
 

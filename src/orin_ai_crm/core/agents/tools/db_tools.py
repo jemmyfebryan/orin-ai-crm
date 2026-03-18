@@ -217,37 +217,58 @@ async def soft_delete_customer(phone_number: str) -> dict:
 
     Example:
         Input: phone_number="628123456789"
-        Output: {success: True, customer_id: 123, message: "Customer soft deleted"}
+        Output: {success: True, customer_id: 123, message: "Customer 123 deleted successfully. Chat reset complete."}
     """
     from datetime import datetime
     from src.orin_ai_crm.core.models.database import WIB
 
     logger.info(f"soft_delete_customer called - phone_number: {phone_number}")
 
-    async with AsyncSessionLocal() as db:
-        # Find customer by phone_number (including soft-deleted ones)
-        query = select(Customer).where(Customer.phone_number == phone_number)
-        result = await db.execute(query)
-        customer = result.scalars().first()
+    try:
+        async with AsyncSessionLocal() as db:
+            # Find customer by phone_number (only non-deleted ones)
+            query = select(Customer).where(
+                Customer.phone_number == phone_number,
+                Customer.deleted_at.is_(None)
+            )
+            result = await db.execute(query)
+            customer = result.scalars().first()
 
-        if not customer:
-            logger.warning(f"Customer not found for phone_number: {phone_number}")
+            if not customer:
+                logger.info(f"Customer not found for phone: {phone_number}")
+                return {
+                    'success': True,
+                    'message': f'No customer found for phone: {phone_number}',
+                    'customer_id': None
+                }
+
+            # Check if already deleted
+            if customer.deleted_at is not None:
+                logger.info(f"Customer already deleted: {customer.id}")
+                return {
+                    'success': True,
+                    'message': f'Customer already deleted at: {customer.deleted_at}',
+                    'customer_id': customer.id
+                }
+
+            # Soft delete: Set deleted_at timestamp
+            customer_id = customer.id
+            customer.deleted_at = datetime.now(WIB)
+            await db.commit()
+            await db.refresh(customer)
+
+            logger.info(f"Customer {customer_id} soft-deleted successfully")
+
             return {
-                "success": False,
-                "customer_id": None,
-                "message": "Customer not found"
+                'success': True,
+                'message': f'Customer {customer_id} deleted successfully. Chat reset complete.',
+                'customer_id': customer_id
             }
 
-        # Soft delete by setting deleted_at
-        customer_id = customer.id
-        customer.deleted_at = datetime.now(WIB)
-        await db.commit()
-        await db.refresh(customer)
-
-        logger.info(f"Customer soft deleted - id: {customer_id}, phone_number: {phone_number}")
-
+    except Exception as e:
+        logger.error(f"Error soft-deleting customer: {str(e)}")
         return {
-            "success": True,
-            "customer_id": customer_id,
-            "message": f"Customer {customer_id} soft deleted successfully"
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'customer_id': None
         }

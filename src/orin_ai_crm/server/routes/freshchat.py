@@ -434,18 +434,18 @@ async def freshchat_webhook_endpoint(
             # Soft delete the customer in background
             async def reset_chat_task():
                 result = await soft_delete_customer(phone_number)
-                if result.get("success"):
+                if result.get('success'):
                     logger.info(f"Customer soft deleted successfully: {result.get('customer_id')}")
                     # Send confirmation message to Freshchat
                     await send_message_to_freshchat(
                         conversation_id=conversation_id,
-                        message_content=f"✅ Chat history reset successfully. Customer ID: {result.get('customer_id')}"
+                        message_content=f"✅ {result.get('message')}"
                     )
                 else:
                     logger.error(f"Failed to soft delete customer: {result.get('message')}")
                     await send_message_to_freshchat(
                         conversation_id=conversation_id,
-                        message_content=f"❌ Failed to reset chat: {result.get('message')}"
+                        message_content=f"❌ {result.get('message')}"
                     )
 
             # Queue background task for soft delete

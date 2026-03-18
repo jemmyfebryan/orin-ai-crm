@@ -327,8 +327,6 @@ Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
 
 # List of support tools for easy import
 SUPPORT_TOOLS = [
-    classify_issue_type,
-    generate_empathetic_response,
     human_takeover,
     forgot_password,
     license_extension,

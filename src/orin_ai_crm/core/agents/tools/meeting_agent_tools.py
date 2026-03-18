@@ -1,6 +1,15 @@
 """
 Meeting & Sales Agent Tools
 
+**DEPRECATED**: This module is deprecated as of 2026-03-19.
+
+The sales node has been simplified to use LLM-based classification instead of
+meeting management tools. All meeting-related operations are now handled by
+live human agents via the human_takeover flow.
+
+These tools are kept for backward compatibility but are no longer used in the
+active agent workflow. They may be removed in a future release.
+
 LangChain StructuredTool objects for meeting and sales operations.
 These tools are used by the LangGraph agent for meeting-related operations.
 """

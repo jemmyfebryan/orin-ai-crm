@@ -9,8 +9,8 @@ Architecture:
 1. agent_entry_handler: Ensures customer_id exists
 2. orchestrator_node: Traffic controller that decides which worker to call
 3. profiling_node: Collects and updates customer data (name, domicile, vehicle, unit_qty, is_b2b)
-4. sales_node: Handles B2B inquiries, meeting scheduling, large orders (>5 units)
-5. ecommerce_node: Handles product questions, pricing, catalog, small orders (≤5 units)
+4. sales_node: Handles B2B/large volume customers, qualifies for meeting → human takeover or ecommerce
+5. ecommerce_node: Handles product questions, pricing, catalog, recommendations
 6. support_node: Handles complaints, technical support, and issues
 7. orchestrator_router: Routes from orchestrator to appropriate worker
 8. quality_check_node: Evaluates AI answer quality
@@ -69,6 +69,8 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_final_message,
     node_human_takeover
 )
+from src.orin_ai_crm.core.agents.nodes.hana_legacy.sales_nodes import node_sales
+from src.orin_ai_crm.core.agents.nodes.hana_legacy.ecommerce_nodes import node_ecommerce
 
 logger = get_logger(__name__)
 
@@ -440,86 +442,6 @@ async def profiling_node(state: AgentState) -> Dict:
     return result
 
 
-async def sales_node(state: AgentState) -> Dict:
-    """
-    Sales node - handles B2B and large order sales flow with meetings.
-    """
-    from langchain.agents import create_agent
-
-    logger.info("ENTER: sales_node")
-
-    # Get sales agent prompt from database
-    system_prompt = await get_prompt_from_db("hana_sales_agent")
-    if not system_prompt:
-        logger.warning("Failed to load hana_sales_agent prompt from DB, using fallback")
-        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
-
-    # Create sales agent with sales tools
-    agent = create_agent(
-        model=llm,
-        tools=SALES_AGENT_TOOLS,
-        system_prompt=system_prompt,
-        state_schema=AgentState,
-    )
-
-    # Invoke the agent with current state
-    result = await agent.ainvoke(state, recursion_limit=10)
-
-    # Apply tool state updates (e.g., send_images from send_product_images tool)
-    result = await apply_tool_state_updates(result)
-
-    # Track that this agent was called
-    agents_called = result.get("agents_called", [])
-    agents_called.append("sales")
-    result["agents_called"] = list(set(agents_called))  # Remove duplicates
-
-    # Increment orchestrator step
-    result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
-
-    logger.info("EXIT: sales_node")
-    return result
-
-
-async def ecommerce_node(state: AgentState) -> Dict:
-    """
-    Ecommerce node - handles B2C and small order product inquiries.
-    """
-    from langchain.agents import create_agent
-
-    logger.info("ENTER: ecommerce_node")
-
-    # Get ecommerce agent prompt from database
-    system_prompt = await get_prompt_from_db("hana_ecommerce_agent")
-    if not system_prompt:
-        logger.warning("Failed to load hana_ecommerce_agent prompt from DB, using fallback")
-        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
-
-    # Create ecommerce agent with product tools
-    agent = create_agent(
-        model=llm,
-        tools=ECOMMERCE_AGENT_TOOLS,
-        system_prompt=system_prompt,
-        state_schema=AgentState,
-    )
-
-    # Invoke the agent with current state
-    result = await agent.ainvoke(state, recursion_limit=10)
-
-    # Apply tool state updates (e.g., send_images from send_product_images tool)
-    result = await apply_tool_state_updates(result)
-
-    # Track that this agent was called
-    agents_called = result.get("agents_called", [])
-    agents_called.append("ecommerce")
-    result["agents_called"] = list(set(agents_called))  # Remove duplicates
-
-    # Increment orchestrator step
-    result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
-
-    logger.info("EXIT: ecommerce_node")
-    return result
-
-
 async def support_node(state: AgentState) -> Dict:
     """
     Support node - handles complaints, technical support, and issues.
@@ -588,8 +510,8 @@ def build_hana_agent_graph():
 
     Worker agents:
     - profiling_agent: Collects/updates customer data
-    - sales_agent: Handles B2B, meetings, large orders
-    - ecommerce_agent: Handles products, pricing, small orders
+    - sales_agent: Handles B2B/large volume, qualifies for meeting → human takeover or ecommerce
+    - ecommerce_agent: Handles products, pricing, recommendations
     - support_agent: Handles complaints, technical support, issues
     """
     logger.info("Building Hana Agent Graph with Orchestrator-Worker pattern...")

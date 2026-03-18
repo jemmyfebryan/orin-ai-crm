@@ -277,8 +277,6 @@ async def node_quality_check(state: AgentState):
     - Form flow (acknowledgment vs full answer)
     - Session ending (user satisfaction detection)
 
-    NOTE: Uses REAL WhatsApp conversation history from database (not internal workflow messages).
-
     Args:
         state: Current agent state (LangGraph standard)
 

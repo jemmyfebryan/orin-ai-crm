@@ -11,7 +11,7 @@ Tool Categories:
 1. ORCHESTRATOR (2 tools) - For routing decisions
 2. CUSTOMER MANAGEMENT (2 tools) - For profiling agent
 3. PROFILING (7 tools) - For profiling agent
-4. SALES & MEETING (7 tools) - For sales agent
+4. SALES (0 tools) - Sales node simplified, uses LLM-based classification only
 5. PRODUCT & E-COMMERCE (8 tools) - For ecommerce agent
 6. SUPPORT & COMPLAINTS (3 tools) - Reserved for future use
 7. GREETING & CONVERSATION (2 tools) - Reserved for future use
@@ -54,7 +54,9 @@ PROFILING_AGENT_TOOLS = (
 )
 
 # Sales Agent Tools (used by sales_node for B2B/large orders)
-SALES_AGENT_TOOLS = SALES_MEETING_TOOLS
+# DEPRECATED: Sales node now uses LLM-based classification without tools
+# Meeting tools are no longer used - live agents handle all meetings
+SALES_AGENT_TOOLS = ()  # Empty tuple - simplified sales node doesn't use tools
 
 # Ecommerce Agent Tools (used by ecommerce_node for B2C/small orders)
 ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS

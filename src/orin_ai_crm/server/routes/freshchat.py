@@ -16,6 +16,9 @@ from src.orin_ai_crm.server.security.webhook import is_ip_allowed, verify_freshc
 from src.orin_ai_crm.server.config.settings import settings
 from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
+from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT
+from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
+from src.orin_ai_crm.core.models.database import Customer
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -29,7 +32,8 @@ async def process_freshchat_agent_task(
     is_new_chat: bool,
     conversation_id: str,
     user_id: str,
-    timeout_task: Optional[asyncio.Task] = None
+    timeout_task: Optional[asyncio.Task] = None,
+    skip_user_save: bool = False
 ):
     """
     Background task to process chat and send replies to Freshchat.
@@ -39,6 +43,7 @@ async def process_freshchat_agent_task(
     Args:
         timeout_task: Optional asyncio task that sends timeout message.
                      Will be cancelled before sending final messages to prevent collision.
+        skip_user_save: If True, skip saving user message to DB (used for batched messages).
     """
     try:
         logger.info(f"Processing Freshchat agent task for conversation {conversation_id}")
@@ -50,6 +55,7 @@ async def process_freshchat_agent_task(
             message=message,
             contact_name=contact_name,
             is_new_chat=is_new_chat,
+            skip_user_save=skip_user_save,
         )
 
         # 2. CANCEL TIMEOUT TASK before sending final messages
@@ -203,7 +209,8 @@ async def send_timeout_message(conversation_id: str):
 async def process_freshchat_webhook_task(
     user_id: str,
     message_content: str,
-    conversation_id: str
+    conversation_id: str,
+    skip_db_save: bool = False
 ):
     """
     Background task to process Freshchat webhook payload.
@@ -217,6 +224,7 @@ async def process_freshchat_webhook_task(
         user_id: Freshchat user ID
         message_content: Message text content
         conversation_id: Freshchat conversation ID
+        skip_db_save: If True, skip saving message to DB (used for batched messages)
     """
     try:
         logger.info(f"Processing webhook task: conversation={conversation_id}, user_id={user_id}")
@@ -285,7 +293,8 @@ async def process_freshchat_webhook_task(
             is_new_chat=True,  # Always new chat at first, the second tries will use DB as source of truth
             conversation_id=conversation_id,
             user_id=user_id,
-            timeout_task=timeout_task  # Pass timeout task to cancel before sending messages
+            timeout_task=timeout_task,  # Pass timeout task to cancel before sending messages
+            skip_user_save=skip_db_save  # Skip DB save if this is a batched message
         )
 
         logger.info(f"Webhook processing completed for conversation {conversation_id}")
@@ -409,15 +418,59 @@ async def freshchat_webhook_endpoint(
             logger.warning(f"Incomplete webhook payload: conversation_id={conversation_id}, has_message={bool(message_content)}")
             return FreshchatWebhookResponse(status="success")
 
-        # 8. Queue Background Task (all heavy processing happens here)
-        background_tasks.add_task(
-            process_freshchat_webhook_task,
+        # 8. Fetch User Details (for DB save and allowlist check)
+        user_details = await get_freshchat_user_details(user_id)
+
+        if not user_details:
+            logger.warning(f"Failed to fetch user details for user_id={user_id}. Leaving for human agents.")
+            return FreshchatWebhookResponse(status="success")
+
+        phone_number = user_details.get("phone", "")
+        contact_name = user_details.get("first_name", "")
+
+        if not phone_number:
+            logger.warning(f"User has no phone number: user_id={user_id}. Leaving for human agents.")
+            return FreshchatWebhookResponse(status="success")
+
+        logger.info(f"User details fetched: phone={phone_number}, name={contact_name}")
+
+        # 9. Allowlist / Beta Testing Filter (by phone number)
+        if phone_number not in settings.allowed_numbers:
+            logger.info(f"Phone number not in allowlist: {phone_number}. ALLOWED_NUMBERS={settings.allowed_numbers}. Leaving for human agents.")
+            return FreshchatWebhookResponse(status="success")
+
+        logger.info(f"Allowlist check passed for phone_number: {phone_number}")
+
+        # 10. Get or Create Customer (for DB save)
+        from src.orin_ai_crm.core.agents.tools.db_tools import get_or_create_customer
+
+        customer_data = await get_or_create_customer(
+            phone_number=phone_number,
+            lid_number=None,
+            contact_name=contact_name
+        )
+        customer_id = customer_data.get('customer_id')
+
+        # 11. Save individual message to DB immediately (before batching)
+        await save_message_to_db(customer_id, "user", message_content, content_type="text")
+        logger.info(f"Individual message saved to DB: customer_id={customer_id}, message={message_content[:50]}...")
+
+        # 12. Queue or Batch webhook (message batching logic)
+        # This will either add to buffer and restart AI processing, or ignore if buffer is full
+        batch_result = queue_or_batch_webhook(
             user_id=user_id,
             message_content=message_content,
             conversation_id=conversation_id
         )
 
-        # 9. Instant Response (CRITICAL - must be within 3 seconds)
+        if batch_result.get("ignored"):
+            logger.warning(
+                f"Message ignored due to buffer limits: "
+                f"{batch_result['message_count']}/{MAX_BUFFER_SIZE} messages, "
+                f"{batch_result['char_count']}/{MAX_CHAR_COUNT} chars"
+            )
+
+        # 13. Instant Response (CRITICAL - must be within 3 seconds)
         return FreshchatWebhookResponse(status="success")
 
     except Exception as e:

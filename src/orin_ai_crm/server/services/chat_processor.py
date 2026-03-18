@@ -22,6 +22,7 @@ async def process_chat_request(
     message: str,
     contact_name: Optional[str],
     is_new_chat: bool,
+    skip_user_save: bool = False,
 ) -> Dict[str, Any]:
     """
     Process a chat request using the agentic AI workflow.
@@ -34,6 +35,7 @@ async def process_chat_request(
         message: User's message text
         contact_name: User's contact name
         is_new_chat: Whether this is a new conversation
+        skip_user_save: If True, skip saving user message to DB (used for batched messages)
 
     Returns:
         Dict containing:
@@ -82,8 +84,12 @@ async def process_chat_request(
     send_form = not is_onboarded if is_onboarded is not None else is_new_chat
     logger.info(f"send_form determined as: {send_form} (is_onboarded={is_onboarded}, is_new_chat={is_new_chat})")
 
-    # 5. Save user message to database
-    await save_message_to_db(customer_id, "user", message)
+    # 5. Save user message to database (unless skipping for batched requests)
+    if not skip_user_save:
+        await save_message_to_db(customer_id, "user", message)
+        logger.info(f"User message saved to DB: customer_id={customer_id}")
+    else:
+        logger.info(f"Skipping user message save to DB (skip_user_save=True)")
 
     # 6. Prepare state for agent
     current_messages = [HumanMessage(content=message)]

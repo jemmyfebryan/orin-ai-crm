@@ -1,6 +1,7 @@
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
 -Sales node -> Tawarkan meeting, jika mau -> human_takeover, ubah tools yang persetujuan meeting
 -Masih jadi problem ini kenapa gk mau update customer data setelah formnya diisi, terpaksa force profiling_agent aja wajib dipanggil.
+-Multi-chat input, jika ada multiple webhook masuk, selagi belum nyampai final message bisa coba diinject didalem flow yang masih berjalan (atau restart prompt)?
 
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)

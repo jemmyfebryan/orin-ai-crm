@@ -221,17 +221,17 @@ async def generate_human_takeover_message(
     system_prompt = f"""{hana_persona}
 
 TASK:
-Generate pesan handover yang natural dan ramah untuk menjelaskan bahwa agent manusia yang akan mengambil alih percakapan.
+Generate pesan handover yang natural dan ramah untuk menjelaskan bahwa live agent yang akan mengambil alih percakapan.
 
 CUSTOMER: {customer_context}
 
 CONTEXT:
-AI tidak bisa menjawab pertanyaan ini dengan memuaskan. Sekarang CS manusia dari ORIN GPS Tracker akan mengambil alih untuk membantu.
+AI tidak bisa menjawab pertanyaan ini dengan memuaskan. Sekarang live agent dari ORIN GPS Tracker akan mengambil alih untuk membantu.
 
 RULES:
 - Pesan harus sopan dan ramah
-- Jelaskan bahwa CS manusia akan segera membantu
-- Berikan harapan kapan CS akan membalas (misal: "segera", "dalam waktu singkat")
+- Jelaskan bahwa live agent akan segera membantu
+- Berikan harapan kapan live agent akan membalas (misal: "segera", "dalam waktu singkat")
 - Gunakan emoji secara wajar
 - Personalized dengan nama customer
 - Jangan terlalu formal, natural seperti chat WhatsApp

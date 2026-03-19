@@ -15,6 +15,7 @@ from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
@@ -39,6 +40,7 @@ async def ask_customer_about_meeting(
     Returns:
         dict with: message (str) - Friendly meeting invitation message
     """
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
     customer_data = state.get('customer_data', {})
     customer_name = customer_data.get('name', 'Kak')
@@ -46,6 +48,9 @@ async def ask_customer_about_meeting(
     is_b2b = customer_data.get('is_b2b', False)
 
     logger.info(f"TOOL: ask_customer_about_meeting - customer: {customer_name}, qty: {unit_qty}, b2b: {is_b2b}")
+
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
 
     # Generate friendly meeting invitation message
     if is_b2b:
@@ -59,7 +64,7 @@ async def ask_customer_about_meeting(
 
 Kami punya tim sales khusus yang bisa bantu Kakak {context}.
 
-Mau Kakak kalau Hana jadwalkan meeting online dengan tim sales kami? Mereka bisa kasih penawaran khusus dan jawab pertanyaan lebih detail.
+Mau Kakak kalau {agent_name} jadwalkan meeting online dengan tim sales kami? Mereka bisa kasih penawaran khusus dan jawab pertanyaan lebih detail.
 
 Kira-kira kakak tertarik untuk meeting nggak ya? 🙏"""
 

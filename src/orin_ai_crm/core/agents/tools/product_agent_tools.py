@@ -18,7 +18,7 @@ from langgraph.prebuilt import InjectedState
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
-from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 import json
 
 logger = get_logger(__name__)
@@ -680,10 +680,20 @@ async def answer_product_question(
     """
     logger.info("TOOL: answer_product_question")
 
-    # Get Hana persona from database (fresh on each invoke)
-    hana_persona = await get_prompt_from_db("hana_ecommerce_agent")
-    if not hana_persona:
-        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+    # Get agent persona from database (fresh on each invoke)
+    agent_persona = await get_prompt_from_db("hana_ecommerce_agent")
+    if not agent_persona:
+        # Fallback with dynamic agent name
+        agent_name = get_agent_name()
+        agent_persona = f"Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker."
+    else:
+        # Format agent name into the persona
+        agent_name = get_agent_name()
+        try:
+            agent_persona = agent_persona.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     result = await get_all_active_products.ainvoke({})
     products = result['products']
@@ -698,7 +708,7 @@ Customer Profile:
 - B2B: {customer_profile.get('is_b2b', False)}
 """
 
-    prompt = f"""{hana_persona}
+    prompt = f"""{agent_persona}
 
 {products_context}
 
@@ -880,10 +890,20 @@ async def recommend_products_for_customer(
     """
     logger.info("TOOL: recommend_products_for_customer")
 
-    # Get Hana persona from database (fresh on each invoke)
-    hana_persona = await get_prompt_from_db("hana_ecommerce_agent")
-    if not hana_persona:
-        hana_persona = "Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker."
+    # Get agent persona from database (fresh on each invoke)
+    agent_persona = await get_prompt_from_db("hana_ecommerce_agent")
+    if not agent_persona:
+        # Fallback with dynamic agent name
+        agent_name = get_agent_name()
+        agent_persona = f"Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker."
+    else:
+        # Format agent name into the persona
+        agent_name = get_agent_name()
+        try:
+            agent_persona = agent_persona.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     vehicle_alias = customer_profile.get('vehicle_alias', '')
     vehicle_type = 'motor' if 'motor' in vehicle_alias.lower() else 'mobil'
@@ -904,7 +924,7 @@ async def recommend_products_for_customer(
     customer_name = customer_profile.get('name') or 'Kak'
     unit_qty = customer_profile.get('unit_qty', 1)
 
-    prompt = f"""{hana_persona}
+    prompt = f"""{agent_persona}
 
 {products_context}
 
@@ -1202,7 +1222,9 @@ Customer Profile:
 - B2B: {customer_data.get('is_b2b', False)}
 """
 
-    system_prompt = f"""Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+    # Get agent name for dynamic messaging
+    agent_name = await get_prompt_from_db("agent_name") or "Hana"
+    system_prompt = f"""Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
 
 {products_context}

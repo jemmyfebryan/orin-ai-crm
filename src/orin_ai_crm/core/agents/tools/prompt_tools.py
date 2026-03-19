@@ -16,6 +16,46 @@ from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Prompt
 
 logger = get_logger(__name__)
 
+# ============================================================================
+# CACHED AGENT NAME (loaded once at startup)
+# ============================================================================
+
+_AGENT_NAME: str = "Hana"  # Default fallback, will be loaded from DB on first access
+
+
+def get_agent_name() -> str:
+    """
+    Get the cached agent name.
+
+    Returns:
+        str: The agent name (default "Hana" if not yet loaded from DB)
+    """
+    return _AGENT_NAME
+
+
+async def initialize_agent_name() -> str:
+    """
+    Initialize agent name from database (should be called once at app startup).
+
+    Returns:
+        str: The loaded agent name
+    """
+    global _AGENT_NAME
+
+    try:
+        agent_name = await get_prompt_from_db("agent_name")
+        if agent_name:
+            _AGENT_NAME = agent_name
+            logger.info(f"Initialized agent_name from DB: {_AGENT_NAME}")
+        else:
+            logger.warning("agent_name not found in DB, using default 'Hana'")
+            _AGENT_NAME = "Hana"
+    except Exception as e:
+        logger.error(f"Error loading agent_name from DB: {e}, using default 'Hana'")
+        _AGENT_NAME = "Hana"
+
+    return _AGENT_NAME
+
 
 # ============================================================================
 # INTERNAL HELPER FUNCTIONS

@@ -62,7 +62,7 @@ from src.orin_ai_crm.core.agents.tools.agent_tools import (
 from src.orin_ai_crm.core.agents.tools.customer_agent_tools import (
     get_customer_profile,
 )
-from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_quality_check,
     quality_router,
@@ -244,9 +244,13 @@ async def orchestrator_node(state: AgentState) -> Dict:
         logger.error("Failed to load orchestrator prompt from DB! Using fallback.")
         system_prompt = """You are a router. Decide next agent: profiling, sales, ecommerce, or final."""
 
+    # Get agent name
+    agent_name = get_agent_name()
+
     # Fill in context variables
     try:
         system_prompt = system_prompt.format(
+            agent_name=agent_name,
             name=customer_data.get('name', ''),
             domicile=customer_data.get('domicile', ''),
             vehicle_alias=customer_data.get('vehicle_alias', ''),
@@ -398,7 +402,16 @@ async def profiling_node(state: AgentState) -> Dict:
     system_prompt = await get_prompt_from_db("hana_customer_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_customer_agent prompt from DB, using fallback")
-        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker. Collect customer data."
+        agent_name = get_agent_name()
+        system_prompt = f"You are {agent_name}, Customer Service AI from ORIN GPS Tracker. Collect customer data."
+    else:
+        # Format agent name into the prompt
+        agent_name = get_agent_name()
+        try:
+            system_prompt = system_prompt.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     # Create profiling agent with profiling tools
     agent = create_agent(
@@ -457,7 +470,8 @@ async def sales_node(state: AgentState) -> Dict:
     system_prompt = await get_prompt_from_db("hana_sales_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_sales_agent prompt from DB, using fallback")
-        system_prompt = """You are Hana from ORIN GPS Tracker.
+        agent_name = get_agent_name()
+        system_prompt = f"""You are {agent_name} from ORIN GPS Tracker.
 
 You are handling B2B or high-volume customers (5+ units).
 
@@ -473,6 +487,14 @@ Important:
 - If they want meeting, trigger human takeover immediately
 - If they don't, acknowledge and let them know product info is available
 """
+    else:
+        # Format agent name into the prompt
+        agent_name = get_agent_name()
+        try:
+            system_prompt = system_prompt.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     # Create sales agent with meeting tools
     agent = create_agent(
@@ -512,7 +534,16 @@ async def ecommerce_node(state: AgentState) -> Dict:
     system_prompt = await get_prompt_from_db("hana_ecommerce_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_ecommerce_agent prompt from DB, using fallback")
-        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+        agent_name = get_agent_name()
+        system_prompt = f"You are {agent_name}, Customer Service AI from ORIN GPS Tracker."
+    else:
+        # Format agent name into the prompt
+        agent_name = get_agent_name()
+        try:
+            system_prompt = system_prompt.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     # Create ecommerce agent with product tools
     agent = create_agent(
@@ -552,7 +583,16 @@ async def support_node(state: AgentState) -> Dict:
     system_prompt = await get_prompt_from_db("hana_support_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_support_agent prompt from DB, using fallback")
-        system_prompt = "You are Hana, Customer Service AI from ORIN GPS Tracker."
+        agent_name = get_agent_name()
+        system_prompt = f"You are {agent_name}, Customer Service AI from ORIN GPS Tracker."
+    else:
+        # Format agent name into the prompt
+        agent_name = get_agent_name()
+        try:
+            system_prompt = system_prompt.format(agent_name=agent_name)
+        except KeyError:
+            # Prompt doesn't have {agent_name} placeholder, use as-is
+            pass
 
     # Create support agent with support tools
     agent = create_agent(
@@ -586,7 +626,7 @@ async def support_node(state: AgentState) -> Dict:
 
 def build_hana_agent_graph():
     """
-    Build Hana AI agent graph with Orchestrator-Worker pattern.
+    Build AI agent graph with Orchestrator-Worker pattern.
 
     Graph Structure:
     1. Entry → orchestrator_node (decides first agent)
@@ -612,7 +652,8 @@ def build_hana_agent_graph():
     - ecommerce_agent: Handles products, pricing, recommendations
     - support_agent: Handles complaints, technical support, issues
     """
-    logger.info("Building Hana Agent Graph with Orchestrator-Worker pattern...")
+    agent_name = get_agent_name()
+    logger.info(f"Building {agent_name} Agent Graph with Orchestrator-Worker pattern...")
 
     # Initialize the graph
     workflow = StateGraph(AgentState)
@@ -671,7 +712,8 @@ def build_hana_agent_graph():
     # Compile the graph
     hana_agent = workflow.compile()
 
-    logger.info("Hana Agent Graph compiled with Orchestrator-Worker pattern!")
+    agent_name = get_agent_name()
+    logger.info(f"{agent_name} Agent Graph compiled with Orchestrator-Worker pattern!")
     logger.info(f"Orchestrator tools: {len(ORCHESTRATOR_TOOLS)}")
     logger.info(f"Profiling agent tools: {len(PROFILING_AGENT_TOOLS)}")
     logger.info(f"Sales agent tools: {len(SALES_AGENT_TOOLS)}")

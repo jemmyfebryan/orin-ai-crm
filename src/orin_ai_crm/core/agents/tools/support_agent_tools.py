@@ -17,7 +17,7 @@ from langgraph.prebuilt import InjectedState
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
-from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -144,7 +144,7 @@ def human_takeover() -> dict:
 
 
 @tool
-def forgot_password() -> dict:
+async def forgot_password() -> dict:
     """
     Get the forgot password guide for customers.
 
@@ -156,9 +156,14 @@ def forgot_password() -> dict:
     Returns:
         dict with: message (str) - Password reset guide
     """
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+
     logger.info("TOOL: forgot_password")
 
-    message = """Halo Kak, maaf ya kendalanya 😔
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
+
+    message = f"""Halo Kak, maaf ya kendalanya 😔
 
 Kalau Kakak lupa password, gampang banget kok caranya:
 
@@ -166,11 +171,11 @@ Kalau Kakak lupa password, gampang banget kok caranya:
 2️⃣ Pilih menu "Lupa Password"
 3️⃣ Ikuti langkah-langkahnya di sana
 
-Kalau udah dicoba tapi masih belum bisa juga, tolong infoin ke Hana:
+Kalau udah dicoba tapi masih belum bisa juga, tolong infoin ke {agent_name}:
 - Username untuk login
 - Email yang dipakai
 
-Nanti Hana bantu cek lebih lanjut ya 🙏"""
+Nanti {agent_name} bantu cek lebih lanjut ya 🙏"""
 
     return {
         'message': message
@@ -193,8 +198,12 @@ async def license_extension(
         dict with: message (str) - License extension guide based on account type
     """
     from src.orin_ai_crm.core.agents.tools.db_tools import get_account_type
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
     logger.info("TOOL: license_extension")
+
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
 
     # Get customer_id from state
     customer_id = state.get("customer_id")
@@ -202,7 +211,7 @@ async def license_extension(
     if not customer_id:
         logger.error("TOOL: license_extension - No customer_id in state!")
         return {
-            'message': 'Maaf Kak, Hana belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
+            'message': f'Maaf Kak, {agent_name} belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
         }
 
     # Get account type from database
@@ -211,7 +220,7 @@ async def license_extension(
 
     # Generate message based on account type
     if account_type in ['free', 'lite', 'promo', 'pro']:
-        message = """Untuk perpanjangan lisensi ORIN, Kakak bisa lakukan online dari browser kok 😊
+        message = f"""Untuk perpanjangan lisensi ORIN, Kakak bisa lakukan online dari browser kok 😊
 
 Caranya gampang banget:
 1️⃣ Login ke akun ORIN di https://app.orin.id
@@ -220,9 +229,9 @@ Caranya gampang banget:
 4️⃣ Pilih jenis akun (Pro/Plus/Lite) dan periode (bulanan/tahunan)
 5️⃣ Bayar via BCA Virtual Account atau metode lain yang tersedia
 
-Silahkan dicoba ya Kak! Kalau ada kendala, hubungi Hana lagi 🙏"""
+Silahkan dicoba ya Kak! Kalau ada kendala, hubungi {agent_name} lagi 🙏"""
     elif account_type == 'plus':
-        message = """Untuk perpanjangan HALO ORIN dengan lisensi ORIN PLUS, Kakak bisa transfer ke:
+        message = f"""Untuk perpanjangan HALO ORIN dengan lisensi ORIN PLUS, Kakak bisa transfer ke:
 
 🏦 **Bank BCA**
 PT Vastel Telematika Integrasi
@@ -234,7 +243,7 @@ PT Vastel Telematika Integrasi
 
 ⚠️ Jangan lupa tulis **nomor polisi kendaraan** di kolom pesan ya Kak!
 
-Setelah transfer, kirim bukti transfer ke Hana. Proses reaktivasi biasanya 2-3 hari kerja kalau terlambat bayar.
+Setelah transfer, kirim bukti transfer ke {agent_name}. Proses reaktivasi biasanya 2-3 hari kerja kalau terlambat bayar.
 
 Terima kasih Kak! 🙏"""
     else:  # account_type is None or unknown
@@ -276,8 +285,12 @@ async def device_troubleshooting(
         dict with: message (str), update_state (dict, optional), device_type (str)
     """
     from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
     logger.info(f"TOOL: device_troubleshooting - device_name: {device_name}")
+
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
 
     # Get customer_id from state
     customer_id = state.get("customer_id")
@@ -325,7 +338,7 @@ async def device_troubleshooting(
    → Coba isi pulsa **ALL data** (2G & 4G) Rp 25.000 ya Kak
 
 4️⃣ Kalau unit **membalas SMS**:
-   → Tolong kirimkan balasan SMS dari unit ke Hana untuk kami telaah lebih lanjut
+   → Tolong kirimkan balasan SMS dari unit ke {agent_name} untuk kami telaah lebih lanjut
 
 💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
     elif device_type.lower() == 'postpaid':
@@ -352,7 +365,7 @@ Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
    → Tekan tombol **REFRESH UNIT**
 
 3️⃣ Kalau setelah isi pulsa dan refresh unit masih belum update:
-   → Hubungi Hana lagi ya untuk bantu cek lebih lanjut
+   → Hubungi {agent_name} lagi ya untuk bantu cek lebih lanjut
 
 💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
 

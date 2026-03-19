@@ -16,13 +16,14 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, LeadRouting
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 from sqlalchemy import select
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
-HANA_PERSONA = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+AGENT_PERSONA = """Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif.
 Jangan terlalu kaku, gunakan bahasa natural seperti chat WhatsApp asli.
 
@@ -299,12 +300,17 @@ async def generate_profiling_question(
     Returns:
         dict with: question (str) - The natural question to ask
     """
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+
     logger.info(f"TOOL: generate_profiling_question - field: {field_name}")
+
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
 
     field_prompts = {
         "name": f"""Generate a greeting to ask for the customer's name.
 Context: {conversation_context}
-Task: Perkenalkan diri sebagai Hana dari ORIN GPS Tracker, lalu tanya nama dengan sopan.
+Task: Perkenalkan diri sebagai {agent_name} dari ORIN GPS Tracker, lalu tanya nama dengan sopan.
 Response: Pesan natural untuk WhatsApp""",
 
         "domicile": f"""Generate a question to ask for customer's domicile/location.
@@ -330,7 +336,7 @@ Response: Pesan natural untuk WhatsApp"""
     }
 
     prompt = field_prompts.get(field_name, field_prompts["name"])
-    prompt = f"""{HANA_PERSONA}
+    prompt = f"""{AGENT_PERSONA.format(agent_name=agent_name)}
 
 {prompt}
 

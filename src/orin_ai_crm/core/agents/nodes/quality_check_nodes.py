@@ -14,14 +14,15 @@ from src.orin_ai_crm.core.agents.config import llm_config
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
 from sqlalchemy import update, select
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 
 logger = get_logger(__name__)
 llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
 WIB = timezone(timedelta(hours=7))
 
-# HANA_PERSONA is now loaded from database (hana_persona prompt key)
+# AGENT_PERSONA is now loaded from database (hana_persona prompt key)
 # Hardcoded fallback in case DB is not available
-HANA_PERSONA_FALLBACK = """Kamu adalah Hana, Customer Service AI dari ORIN GPS Tracker.
+AGENT_PERSONA_FALLBACK = """Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker.
 Sikapmu: Ramah, menggunakan emoji (seperti :), 🙏), sopan, dan solutif. Jangan terlalu kaku.
 
 ATURAN PERCAKAPAN:
@@ -29,15 +30,21 @@ ATURAN PERCAKAPAN:
 - Singkat tapi ramah dan membantu"""
 
 
-async def get_hana_persona() -> str:
-    """Load Hana persona from database, with fallback to hardcoded value."""
-    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
-
+async def get_agent_persona() -> str:
+    """Load agent persona from database, with fallback to hardcoded value."""
     persona = await get_prompt_from_db("hana_persona")
     if not persona:
         logger.warning("hana_persona not found in DB, using fallback")
-        return HANA_PERSONA_FALLBACK
-    return persona
+        agent_name = get_agent_name()
+        return AGENT_PERSONA_FALLBACK.format(agent_name=agent_name)
+
+    # Format agent name into the persona
+    agent_name = get_agent_name()
+    try:
+        return persona.format(agent_name=agent_name)
+    except KeyError:
+        # Prompt doesn't have {agent_name} placeholder, use as-is
+        return persona
 
 
 class AnswerQualityEvaluation(BaseModel):
@@ -94,7 +101,7 @@ async def evaluate_answer_quality(
     logger.info(f"evaluate_answer_quality called - user_msg: {user_message[:200]}..., ai_answer: {ai_answer[:50]}...")
 
     # Load persona from DB
-    hana_persona = await get_hana_persona()
+    agent_persona = await get_agent_persona()
 
     customer_context = f"Customer: {customer_name}" if customer_name else "Customer: Kak"
 
@@ -112,7 +119,7 @@ async def evaluate_answer_quality(
             content = msg.content if hasattr(msg, 'content') else str(msg)
             conversation_context += f"{role}: {content}\n"
 
-    system_prompt = f"""{hana_persona}
+    system_prompt = f"""{agent_persona}
 
 TASK:
 Kamu adalah Quality Evaluator untuk jawaban AI dari ORIN GPS Tracker.
@@ -175,7 +182,7 @@ CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
 - "Baik terima kasih kak"
 - "Sangat membantu, thanks"
 - "Oke kak terima kasih"
-- "Makasih ya Hana"
+- "Makasih ya [agent_name]"
 - "Sudah jelas, terima kasih"
 - "Puas sama pelayanannya, thanks"
 
@@ -214,11 +221,11 @@ async def generate_human_takeover_message(
     logger.info(f"generate_human_takeover_message called - customer: {customer_name}")
 
     # Load persona from DB
-    hana_persona = await get_hana_persona()
+    agent_persona = await get_agent_persona()
 
     customer_context = customer_name if customer_name else "Kak"
 
-    system_prompt = f"""{hana_persona}
+    system_prompt = f"""{agent_persona}
 
 TASK:
 Generate pesan handover yang natural dan ramah untuk menjelaskan bahwa live agent yang akan mengambil alih percakapan.
@@ -489,10 +496,12 @@ async def node_final_message(state: AgentState):
             missing_fields.append("- Kebutuhan (pribadi, perusahaan, operasional, dll)")
 
         if missing_fields:
+            # Get agent name for dynamic messaging
+            agent_name = get_agent_name()
             form_instructions = f"""
 
 TAMBAHKAN FORM DATA UNTUK PESAN KEPADA USER (1 Form untuk 1 Bubble Chat):
-Supaya Hana bisa kasih penawaran yang lebih pas, tolong lengkapi data berikut:
+Supaya {agent_name} bisa kasih penawaran yang lebih pas, tolong lengkapi data berikut:
 {chr(10).join(missing_fields)}
 
 Contoh format yang bisa digunakan:
@@ -504,13 +513,16 @@ Kebutuhan: Pribadi"
 """
 
     # Load persona from DB
-    hana_persona = await get_hana_persona()
+    agent_persona = await get_agent_persona()
+
+    # Get agent name for dynamic messaging
+    agent_name = await get_agent_name()
 
     # Build system prompt for LLM
-    system_prompt = f"""{hana_persona}
+    system_prompt = f"""{agent_persona}
 
 TASK:
-Kamu adalah Final Message Generator untuk Hana AI dari ORIN GPS Tracker.
+Kamu adalah Final Message Generator untuk {agent_name} AI dari ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
 CUSTOMER PROFILE:

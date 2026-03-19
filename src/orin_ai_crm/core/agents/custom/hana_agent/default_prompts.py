@@ -14,7 +14,7 @@ DEFAULT_PROMPTS = [
     {
         "prompt_key": "agent_name",
         "prompt_name": "Agent Name",
-        "prompt_text": "Si Orin",
+        "prompt_text": "Siorin",
         "description": "The name of the AI agent - used throughout all prompts and responses"
     },
     {

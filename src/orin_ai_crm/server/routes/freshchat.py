@@ -18,6 +18,7 @@ from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshc
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT, pending_timeouts
 from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 from src.orin_ai_crm.core.models.database import Customer, AsyncSessionLocal
 
 logger = get_logger(__name__)
@@ -287,7 +288,8 @@ async def send_timeout_message(conversation_id: str):
     Send a timeout message to customer if processing takes too long.
     This function is called after 10 seconds if processing hasn't completed.
     """
-    timeout_message = "Mohon tunggu sebentar ya, Hana akan segera membalas..."
+    agent_name = get_agent_name()
+    timeout_message = f"Mohon tunggu sebentar ya, {agent_name} akan segera membalas..."
     logger.info(f"Sending timeout message to conversation {conversation_id}")
     await send_message_to_freshchat(conversation_id, timeout_message)
 

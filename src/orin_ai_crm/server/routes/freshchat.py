@@ -350,7 +350,8 @@ async def process_freshchat_webhook_task(
         logger.info(f"User details fetched: phone={phone_number}, name={contact_name}")
 
         # 2. Allowlist / Beta Testing Filter (by phone number)
-        if phone_number not in settings.allowed_numbers:
+        # If allowed_numbers is empty, allow all numbers (no filter)
+        if settings.allowed_numbers and phone_number not in settings.allowed_numbers:
             logger.info(f"Phone number not in allowlist: {phone_number}. ALLOWED_NUMBERS={settings.allowed_numbers}. Leaving for human agents.")
             return
 
@@ -623,7 +624,8 @@ async def freshchat_webhook_endpoint(
         logger.info(f"User details fetched: phone={phone_number}, name={contact_name}")
 
         # 9. Allowlist / Beta Testing Filter (by phone number)
-        if phone_number not in settings.allowed_numbers:
+        # If allowed_numbers is empty, allow all numbers (no filter)
+        if settings.allowed_numbers and phone_number not in settings.allowed_numbers:
             logger.info(f"Phone number not in allowlist: {phone_number}. ALLOWED_NUMBERS={settings.allowed_numbers}. Leaving for human agents.")
             return FreshchatWebhookResponse(status="success")
 

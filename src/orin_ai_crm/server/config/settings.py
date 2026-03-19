@@ -32,11 +32,13 @@ class Settings:
             if channel_ids else []
         )
 
-        # Allowlist for beta testing
-        self.allowed_numbers = [
-            "+628123456789",
-            "+6285850434383",
-        ]
+        # Allowlist for beta testing - parse comma-separated from env
+        # If empty, allow all numbers (no filter)
+        allowed_numbers_env = os.getenv("ALLOWED_NUMBERS", "")
+        self.allowed_numbers = (
+            [num.strip() for num in allowed_numbers_env.split(",") if num.strip()]
+            if allowed_numbers_env else []
+        )
 
         # Assets URL for product images and public files
         self.assets_url = os.getenv("ASSETS_URL", "")

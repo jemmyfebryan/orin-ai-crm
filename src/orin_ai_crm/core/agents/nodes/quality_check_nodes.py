@@ -516,7 +516,7 @@ Kebutuhan: Pribadi"
     agent_persona = await get_agent_persona()
 
     # Get agent name for dynamic messaging
-    agent_name = await get_agent_name()
+    agent_name = get_agent_name()
 
     # Build system prompt for LLM
     system_prompt = f"""{agent_persona}

@@ -168,18 +168,20 @@ async def save_message_to_db(customer_id: Optional[int], role: str, content: str
         return None
 
 
-async def get_account_type(customer_id: int) -> Optional[str]:
+async def get_account_type(customer_id: int) -> Optional[dict]:
     """
     Get customer's account type from VPS database.
 
     Fetches the customer's phone number from the local database,
-    then queries the VPS database to get the account type.
+    then queries the VPS database to get the account type and expiration date.
 
     Args:
         customer_id: The customer's ID
 
     Returns:
-        Optional[str]: Account type ('free', 'basic', 'lite', 'promo', 'plus') or None if not found
+        Optional[dict]: Dict with 'account_type' ('free', 'basic', 'lite', 'promo', 'plus')
+                        and 'account_expired_date' (expiration date string or None),
+                        or None if not found
     """
     from src.orin_ai_crm.core.agents.tools.vps_tools import get_account_type_from_vps
 
@@ -200,11 +202,11 @@ async def get_account_type(customer_id: int) -> Optional[str]:
 
     logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
 
-    # Query VPS database for account type
-    account_type = await get_account_type_from_vps(phone_number)
-    logger.info(f"Account type for customer {customer_id}: {account_type}")
+    # Query VPS database for account type and expiration date
+    account_info = await get_account_type_from_vps(phone_number)
+    logger.info(f"Account info for customer {customer_id}: {account_info}")
 
-    return account_type
+    return account_info
 
 
 async def get_device_type(customer_id: int, device_name: Optional[str] = None) -> Optional[str]:

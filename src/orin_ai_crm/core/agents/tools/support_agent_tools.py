@@ -185,6 +185,7 @@ Nanti {agent_name} bantu cek lebih lanjut ya 🙏"""
 @tool
 async def license_extension(
     state: Annotated[dict, InjectedState],
+    account_type: Optional[str] = None,
 ) -> dict:
     """
     Get license extension guide based on customer's account type.
@@ -193,6 +194,11 @@ async def license_extension(
     - Customer asks about license renewal/extension
     - Customer wants to extend their ORIN subscription
     - Customer asks about perpanjangan lisensi
+
+    Args:
+        state: Agent state (contains customer_id)
+        account_type: Optional - if already known from get_account_info tool
+                     If not provided, will fetch from database automatically
 
     Returns:
         dict with: message (str) - License extension guide based on account type
@@ -214,9 +220,21 @@ async def license_extension(
             'message': f'Maaf Kak, {agent_name} belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
         }
 
-    # Get account type from database
-    account_type = await get_account_type(customer_id)
-    logger.info(f"Account type for customer {customer_id}: {account_type}")
+    # Get account type from database if not provided
+    if account_type is None:
+        account_info = await get_account_type(customer_id)
+        if account_info is None:
+            logger.error(f"TOOL: license_extension - Could not get account info for customer {customer_id}")
+            return {
+                'message': f'Maaf Kak, {agent_name} belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏',
+                'update_state': {
+                    'human_takeover': True
+                }
+            }
+        account_type = account_info.get('account_type')
+        logger.info(f"Account type for customer {customer_id}: {account_type}")
+    else:
+        logger.info(f"Using provided account_type: {account_type}")
 
     # Generate message based on account type
     if account_type in ['free', 'lite', 'promo', 'pro']:
@@ -417,6 +435,99 @@ async def get_company_profile() -> dict:
 
 
 @tool
+async def get_account_info(
+    state: Annotated[dict, InjectedState],
+) -> dict:
+    """
+    Get customer's account type and expiration date.
+
+    Use this tool when:
+    - Customer asks "What is my account type?" or "Akun saya apa?"
+    - Customer asks about their account status
+    - Customer asks "Akun saya gratis atau berbayar?"
+    - Customer asks "Kapan masa berlakunya habis?" or "Berapa lama lagi?"
+    - Need to check account type before providing specific information
+
+    Args:
+        state: Agent state (contains customer_id)
+
+    Returns:
+        dict with: account_type (str), account_expired_date (str), message (str) - User-friendly account info
+    """
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_account_type
+
+    logger.info("TOOL: get_account_info")
+
+    # Get agent name for dynamic messaging
+    agent_name = get_agent_name()
+
+    # Get customer_id from state
+    customer_id = state.get("customer_id")
+
+    if not customer_id:
+        logger.error("TOOL: get_account_info - No customer_id in state!")
+        return {
+            'account_type': None,
+            'account_expired_date': None,
+            'message': f'Maaf Kak, {agent_name} belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
+        }
+
+    # Get account info from database
+    account_info = await get_account_type(customer_id)
+
+    if account_info is None:
+        logger.error(f"TOOL: get_account_info - Could not get account info for customer {customer_id}")
+        return {
+            'account_type': None,
+            'account_expired_date': None,
+            'message': f'Maaf Kak, {agent_name} belum bisa identifikasi akun Kakak. Tolong hubungi CS kami ya 🙏'
+        }
+
+    account_type = account_info.get('account_type')
+    account_expired_date = account_info.get('account_expired_date')
+
+    logger.info(f"Account info for customer {customer_id}: type={account_type}, expired={account_expired_date}")
+
+    # Generate user-friendly message
+    account_type_names = {
+        'free': 'ORIN FREE',
+        'basic': 'ORIN BASIC',
+        'lite': 'ORIN LITE',
+        'promo': 'ORIN PROMO',
+        'plus': 'ORIN PLUS',
+        'pro': 'ORIN PRO'
+    }
+
+    display_name = account_type_names.get(account_type, account_type.upper() if account_type else 'UNKNOWN')
+
+    if account_expired_date:
+        # Format the date nicely (assuming it's in YYYY-MM-DD format)
+        try:
+            from datetime import datetime
+            # Try parsing the date
+            if isinstance(account_expired_date, str):
+                try:
+                    parsed_date = datetime.fromisoformat(account_expired_date.replace('Z', '+00:00'))
+                    formatted_date = parsed_date.strftime('%d %B %Y')
+                    message = f"Akun Kakak adalah **{display_name}** dengan masa berlaku sampai **{formatted_date}** 😊"
+                except:
+                    # If parsing fails, just display as is
+                    message = f"Akun Kakak adalah **{display_name}** dengan masa berlaku sampai **{account_expired_date}** 😊"
+            else:
+                message = f"Akun Kakak adalah **{display_name}** dengan masa berlaku sampai **{account_expired_date}** 😊"
+        except:
+            message = f"Akun Kakak adalah **{display_name}** dengan masa berlaku sampai **{account_expired_date}** 😊"
+    else:
+        message = f"Akun Kakak adalah **{display_name}** 😊"
+
+    return {
+        'account_type': account_type,
+        'account_expired_date': account_expired_date,
+        'message': message
+    }
+
+
+@tool
 async def list_customer_devices(
     state: Annotated[dict, InjectedState],
 ) -> dict:
@@ -467,6 +578,7 @@ async def list_customer_devices(
 SUPPORT_TOOLS = [
     human_takeover,
     forgot_password,
+    get_account_info,
     license_extension,
     device_troubleshooting,
     get_company_profile,

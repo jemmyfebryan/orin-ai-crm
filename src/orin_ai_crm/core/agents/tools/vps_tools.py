@@ -177,7 +177,7 @@ async def get_all_vehicles() -> List[dict]:
     return vehicles
 
 
-async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
+async def get_account_type_from_vps(phone_number: str) -> Optional[dict]:
     """
     Get user's account type from VPS database by phone number.
 
@@ -185,7 +185,10 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
         phone_number: Customer's phone number (can be in various formats)
 
     Returns:
-        Account type string: 'free', 'basic', 'premium' (mapped to 'plus'), 'lite', 'promo', or None if not found
+        dict with:
+            - account_type: 'free', 'basic', 'premium' (mapped to 'plus'), 'lite', 'promo', or None if not found
+            - account_expired_date: Expiration date string or None
+        Returns None if user not found
     """
     logger.info(f"get_account_type_from_vps called - phone_number: {phone_number}")
 
@@ -234,7 +237,7 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
     # Build OR query
     phone_conditions = " OR ".join([f"phone_number = {v}" for v in unique_variations])
     sql_query = f"""
-        SELECT account_type
+        SELECT account_type, account_expired_date
         FROM users
         WHERE ({phone_conditions})
         AND deleted_at IS NULL
@@ -257,14 +260,18 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[str]:
         return None
 
     account_type = users[0].get("account_type")
-    logger.info(f"Found account_type in VPS DB: {account_type}")
+    account_expired_date = users[0].get("account_expired_date")
+    logger.info(f"Found account_type in VPS DB: {account_type}, expired_date: {account_expired_date}")
 
     # Map 'premium' to 'plus'
     if account_type == 'premium':
         logger.info(f"Mapping 'premium' to 'plus'")
-        return 'plus'
+        account_type = 'plus'
 
-    return account_type
+    return {
+        'account_type': account_type,
+        'account_expired_date': account_expired_date
+    }
 
 
 async def get_device_type_from_vps(phone_number: str, device_name: Optional[str] = None) -> Optional[str]:

@@ -64,10 +64,6 @@ class AnswerQualityEvaluation(BaseModel):
         default=[],
         description="List informasi yang hilang atau kurang dari jawaban (jika ada)"
     )
-    session_ending: bool = Field(
-        default=False,
-        description="True jika user menunjukkan kepuasan/tanda-tanda ingin mengakhiri percakapan (ucapan terima kasih, puas, dll)"
-    )
 
 
 class FinalMessagesResponse(BaseModel):
@@ -77,6 +73,16 @@ class FinalMessagesResponse(BaseModel):
     )
     reasoning: str = Field(
         description="Alasan mengapa response dibagi menjadi beberapa bubble"
+    )
+
+
+class SessionEndingDetection(BaseModel):
+    """Detection of session ending signals from user"""
+    is_session_ending: bool = Field(
+        description="True jika user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan"
+    )
+    reasoning: str = Field(
+        description="Alasan mengapa ini dikategorikan sebagai session ending"
     )
 
 
@@ -105,19 +111,23 @@ async def evaluate_answer_quality(
 
     customer_context = f"Customer: {customer_name}" if customer_name else "Customer: Kak"
 
-    # Build conversation context from history
+    # Build conversation context from history - FILTER to WhatsApp messages only
+    # Exclude internal workflow messages (tool calls, system messages, etc.)
     conversation_context = ""
     if conversation_history and len(conversation_history) > 0:
-        conversation_context = "\n\nCONVERSATION HISTORY (last 5 messages for context):\n"
-        for msg in conversation_history[-5:]:
-            if hasattr(msg, 'type'):
-                role = "User" if msg.type == 'human' else "AI"
-            elif hasattr(msg, '__class__') and 'Human' in msg.__class__.__name__:
-                role = "User"
-            else:
-                role = "AI"
-            content = msg.content if hasattr(msg, 'content') else str(msg)
-            conversation_context += f"{role}: {content}\n"
+        # Filter to only real WhatsApp messages (user/ai roles from ChatSession)
+        whatsapp_only_history = [
+            msg for msg in conversation_history
+            if hasattr(msg, 'message_role') and msg.message_role in ['user', 'ai']
+        ]
+
+        if whatsapp_only_history:
+            conversation_context = "\n\nCONVERSATION HISTORY (WhatsApp messages only - last 5 for context):\n"
+            for msg in whatsapp_only_history[-5:]:
+                if hasattr(msg, 'message_role'):
+                    role = "User" if msg.message_role == 'user' else "AI"
+                    content = msg.content if hasattr(msg, 'content') else str(msg)
+                    conversation_context += f"{role}: {content}\n"
 
     system_prompt = f"""{agent_persona}
 
@@ -136,21 +146,23 @@ AI ANSWER TO EVALUATE:
 
 EVALUATION CRITERIA:
 1. **Relevance**: Apakah jawaban relevan dengan pertanyaan?
-2. **Completeness**: Apakah jawaban lengkap atau ada informasi penting yang hilang?
-3. **Accuracy**: Apakah jawaban akurat dan dapat dipercaya?
-4. **Helpfulness**: Apakah jawaban membantu user atau hanya menunda?
-5. **Context Awareness**: Gunakan conversation history untuk memahami konteks. Jawaban mungkin terlihat tidak relevan jika di luar konteks, tapi sebenarnya tepat jika melihat history.
+2. **Completeness**: Apakah jawaban cukup lengkap? (tidak harus sempurna)
+3. **Accuracy**: Apakah jawaban secara umum akurat?
+4. **Helpfulness**: Apakah jawaban membantu user?
+5. **Context Awareness**: Gunakan conversation history untuk memahami konteks. Jawaban mungkin terlihat singkat tapi sudah tepat jika melihat history.
 
 RULES:
-- Isi is_satisfactory dengan True jika jawaban baik (confidence >= 0.6)
-- Isi is_satisfactory dengan False jika jawaban buruk (confidence < 0.6)
+- BIAS LEBIH LENIENT: Kalau ragu, anggap jawaban itu memuaskan (is_satisfactory=True)
+- Isi is_satisfactory dengan True jika jawaban cukup membantu (confidence >= 0.4)
+- Isi is_satisfactory dengan False HANYA jika jawaban jelas-jelas buruk (confidence < 0.4)
 - Confidence score 0.0 - 1.0:
-  * 0.8 - 1.0: Jawaban sangat baik dan lengkap
-  * 0.6 - 0.7: Jawaban cukup baik, tapi bisa lebih baik
-  * 0.4 - 0.5: Jawaban kurang memuaskan, ada informasi penting yang hilang
-  * 0.0 - 0.3: Jawaban buruk, tidak menjawab pertanyaan, atau salah
+  * 0.7 - 1.0: Jawaban sangat baik dan lengkap
+  * 0.5 - 0.6: Jawaban baik dan membantu
+  * 0.4 - 0.5: Jawaban cukup, bisa diterima, mungkin ada kekurangan kecil
+  * 0.2 - 0.3: Jawaban kurang, tapi tidak sepenuhnya salah
+  * 0.0 - 0.1: Jawaban buruk, tidak menjawab pertanyaan, atau salah total
 - Berikan reasoning yang jelas
-- List missing_info jika ada informasi penting yang hilang
+- List missing_info HANYA jika ada informasi KRUSIAL yang hilang (bukan detail kecil)
 
 **PENTING - FORM FLOW DETECTION:**
 Cek conversation history untuk mendeteksi form flow:
@@ -167,26 +179,7 @@ Dalam kasus form flow:
   * "Oke kak, domisili: Jakarta. Ada yang bisa dibantu?"
 - JANGAN anggap jawaban ini buruk hanya karena singkat!
 
-**PENTING - SESSION ENDING DETECTION:**
-Cek apakah user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan:
-- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
-- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
-- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
-- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
-
-Jika user menunjukkan tanda-tanda session ending:
-- Set session_ending = True
-- Ini adalah behavior BAIK (user puas dengan pelayanan)
-- Tetap set is_satisfactory = True (ini bukan masalah, ini adalah sukses!)
-CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
-- "Baik terima kasih kak"
-- "Sangat membantu, thanks"
-- "Oke kak terima kasih"
-- "Makasih ya [agent_name]"
-- "Sudah jelas, terima kasih"
-- "Puas sama pelayanannya, thanks"
-
-CONTOH JAWABAN BURUK (is_satisfactory=False, confidence<0.6):
+CONTOH JAWABAN BURUK (is_satisfactory=False, confidence<0.4):
 - Jawaban yang mengatakan "saya tidak bisa membantu" tanpa alternatif
 - Jawaban yang tidak relevan dengan pertanyaan
 - Jawaban yang meminta user untuk mengulang pertanyaan tanpa alasan yang jelas
@@ -202,6 +195,81 @@ CONTOH JAWABAN BAIK (is_satisfactory=True, confidence>=0.6):
     evaluator_llm = llm.with_structured_output(AnswerQualityEvaluation)
     result = evaluator_llm.invoke([SystemMessage(content=system_prompt)])
 
+    return result
+
+
+async def detect_session_ending(
+    customer_id: Optional[int] = None
+) -> SessionEndingDetection:
+    """
+    Detect if user is showing signs of ending the conversation with satisfaction.
+
+    Args:
+        customer_id: Customer ID to fetch conversation history
+
+    Returns:
+        SessionEndingDetection with is_session_ending flag and reasoning
+    """
+    from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
+
+    logger.info(f"detect_session_ending called - customer_id: {customer_id}")
+
+    # Fetch conversation history
+    conversation_history = []
+    if customer_id:
+        try:
+            chat_history = await get_chat_history(customer_id, limit=5)  # Last 5 messages
+            logger.info(f"Fetched {len(chat_history)} messages for session ending detection")
+            conversation_history = chat_history
+        except Exception as e:
+            logger.error(f"Error fetching chat history for session detection: {e}")
+            conversation_history = []
+
+    if not conversation_history:
+        logger.info("No conversation history - cannot detect session ending")
+        return SessionEndingDetection(
+            is_session_ending=False,
+            reasoning="No conversation history available"
+        )
+
+    # Build conversation context
+    conversation_context = ""
+    for msg in conversation_history:
+        if hasattr(msg, 'message_role') and msg.message_role in ['user', 'ai']:
+            role = "User" if msg.message_role == 'user' else "AI"
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            conversation_context += f"{role}: {content}\n"
+
+    system_prompt = f"""TASK:
+Deteksi apakah user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan.
+
+CONVERSATION HISTORY (last 5 messages):
+{conversation_context}
+
+SESSION ENDING INDICATORS:
+User menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan:
+- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
+- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
+- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
+- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
+
+CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
+- "Baik terima kasih kak"
+- "Sangat membantu, thanks"
+- "Oke kak terima kasih"
+- "Makasih ya"
+- "Sudah jelas, terima kasih"
+- "Puas sama pelayanannya, thanks"
+
+RULES:
+- Set is_session_ending = True JIKA user message terakhir jelas menunjukkan session ending
+- Set is_session_ending = False JIKA user masih bertanya, meminta info, atau tidak ada tanda puas
+- Berikan reasoning yang jelas"""
+
+    detector_llm = llm.with_structured_output(SessionEndingDetection)
+    result = detector_llm.invoke([SystemMessage(content=system_prompt)])
+
+    logger.info(f"Session ending detection: is_session_ending={result.is_session_ending}, reasoning: {result.reasoning}")
     return result
 
 
@@ -272,23 +340,16 @@ async def set_human_takeover_flag(customer_id: int):
 
 async def node_quality_check(state: AgentState):
     """
-    Quality Check Node - Evaluates AI answer and triggers human takeover if needed.
+    Quality Check Node - Evaluates final WhatsApp messages and triggers human takeover if needed.
 
-    This node is the FINAL GATEKEEPER before END. All responses pass through this node.
-    It evaluates the answer quality using LLM and routes accordingly:
-    - If answer is satisfactory → route to final_message
-    - If answer is NOT satisfactory → route to human_takeover
-
-    The LLM evaluator is smart enough to understand:
-    - Conversational context (profiling questions vs answers)
-    - Form flow (acknowledgment vs full answer)
-    - Session ending (user satisfaction detection)
+    This node evaluates the ACTUAL WhatsApp bubbles that will be sent to the user.
+    It runs AFTER final_message node to evaluate what the user will actually see.
 
     Args:
         state: Current agent state (LangGraph standard)
 
     Returns:
-        Updated state with routing decision and session_ending_detected flag
+        Updated state with routing decision ("END" or "human_takeover")
     """
     from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
 
@@ -296,26 +357,32 @@ async def node_quality_check(state: AgentState):
     logger.info("ENTER: node_quality_check")
 
     messages = state.get('messages', [])
+    final_messages = state.get('final_messages', [])
     customer_id = state.get('customer_id')
     customer_data = state.get('customer_data', {})
 
-    # Basic validation: must have messages
-    if not messages:
-        logger.warning("No messages in state - passing through to final_message")
-        logger.info(f"EXIT: node_quality_check -> final_message (no messages)")
+    # PRIORITY: Check if we have final_messages (actual WhatsApp bubbles to evaluate)
+    if final_messages and len(final_messages) > 0:
+        logger.info(f"Evaluating {len(final_messages)} final WhatsApp bubbles")
+
+        # Combine final messages into a single answer for evaluation
+        ai_answer = "\n\n".join(final_messages)
+    elif messages and len(messages) > 0:
+        # Fallback: Evaluate raw AI answer (backward compatibility)
+        logger.info("No final_messages found, evaluating raw AI answer (fallback)")
+        last_message = messages[-1]
+        ai_answer = last_message.content if hasattr(last_message, 'content') else ""
+    else:
+        logger.warning("No messages or final_messages in state - passing through to END")
+        logger.info(f"EXIT: node_quality_check -> END (no messages)")
         logger.info("=" * 50)
         return {
-            "step": "final_message",
-            "route": "FINAL_MESSAGE"
+            "route": "END"
         }
-
-    # Extract AI's last message (the answer to evaluate)
-    last_message = messages[-1]
-    ai_answer = last_message.content if hasattr(last_message, 'content') else ""
 
     # Extract user's last message (before the AI's response)
     user_message = ""
-    for msg in reversed(messages[:-1]):  # Look at messages before the last one
+    for msg in reversed(messages[:-1] if len(messages) > 1 else []):  # Look at messages before the last one
         if hasattr(msg, 'type') and msg.type == 'human':
             user_message = msg.content
             break
@@ -329,14 +396,13 @@ async def node_quality_check(state: AgentState):
 
     logger.info(f"Quality check - customer_id: {customer_id}, user_msg: {user_message[:50] if user_message else 'N/A'}...")
 
-    # Validate we have both user message and AI answer
-    if not user_message or not ai_answer:
-        logger.info("Missing user_message or ai_answer - passing through without evaluation")
-        logger.info(f"EXIT: node_quality_check -> final_message (incomplete data)")
+    # Validate we have AI answer
+    if not ai_answer:
+        logger.info("Missing ai_answer - passing through without evaluation")
+        logger.info(f"EXIT: node_quality_check -> END (incomplete data)")
         logger.info("=" * 50)
         return {
-            "step": "final_message",
-            "route": "FINAL_MESSAGE"
+            "route": "END"
         }
 
     # Fetch REAL WhatsApp conversation history from database for context
@@ -359,19 +425,18 @@ async def node_quality_check(state: AgentState):
         conversation_history=conversation_history  # Pass real WhatsApp history, not internal workflow
     )
 
-    logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score:.2f}, session_ending={evaluation.session_ending}")
+    logger.info(f"Quality evaluation result: satisfactory={evaluation.is_satisfactory}, confidence={evaluation.confidence_score:.2f}")
 
     # Route based on evaluation result
-    if evaluation.is_satisfactory or evaluation.confidence_score >= 0.1:
-        # Answer is good - proceed to final message
-        logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score:.2f}) - proceeding with original answer")
-        logger.info(f"EXIT: node_quality_check -> final_message")
+    # Trust the LLM's boolean is_satisfactory judgment (more lenient than numeric score)
+    if evaluation.is_satisfactory:
+        # Answer is good - proceed to END (send messages to user)
+        logger.info(f"Answer is SATISFACTORY (score: {evaluation.confidence_score:.2f}) - sending to user")
+        logger.info(f"EXIT: node_quality_check -> END")
         logger.info("=" * 50)
 
         return {
-            "step": "final_message",
-            "route": "FINAL_MESSAGE",
-            "session_ending_detected": evaluation.session_ending
+            "route": "END"
         }
     else:
         # Answer is not satisfactory - trigger human takeover
@@ -381,19 +446,19 @@ async def node_quality_check(state: AgentState):
         logger.info("=" * 50)
 
         return {
-            "step": "human_takeover",
             "route": "HUMAN_TAKEOVER"
         }
-        
+
+
 def quality_router(state: AgentState) -> str:
     route = state.get("route")
-    if route == "FINAL_MESSAGE":
-        return "final_message"
+    if route == "END":
+        return "end"
     if route == "HUMAN_TAKEOVER":
         return "human_takeover"
-    # Fallback to human
-    logger.info(f"Quality Router error with route: {route}")
-    return "human_takeover"
+    # Fallback to end
+    logger.info(f"Quality Router: {route}")
+    return "end"
 
 async def node_final_message(state: AgentState):
     """
@@ -577,14 +642,14 @@ RULES FOR MULTI-BUBBLE RESPONSE:
     logger.info(f"Generated {len(result.messages)} message bubbles")
     logger.info(f"Reasoning: {result.reasoning}")
 
-    # Check if session ending is detected (user expressed satisfaction)
-    session_ending_detected = state.get("session_ending_detected", False)
-    logger.info(f"Session ending detected: {session_ending_detected}")
+    # Detect if user is showing session ending signals (satisfaction)
+    session_detection = await detect_session_ending(customer_id)
+    logger.info(f"Session ending detection: is_session_ending={session_detection.is_session_ending}, reasoning: {session_detection.reasoning}")
 
     final_messages = result.messages
 
     # If session ending detected, append review request message
-    if session_ending_detected:
+    if session_detection.is_session_ending:
         logger.info("Appending review request message to final messages")
         review_message = """Bila Kakak puas dengan pelayanan kami di VASTEL / ORIN, kami harap Kakak berkenan meluangkan 30 detik saja untuk memberi kami bintang 5 di salah satu platform ini:
 

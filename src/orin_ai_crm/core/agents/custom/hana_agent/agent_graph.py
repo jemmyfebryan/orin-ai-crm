@@ -22,7 +22,7 @@ Entry → Orchestrator → Worker (profiling/sales/ecommerce/support) → Orches
                   ↓
              (loops until orchestrator says "final")
                   ↓
-             quality_check → final_message/human_takeover
+             final_message → quality_check → END/human_takeover
 
 Key Benefits:
 - True multi-agent collaboration with intelligent routing
@@ -330,8 +330,8 @@ async def orchestrator_router(state: AgentState) -> str:
 
     if step >= max_steps:
         logger.warning(f"Max orchestrator steps reached ({step}), forcing final")
-        logger.info("EXIT: orchestrator_router -> quality_check")
-        return "quality_check"
+        logger.info("EXIT: orchestrator_router -> final_message")
+        return "final_message"
 
     # Get orchestrator decision
     decision = state.get("orchestrator_decision", {})
@@ -344,9 +344,9 @@ async def orchestrator_router(state: AgentState) -> str:
 
     if next_agent in agents_called:
         logger.warning(f"Agent '{next_agent}' already called in this chat: {agents_called}")
-        logger.warning(f"Forcing route to quality_check (hard-cap enforced)")
-        logger.info("EXIT: orchestrator_router -> quality_check (hard-cap)")
-        return "quality_check"
+        logger.warning(f"Forcing route to final_message (hard-cap enforced)")
+        logger.info("EXIT: orchestrator_router -> final_message (hard-cap)")
+        return "final_message"
 
     # Map to node names
     if next_agent == "profiling":
@@ -362,8 +362,8 @@ async def orchestrator_router(state: AgentState) -> str:
         logger.info("EXIT: orchestrator_router -> support_node")
         return "support_node"
     else:  # "final" or unknown
-        logger.info("EXIT: orchestrator_router -> quality_check")
-        return "quality_check"
+        logger.info("EXIT: orchestrator_router -> final_message")
+        return "final_message"
 
 
 # ============================================================================
@@ -633,10 +633,10 @@ def build_hana_agent_graph():
     2. orchestrator_node → orchestrator_router (routes to worker)
     3. Worker (profiling/sales/ecommerce/support) → orchestrator_node (back to orchestrator)
     4. Loop: orchestrator → worker → orchestrator → worker → ...
-    5. When orchestrator says "final" → quality_check
-    6. When human_takeover flag is set → human_takeover (bypasses quality_check)
-    7. quality_check → final_message OR human_takeover
-    8. final_message → END
+    5. When orchestrator says "final" → final_message (generates WhatsApp bubbles)
+    6. final_message → quality_check (evaluates actual WhatsApp bubbles user will see)
+    7. quality_check → END (send to user) OR human_takeover
+    8. When human_takeover flag is set → human_takeover (bypasses quality_check)
     9. human_takeover → END
 
     The orchestrator:
@@ -695,18 +695,20 @@ def build_hana_agent_graph():
     workflow.add_edge("ecommerce_node", "orchestrator")
     workflow.add_edge("support_node", "orchestrator")
 
-    # Quality check → final message OR human takeover
+    # Final message → quality check (evaluates actual WhatsApp bubbles)
+    workflow.add_edge("final_message", "quality_check")
+
+    # Quality check → END OR human takeover
     workflow.add_conditional_edges(
         "quality_check",
         quality_router,
         {
-            "final_message": "final_message",
+            "end": END,
             "human_takeover": "human_takeover"
         }
     )
 
-    # Final nodes → END
-    workflow.add_edge("final_message", END)
+    # Human takeover → END
     workflow.add_edge("human_takeover", END)
 
     # Compile the graph

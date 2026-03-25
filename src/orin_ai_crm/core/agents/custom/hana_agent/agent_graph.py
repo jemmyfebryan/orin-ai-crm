@@ -684,6 +684,7 @@ def build_hana_agent_graph():
             "sales_node": "sales_node",
             "ecommerce_node": "ecommerce_node",
             "support_node": "support_node",
+            "final_message": "final_message",
             "quality_check": "quality_check",
             "human_takeover": "human_takeover"
         }

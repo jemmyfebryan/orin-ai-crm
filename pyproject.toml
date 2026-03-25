@@ -49,6 +49,7 @@ tqdm = "^4.67.1"
 click = "^8.3.1"
 pytz = "^2025.2"
 python-dateutil = "^2.9.0"
+jinja2 = "^3.1.0"
 
 # Jupyter
 ipykernel = "^7.1.0"

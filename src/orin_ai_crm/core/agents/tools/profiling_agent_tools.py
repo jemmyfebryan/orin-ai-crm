@@ -14,13 +14,15 @@ from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, LeadRouting
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 from sqlalchemy import select
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
+
+# Use advanced model for profiling tasks (structured data extraction)
+llm = get_llm("advanced")
 WIB = timezone(timedelta(hours=7))
 
 AGENT_PERSONA = """Kamu adalah {agent_name}, Customer Service AI dari ORIN GPS Tracker.

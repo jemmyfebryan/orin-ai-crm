@@ -14,11 +14,13 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
+
+# Use medium model for meeting tasks (simple qualification flow)
+llm = get_llm("medium")
 WIB = timezone(timedelta(hours=7))
 
 

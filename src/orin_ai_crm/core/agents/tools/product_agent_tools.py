@@ -16,13 +16,15 @@ from sqlalchemy import select, delete, text
 from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 import json
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
+
+# Use advanced model for query_products_with_llm (needs good reasoning for SQL generation)
+llm = get_llm("advanced")
 WIB = timezone(timedelta(hours=7))
 
 

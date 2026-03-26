@@ -51,7 +51,7 @@ from langchain_openai import ChatOpenAI
 
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.agents.tools.agent_tools import (
     ORCHESTRATOR_TOOLS,
     PROFILING_AGENT_TOOLS,
@@ -72,8 +72,22 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
 
 logger = get_logger(__name__)
 
-# Initialize LLM with tool calling support
-llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"), temperature=0)
+# ============================================================================
+# TIERED LLM CONFIGURATION
+# ============================================================================
+# Advanced: Best reasoning and tool calling (orchestrator, ecommerce, profiling)
+# Medium: Balanced performance (sales, support)
+# Basic: Fast and cost-effective (quality check, final message)
+orchestrator_llm = get_llm("advanced")      # Complex routing decisions
+ecommerce_llm = get_llm("advanced")         # Heavy tool calling, fixes hallucination
+profiling_llm = get_llm("advanced")         # Structured data extraction
+sales_llm = get_llm("medium")               # Simple qualification flow
+support_llm = get_llm("medium")             # FAQ-style responses
+final_message_llm = get_llm("basic")        # Template-based (user requested basic)
+quality_check_llm = get_llm("basic")        # Simple validation
+
+# Legacy single LLM (kept for backward compatibility in some tools)
+llm = get_llm("medium")
 
 
 # ============================================================================
@@ -269,7 +283,8 @@ async def orchestrator_node(state: AgentState) -> Dict:
 
     # Use structured output directly (no create_agent needed)
     # Orchestrator doesn't need tools - just makes a routing decision
-    structured_llm = llm.with_structured_output(OrchestratorDecision)
+    # Use advanced model for better routing decisions
+    structured_llm = orchestrator_llm.with_structured_output(OrchestratorDecision)
 
     # Build messages for the LLM
     from langchain_core.messages import SystemMessage, HumanMessage
@@ -414,8 +429,9 @@ async def profiling_node(state: AgentState) -> Dict:
             pass
 
     # Create profiling agent with profiling tools
+    # Use advanced model for better data extraction
     agent = create_agent(
-        model=llm,
+        model=profiling_llm,
         tools=PROFILING_AGENT_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,
@@ -497,8 +513,9 @@ Important:
             pass
 
     # Create sales agent with meeting tools
+    # Use medium model (simple qualification flow)
     agent = create_agent(
-        model=llm,
+        model=sales_llm,
         tools=SALES_AGENT_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,
@@ -546,8 +563,9 @@ async def ecommerce_node(state: AgentState) -> Dict:
             pass
 
     # Create ecommerce agent with product tools
+    # Use advanced model for better tool calling (fixes hallucination issues)
     agent = create_agent(
-        model=llm,
+        model=ecommerce_llm,
         tools=ECOMMERCE_AGENT_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,
@@ -595,8 +613,9 @@ async def support_node(state: AgentState) -> Dict:
             pass
 
     # Create support agent with support tools
+    # Use medium model (FAQ-style responses)
     agent = create_agent(
-        model=llm,
+        model=support_llm,
         tools=SUPPORT_AGENT_TOOLS,
         system_prompt=system_prompt,
         state_schema=AgentState,

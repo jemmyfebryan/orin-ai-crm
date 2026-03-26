@@ -2,22 +2,31 @@
 Quality Check Node - Evaluates AI answers and triggers human takeover if needed
 """
 
-import os
 from datetime import timedelta, timezone
 from typing import Optional
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config
+from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
-from sqlalchemy import update, select
+from sqlalchemy import update
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 
 logger = get_logger(__name__)
-llm = ChatOpenAI(model=llm_config.DEFAULT_MODEL, api_key=os.getenv("OPENAI_API_KEY"))
+
+# ============================================================================
+# TIERED LLM CONFIGURATION FOR QUALITY CHECK NODES
+# ============================================================================
+# Basic model: Fast and cost-effective (quality check, final message)
+quality_llm = get_llm("medium")          # Simple validation pass/fail
+final_message_llm = get_llm("medium")    # Template-based formatting
+# session_detection_llm = get_llm("basic")  # Simple pattern detection
+human_takeover_llm = get_llm("medium")  # Slightly better for handover message
+
+# Legacy single LLM (kept for backward compatibility)
+llm = quality_llm
 WIB = timezone(timedelta(hours=7))
 
 # AGENT_PERSONA is now loaded from database (hana_persona prompt key)
@@ -67,12 +76,19 @@ class AnswerQualityEvaluation(BaseModel):
 
 
 class FinalMessagesResponse(BaseModel):
-    """Multi-bubble final messages for user"""
+    """Multi-bubble final messages for user with session ending detection"""
     messages: list[str] = Field(
         description="List of message strings to be sent as separate chat bubbles. Each should be a complete, standalone message."
     )
     reasoning: str = Field(
         description="Alasan mengapa response dibagi menjadi beberapa bubble"
+    )
+    is_session_ending: bool = Field(
+        description="True jika user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan (terima kasih, sudah jelas, membantu, dll). Lihat CONVERSATION HISTORY untuk user message terakhir."
+    )
+    session_ending_reasoning: str = Field(
+        default="",
+        description="Alasan mengapa ini dikategorikan sebagai session ending (isi hanya jika is_session_ending=True)"
     )
 
 
@@ -164,7 +180,6 @@ RULES:
 - Berikan reasoning yang jelas
 - List missing_info HANYA jika ada informasi KRUSIAL yang hilang (bukan detail kecil)
 
-**PENTING - FORM FLOW DETECTION:**
 Cek conversation history untuk mendeteksi form flow:
 - Jika AI sebelumnya meminta data (ada kata "mohon isi", "tolong isi", "domisili", "kebutuhan", "jumlah unit")
 - Dan user menjawab dengan jawaban SINGKAT (nama kota, angka, kata kunci seperti "jakarta", "surabaya", "1", "5", "pribadi", "perusahaan")
@@ -192,85 +207,85 @@ CONTOH JAWABAN BAIK (is_satisfactory=True, confidence>=0.6):
 - Jawaban yang menjelaskan dengan baik dan ramah
 - **Form acknowledgment**: User isi form data, AI acknowledge dengan sopan → ini SANGAT BAIK, confidence 0.8-1.0"""
 
-    evaluator_llm = llm.with_structured_output(AnswerQualityEvaluation)
+    evaluator_llm = quality_llm.with_structured_output(AnswerQualityEvaluation)
     result = evaluator_llm.invoke([SystemMessage(content=system_prompt)])
 
     return result
 
 
-async def detect_session_ending(
-    customer_id: Optional[int] = None
-) -> SessionEndingDetection:
-    """
-    Detect if user is showing signs of ending the conversation with satisfaction.
+# async def detect_session_ending(
+#     customer_id: Optional[int] = None
+# ) -> SessionEndingDetection:
+#     """
+#     Detect if user is showing signs of ending the conversation with satisfaction.
 
-    Args:
-        customer_id: Customer ID to fetch conversation history
+#     Args:
+#         customer_id: Customer ID to fetch conversation history
 
-    Returns:
-        SessionEndingDetection with is_session_ending flag and reasoning
-    """
-    from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
+#     Returns:
+#         SessionEndingDetection with is_session_ending flag and reasoning
+#     """
+#     from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
 
-    logger.info(f"detect_session_ending called - customer_id: {customer_id}")
+#     logger.info(f"detect_session_ending called - customer_id: {customer_id}")
 
-    # Fetch conversation history
-    conversation_history = []
-    if customer_id:
-        try:
-            chat_history = await get_chat_history(customer_id, limit=5)  # Last 5 messages
-            logger.info(f"Fetched {len(chat_history)} messages for session ending detection")
-            conversation_history = chat_history
-        except Exception as e:
-            logger.error(f"Error fetching chat history for session detection: {e}")
-            conversation_history = []
+#     # Fetch conversation history
+#     conversation_history = []
+#     if customer_id:
+#         try:
+#             chat_history = await get_chat_history(customer_id, limit=5)  # Last 5 messages
+#             logger.info(f"Fetched {len(chat_history)} messages for session ending detection")
+#             conversation_history = chat_history
+#         except Exception as e:
+#             logger.error(f"Error fetching chat history for session detection: {e}")
+#             conversation_history = []
 
-    if not conversation_history:
-        logger.info("No conversation history - cannot detect session ending")
-        return SessionEndingDetection(
-            is_session_ending=False,
-            reasoning="No conversation history available"
-        )
+#     if not conversation_history:
+#         logger.info("No conversation history - cannot detect session ending")
+#         return SessionEndingDetection(
+#             is_session_ending=False,
+#             reasoning="No conversation history available"
+#         )
 
-    # Build conversation context
-    conversation_context = ""
-    for msg in conversation_history:
-        if hasattr(msg, 'message_role') and msg.message_role in ['user', 'ai']:
-            role = "User" if msg.message_role == 'user' else "AI"
-            content = msg.content if hasattr(msg, 'content') else str(msg)
-            conversation_context += f"{role}: {content}\n"
+#     # Build conversation context
+#     conversation_context = ""
+#     for msg in conversation_history:
+#         if hasattr(msg, 'message_role') and msg.message_role in ['user', 'ai']:
+#             role = "User" if msg.message_role == 'user' else "AI"
+#             content = msg.content if hasattr(msg, 'content') else str(msg)
+#             conversation_context += f"{role}: {content}\n"
 
-    system_prompt = f"""TASK:
-Deteksi apakah user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan.
+#     system_prompt = f"""TASK:
+# Deteksi apakah user menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan.
 
-CONVERSATION HISTORY (last 5 messages):
-{conversation_context}
+# CONVERSATION HISTORY (last 5 messages):
+# {conversation_context}
 
-SESSION ENDING INDICATORS:
-User menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan:
-- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
-- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
-- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
-- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
+# SESSION ENDING INDICATORS:
+# User menunjukkan tanda-tanda ingin mengakhiri percakapan dengan ekspresi kepuasan:
+# - User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
+# - User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
+# - User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
+# - User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
 
-CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
-- "Baik terima kasih kak"
-- "Sangat membantu, thanks"
-- "Oke kak terima kasih"
-- "Makasih ya"
-- "Sudah jelas, terima kasih"
-- "Puas sama pelayanannya, thanks"
+# CONTOH USER MESSAGE YANG MENUNJUKKAN SESSION ENDING:
+# - "Baik terima kasih kak"
+# - "Sangat membantu, thanks"
+# - "Oke kak terima kasih"
+# - "Makasih ya"
+# - "Sudah jelas, terima kasih"
+# - "Puas sama pelayanannya, thanks"
 
-RULES:
-- Set is_session_ending = True JIKA user message terakhir jelas menunjukkan session ending
-- Set is_session_ending = False JIKA user masih bertanya, meminta info, atau tidak ada tanda puas
-- Berikan reasoning yang jelas"""
+# RULES:
+# - Set is_session_ending = True JIKA user message terakhir jelas menunjukkan session ending
+# - Set is_session_ending = False JIKA user masih bertanya, meminta info, atau tidak ada tanda puas
+# - Berikan reasoning yang jelas"""
 
-    detector_llm = llm.with_structured_output(SessionEndingDetection)
-    result = detector_llm.invoke([SystemMessage(content=system_prompt)])
+#     detector_llm = session_detection_llm.with_structured_output(SessionEndingDetection)
+#     result = detector_llm.invoke([SystemMessage(content=system_prompt)])
 
-    logger.info(f"Session ending detection: is_session_ending={result.is_session_ending}, reasoning: {result.reasoning}")
-    return result
+#     logger.info(f"Session ending detection: is_session_ending={result.is_session_ending}, reasoning: {result.reasoning}")
+#     return result
 
 
 async def generate_human_takeover_message(
@@ -313,7 +328,7 @@ RULES:
 - Jangan buat customer merasa buruk karena pertanyaannya tidak terjawab
 Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
-    response = llm.invoke([SystemMessage(content=system_prompt)])
+    response = human_takeover_llm.invoke([SystemMessage(content=system_prompt)])
 
     return response.content
 
@@ -477,7 +492,7 @@ async def node_final_message(state: AgentState):
     Returns:
         Updated state with final_messages (list of strings for multi-bubble chat)
     """
-    from langchain_core.messages import ToolMessage, HumanMessage
+    from langchain_core.messages import HumanMessage
     from src.orin_ai_crm.core.agents.tools.db_tools import get_chat_history
 
     logger.info("=" * 50)
@@ -500,7 +515,7 @@ async def node_final_message(state: AgentState):
     db_conversation_summary = ""
     if customer_id:
         try:
-            chat_history = await get_chat_history(customer_id, limit=8)  # Last 8 messages
+            chat_history = await get_chat_history(customer_id, limit=5)  # Last 8 messages
             logger.info(f"Fetched {len(chat_history)} messages from database for customer {customer_id}")
 
             # Build summary from database (pure WhatsApp messages)
@@ -520,7 +535,7 @@ async def node_final_message(state: AgentState):
     current_execution_summary = ""
     messages = state.get("messages", [])
 
-    for msg in messages:
+    for msg in messages[-5:]:
         if isinstance(msg, HumanMessage):
             current_execution_summary += f"User: {msg.content}\n\n"
         elif isinstance(msg, AIMessage):
@@ -544,39 +559,6 @@ async def node_final_message(state: AgentState):
 {current_execution_summary}
 """
 
-    # Build form instructions if needed
-    form_instructions = ""
-    if send_form:
-        # Check which fields are missing
-        missing_fields = []
-        if not customer_data.get("name"):
-            missing_fields.append("- Nama")
-        if not customer_data.get("domicile"):
-            missing_fields.append("- Domisili/kota")
-        if not customer_data.get("vehicle_alias"):
-            missing_fields.append("- Jenis kendaraan (mobil, motor, truk, dll)")
-        if not customer_data.get("unit_qty") or customer_data.get("unit_qty") == 0:
-            missing_fields.append("- Jumlah unit")
-        if not customer_data.get("is_b2b"):
-            missing_fields.append("- Kebutuhan (pribadi, perusahaan, operasional, dll)")
-
-        if missing_fields:
-            # Get agent name for dynamic messaging
-            agent_name = get_agent_name()
-            form_instructions = f"""
-
-TAMBAHKAN FORM DATA UNTUK PESAN KEPADA USER (1 Form untuk 1 Bubble Chat):
-Supaya {agent_name} bisa kasih penawaran yang lebih pas, tolong lengkapi data berikut:
-{chr(10).join(missing_fields)}
-
-Contoh format yang bisa digunakan:
-"Nama: Budi
-Domisili: Jakarta
-Jenis kendaraan: Mobil
-Jumlah unit: 2
-Kebutuhan: Pribadi"
-"""
-
     # Load persona from DB
     agent_persona = await get_agent_persona()
 
@@ -596,7 +578,6 @@ CUSTOMER PROFILE:
 - Kendaraan: {customer_data.get('vehicle_alias', 'Belum diketahui')}
 - Jumlah Unit: {customer_data.get('unit_qty', 0)}
 - B2B: {customer_data.get('is_b2b', False)}
-{form_instructions}
 
 IMAGES_SENT: {bool(state.get("send_images"))}
 PDFS_SENT: {bool(state.get("send_pdfs"))}
@@ -633,24 +614,57 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 7. If this is your first message with customer (empty conversation history), introduce yourself
 8. No need to include any image&pdf url/name in the text (see IMAGES_SENT & PDFS_SENT)
 9. Do not make up any information if it's not stated in the conversation history
-10. Pastikan formatting markdown WhatsApp-compatible (lihat aturan di atas)"""
+10. Make sure the formatting is WhatsApp-compatible (lihat aturan di atas)
 
-    # Use LLM with structured output to generate multi-bubble response
-    final_messages_llm = llm.with_structured_output(FinalMessagesResponse)
-    result = final_messages_llm.invoke([SystemMessage(content=system_prompt)])
+========================
+SESSION ENDING DETECTION
+========================
+Cek CONVERSATION HISTORY di atas, khususnya user message terakhir.
+
+SESSION ENDING INDICATORS (set is_session_ending = True JIKA user message terakhir menunjukkan):
+- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
+- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
+- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
+- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
+
+RULES:
+1. Set is_session_ending = True HANYA jika user message terakhir jelas menunjukkan session ending (lihat CONVERSATION HISTORY)
+2. Set is_session_ending = False JIKA user masih bertanya, meminta info, atau tidak ada tanda puas
+3. Jika is_session_ending = True, isi session_ending_reasoning dengan alasan yang jelas
+4. Jika is_session_ending = False, biarkan session_ending_reasoning kosong (default "")
+5. Pastikan untuk membaca CONVERSATION HISTORY dengan seksama sebelum menentukan is_session_ending"""
+
+    # Use LLM with structured output to generate multi-bubble response with session ending detection
+    # Use basic model (user requested for final message)
+    # Single LLM call for both message generation AND session ending detection
+    final_messages_llm_structured = final_message_llm.with_structured_output(FinalMessagesResponse)
+    result: FinalMessagesResponse = final_messages_llm_structured.invoke([SystemMessage(content=system_prompt)])
 
     logger.info(f"Generated {len(result.messages)} message bubbles")
     logger.info(f"Reasoning: {result.reasoning}")
-
-    # Detect if user is showing session ending signals (satisfaction)
-    session_detection = await detect_session_ending(customer_id)
-    logger.info(f"Session ending detection: is_session_ending={session_detection.is_session_ending}, reasoning: {session_detection.reasoning}")
+    logger.info(f"Session ending detection: is_session_ending={result.is_session_ending}, reasoning: {result.session_ending_reasoning}")
 
     final_messages = result.messages
 
-    # If session ending detected, append review request message
-    if session_detection.is_session_ending:
-        logger.info("Appending review request message to final messages")
+    # Append form message if send_form = True (BEFORE session ending message)
+    if send_form:
+        logger.info("send_form=True - appending form message to final messages")
+        form_message = f"""Supaya {agent_name} bisa kasih penawaran yang lebih pas, tolong lengkapi data berikut:
+
+Nama: ...
+Domisili: ...
+Jenis kendaraan: ...
+Jumlah unit: ...
+Kebutuhan: ...
+
+Terima kasih kak 😊"""
+
+        final_messages.append(form_message)
+        logger.info(f"Total messages after appending form: {len(final_messages)}")
+
+    # If session ending detected (from the same LLM call), append review request message
+    if result.is_session_ending:
+        logger.info("Session ending detected - appending review request message to final messages")
         review_message = """Bila Kakak puas dengan pelayanan kami di VASTEL / ORIN, kami harap Kakak berkenan meluangkan 30 detik saja untuk memberi kami bintang 5 di salah satu platform ini:
 
 *Google Reviews*

@@ -536,7 +536,12 @@ async def get_all_active_products() -> dict:
         logger.info(f"Retrieved {len(product_list)} active products")
         return {
             'products': product_list,
-            'count': len(product_list)
+            'count': len(product_list),
+            '_agent_instructions': """You might use the returned data to call additional tools:
+- Customer asks for LINKS/TOKOPEDIA/SHOPEE → Call get_ecommerce_links(product_id) for each product
+- Customer asks for DETAILS/SPECS → Call get_product_details(product_id) for specific product
+- Customer asks for IMAGES → Call send_product_images(sort_orders=[...]) with sort_order values
+- Customer asks for CATALOG → Call send_catalog() to send PDF catalog"""
         }
 
 
@@ -1324,24 +1329,16 @@ async def get_pending_inquiry(customer_id: int) -> dict:
 
 @tool
 async def send_product_images(
-    sort_orders: Annotated[List[int], "List of product sort_order values (1-9) to send images for"],
+    sort_orders: Annotated[List[int], "List of product sort_order s to send images for"],
     state: Annotated[dict, InjectedState]
 ) -> str:
     """
     Send product images to customer.
+    Before use this tools, make sure you've called get_all_active_products tools to get the sort_order of products you want to send the images.
 
-    CRITICAL: Call get_all_active_products FIRST to get sort_order values.
-
-    Use this tool when:
-    - Customer asks "kirim gambar", "foto", "liat tampilan"
-    - Customer wants to see product photos
-    - Customer is interested in specific products
-
-    Args:
-        sort_orders: List of sort_order values from get_all_active_products (max 3)
-
-    Returns:
-        JSON with update_state containing send_images list
+    Call this tool if customer ask about a specific product.
+    
+    Returns JSON with update_state containing send_images list.
     """
     logger.info(f"TOOL: send_product_images - sort_orders: {sort_orders}")
 

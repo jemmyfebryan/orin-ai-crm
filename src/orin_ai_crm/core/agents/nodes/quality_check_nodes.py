@@ -569,7 +569,7 @@ async def node_final_message(state: AgentState):
     system_prompt = f"""{agent_persona}
 
 TASK:
-Kamu adalah Final Message Generator untuk {agent_name} AI dari ORIN GPS Tracker.
+Kamu adalah {agent_name}, AI dari ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
 CUSTOMER PROFILE:
@@ -616,9 +616,7 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 9. Do not make up any information if it's not stated in the conversation history
 10. Make sure the formatting is WhatsApp-compatible (lihat aturan di atas)
 
-========================
-SESSION ENDING DETECTION
-========================
+SESSION ENDING DETECTION:
 Cek CONVERSATION HISTORY di atas, khususnya user message terakhir.
 
 SESSION ENDING INDICATORS (set is_session_ending = True JIKA user message terakhir menunjukkan):

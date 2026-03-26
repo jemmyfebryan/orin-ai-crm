@@ -65,8 +65,8 @@ Customer Context:
 Agents Already Called: {agents_called}
 Current Step: {orchestrator_step} / {max_orchestrator_steps}
 
-Recent Conversation:
-{conversation_history}
+Current Agent State
+{state}
 
 === BUSINESS RULES (Usually Follow, Can Break if Intent Clear) ===
 

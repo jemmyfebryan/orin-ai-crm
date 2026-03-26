@@ -48,6 +48,7 @@ from pydantic import BaseModel, Field
 
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
+from langchain.agents import create_agent
 
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.logger import get_logger
@@ -246,11 +247,11 @@ async def orchestrator_node(state: AgentState) -> Dict:
     customer_data = state.get('customer_data', {})
     messages = state.get('messages', [])
 
-    # Build conversation summary (last 10 messages for context)
-    conversation_summary = "\n".join([
-        f"{msg.type}: {msg.content[:100]}..."
-        for msg in messages[-10:] if hasattr(msg, 'content')
-    ])
+    # # Build conversation summary (last 10 messages for context)
+    # conversation_summary = "\n".join([
+    #     f"{msg.type}: {msg.content[:100]}..."
+    #     for msg in messages[-10:] if hasattr(msg, 'content')
+    # ])
 
     # Get orchestrator prompt from DB
     system_prompt = await get_prompt_from_db("hana_orchestrator_agent")
@@ -274,7 +275,7 @@ async def orchestrator_node(state: AgentState) -> Dict:
             agents_called=agents_called,
             orchestrator_step=step,
             max_orchestrator_steps=max_steps,
-            conversation_history=conversation_summary
+            state=state,
         )
     except KeyError as e:
         logger.error(f"Missing variable in orchestrator prompt: {e}")
@@ -392,8 +393,6 @@ async def profiling_node(state: AgentState) -> Dict:
     This is the PROFILING agent - handles customer onboarding,
     data collection, and profile updates.
     """
-    from langchain.agents import create_agent
-
     logger.info("ENTER: profiling_node")
 
     # === CRITICAL: Load customer profile FIRST (before LLM) ===
@@ -478,8 +477,6 @@ async def sales_node(state: AgentState) -> Dict:
     2. If YES → trigger human takeover (live agents handle meetings)
     3. If NO → continue to ecommerce for product recommendations
     """
-    from langchain.agents import create_agent
-
     logger.info("ENTER: sales_node")
 
     # Get sales agent prompt from database
@@ -543,8 +540,6 @@ async def ecommerce_node(state: AgentState) -> Dict:
     """
     Ecommerce node - handles B2C and small order product inquiries.
     """
-    from langchain.agents import create_agent
-
     logger.info("ENTER: ecommerce_node")
 
     # Get ecommerce agent prompt from database
@@ -593,8 +588,6 @@ async def support_node(state: AgentState) -> Dict:
     """
     Support node - handles complaints, technical support, and issues.
     """
-    from langchain.agents import create_agent
-
     logger.info("ENTER: support_node")
 
     # Get support agent prompt from database

@@ -86,6 +86,8 @@ async def process_chat_request(
             history.append(HumanMessage(content=row.content))
         else:
             history.append(AIMessage(content=row.content))
+    ## Append current message as history too
+    history.append(HumanMessage(content=message))
 
     # 3. Load customer data
     customer_data = {

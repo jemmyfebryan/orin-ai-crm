@@ -511,52 +511,55 @@ async def node_final_message(state: AgentState):
     # 1. Database history (real WhatsApp messages) - for conversation flow context
     # 2. State messages (current execution) - for tool results and what just happened
 
-    # PART 1: Get WhatsApp conversation history from database
-    db_conversation_summary = ""
-    if customer_id:
-        try:
-            chat_history = await get_chat_history(customer_id, limit=5)  # Last 8 messages
-            logger.info(f"Fetched {len(chat_history)} messages from database for customer {customer_id}")
+    # # PART 1: Get WhatsApp conversation history from database
+    # db_conversation_summary = ""
+    # if customer_id:
+    #     try:
+    #         chat_history = await get_chat_history(customer_id, limit=5)  # Last 8 messages
+    #         logger.info(f"Fetched {len(chat_history)} messages from database for customer {customer_id}")
 
-            # Build summary from database (pure WhatsApp messages)
-            for msg in chat_history:
-                role = msg.message_role  # 'user' or 'ai'
-                content = msg.content
-                role_display = "User" if role == "user" else "AI"
-                db_conversation_summary += f"{role_display}: {content}\n\n"
+    #         # Build summary from database (pure WhatsApp messages)
+    #         for msg in chat_history:
+    #             role = msg.message_role  # 'user' or 'ai'
+    #             content = msg.content
+    #             role_display = "User" if role == "user" else "AI"
+    #             db_conversation_summary += f"{role_display}: {content}\n\n"
 
-            logger.info(f"Built DB conversation summary: {len(chat_history)} messages")
-        except Exception as e:
-            logger.error(f"Error fetching chat history from DB: {e}")
-            db_conversation_summary = "(Error loading conversation history)"
+    #         logger.info(f"Built DB conversation summary: {len(chat_history)} messages")
+    #     except Exception as e:
+    #         logger.error(f"Error fetching chat history from DB: {e}")
+    #         db_conversation_summary = "(Error loading conversation history)"
 
-    # PART 2: Get current workflow execution from state
-    # Filter to show what happened in THIS interaction (tool calls + latest messages)
-    current_execution_summary = ""
-    messages = state.get("messages", [])
+    # # PART 2: Get current workflow execution from state
+    # # Filter to show what happened in THIS interaction (tool calls + latest messages)
+    # current_execution_summary = ""
+    # messages = state.get("messages", [])
 
-    for msg in messages[-5:]:
-        if isinstance(msg, HumanMessage):
-            current_execution_summary += f"User: {msg.content}\n\n"
-        elif isinstance(msg, AIMessage):
-            # Include AIMessage content (actual responses)
-            if msg.content and msg.content.strip():
-                current_execution_summary += f"AI: {msg.content}\n\n"
-            # Include tool calls for transparency
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                for tool_call in msg.tool_calls:
-                    tool_name = tool_call.get('name', 'unknown_tool')
-                    current_execution_summary += f"[AI called tool: {tool_name}]\n"
+    # for msg in messages[-5:]:
+    #     if isinstance(msg, HumanMessage):
+    #         current_execution_summary += f"User: {msg.content}\n\n"
+    #     elif isinstance(msg, AIMessage):
+    #         # Include AIMessage content (actual responses)
+    #         if msg.content and msg.content.strip():
+    #             current_execution_summary += f"AI: {msg.content}\n\n"
+    #         # Include tool calls for transparency
+    #         if hasattr(msg, 'tool_calls') and msg.tool_calls:
+    #             for tool_call in msg.tool_calls:
+    #                 tool_name = tool_call.get('name', 'unknown_tool')
+    #                 current_execution_summary += f"[AI called tool: {tool_name}]\n"
 
-    logger.info(f"Built current execution summary: {len(messages)} recent messages")
+    # logger.info(f"Built current execution summary: {len(messages)} recent messages")
+    
+    messages_history = state.get("messages_history")[-5:]
+    workflow_messages = state.get("messages")
 
     # PART 3: Combine both summaries
     # Start with DB history for context, then add current execution
     conversation_summary = f"""=== WHATSAPP CONVERSATION HISTORY ===
-{db_conversation_summary}
+{messages_history}
 
-=== AI AGENT WORKFLOW INTERNAL CONVERSATION ===
-{current_execution_summary}
+=== AI AGENT WORKFLOW INTERNAL MESSAGES RESULT ===
+{workflow_messages}
 """
 
     # Load persona from DB
@@ -569,7 +572,7 @@ async def node_final_message(state: AgentState):
     system_prompt = f"""{agent_persona}
 
 TASK:
-Kamu adalah {agent_name}, AI dari ORIN GPS Tracker.
+Kamu adalah {agent_name} ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
 CUSTOMER PROFILE:
@@ -579,6 +582,7 @@ CUSTOMER PROFILE:
 - Jumlah Unit: {customer_data.get('unit_qty', 0)}
 - B2B: {customer_data.get('is_b2b', False)}
 
+FORM_SENT: {bool(send_form)} {"(No need to send customer profile-related question)" if send_form else ""}
 IMAGES_SENT: {bool(state.get("send_images"))}
 PDFS_SENT: {bool(state.get("send_pdfs"))}
 

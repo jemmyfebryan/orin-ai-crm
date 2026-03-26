@@ -484,15 +484,15 @@ Generate ONLY the SQL query, no explanation."""
 @tool
 async def get_all_active_products() -> dict:
     """
-    Get all active products from database.
+    Get all active products with basic info (id, name, sort_order).
 
-    Use this tool when:
-    - Need product information for recommendations
-    - Customer asks about available products
-    - Building product context for LLM
+    CALL THIS TOOL FIRST when:
+    - Customer asks about products, harga, atau "ada apa aja"
+    - Need to find product IDs for other tools (send_product_images, get_product_details, get_ecommerce_links)
+    - Any product-related question starts here
 
     Returns:
-        dict with: products (list of product dicts), count (int)
+        dict with: products (list), count (int)
     """
     logger.info("TOOL: get_all_active_products")
 
@@ -615,11 +615,15 @@ async def search_products(
 @tool
 async def get_product_details(product_id: int) -> dict:
     """
-    Get detailed information about a specific product.
+    Get FULL product details (specs, features, price, links).
 
-    Use this tool when:
-    - Customer asks about specific product details
-    - Need full product information including specs, features, links
+    Use this tool AFTER get_all_active_products when:
+    - Customer asks detailed specs of a specific product
+    - Customer wants complete feature list
+    - Need ecommerce_links or detailed compatibility info
+
+    Args:
+        product_id: Product ID from get_all_active_products
 
     Returns:
         dict with complete product information
@@ -737,12 +741,15 @@ Response HANYA dengan jawaban yang akan dikirim ke customer."""
 @tool
 async def get_ecommerce_links(product_id: int) -> dict:
     """
-    Get e-commerce purchase links for a product.
+    Get purchase links (Tokopedia, Shopee, etc) for a product.
 
     Use this tool when:
-    - Customer wants to buy a product
-    - Customer asks for purchase links
-    - Need to provide Tokopedia/Shopee links
+    - Customer asks "cara beli", "link beli", "toko", "tokopedia", "shopee"
+    - Customer wants to purchase
+    - Customer asks where to buy
+
+    Args:
+        product_id: Product ID from get_all_active_products
 
     Returns:
         dict with: product_name (str), links (dict with platform: url)
@@ -954,7 +961,19 @@ Response HANYA dengan rekomendasi yang akan dikirim ke customer."""
 
 @tool
 async def get_products_by_category(category: str) -> dict:
-    """Get products by category (TANAM/INSTAN)"""
+    """
+    Get products by installation category.
+
+    Use this tool when customer mentions:
+    - "tanam" or "pasang" → category="TANAM"
+    - "instan" or "colok" or "obd" → category="INSTAN"
+
+    Args:
+        category: "TANAM" or "INSTAN"
+
+    Returns:
+        dict with: products (list), count (int)
+    """
     logger.info(f"TOOL: get_products_by_category - category: {category}")
 
     async with AsyncSessionLocal() as db:
@@ -995,7 +1014,20 @@ async def get_products_by_category(category: str) -> dict:
 
 @tool
 async def get_products_by_vehicle_type(vehicle_type: str) -> dict:
-    """Get products by vehicle type (mobil, motor, truk, alat berat, dll)"""
+    """
+    Get products filtered by vehicle type.
+
+    Use this tool when customer mentions:
+    - "mobil", "car" → vehicle_type="mobil"
+    - "motor", "motorcycle" → vehicle_type="motor"
+    - "truk", "truck" → vehicle_type="truk"
+
+    Args:
+        vehicle_type: "mobil", "motor", "truk", "alat berat"
+
+    Returns:
+        dict with: products (list), count (int)
+    """
     logger.info(f"TOOL: get_products_by_vehicle_type - vehicle: {vehicle_type}")
 
     async with AsyncSessionLocal() as db:
@@ -1292,16 +1324,24 @@ async def get_pending_inquiry(customer_id: int) -> dict:
 
 @tool
 async def send_product_images(
-    sort_orders: Annotated[List[int], "List of product sort_order s to send images for"],
+    sort_orders: Annotated[List[int], "List of product sort_order values (1-9) to send images for"],
     state: Annotated[dict, InjectedState]
 ) -> str:
     """
     Send product images to customer.
-    Before use this tools, make sure you've called get_all_active_products tools to get the sort_order of products you want to send the images.
 
-    Call this tool if customer ask about a specific product.
-    
-    Returns JSON with update_state containing send_images list.
+    CRITICAL: Call get_all_active_products FIRST to get sort_order values.
+
+    Use this tool when:
+    - Customer asks "kirim gambar", "foto", "liat tampilan"
+    - Customer wants to see product photos
+    - Customer is interested in specific products
+
+    Args:
+        sort_orders: List of sort_order values from get_all_active_products (max 3)
+
+    Returns:
+        JSON with update_state containing send_images list
     """
     logger.info(f"TOOL: send_product_images - sort_orders: {sort_orders}")
 
@@ -1356,17 +1396,24 @@ async def send_product_images(
     })
 
 
+@tool
 async def send_catalog(
     state: Annotated[dict, InjectedState]
 ) -> str:
     """
     Send product catalog PDF to customer.
-    
-    Call this tool if user want to see the catalog or the product is not specific. If the product interest specific, use send_product_images instead.
 
-    Don't call this tool if we had sent the catalog in the chat history before.
+    Use this tool when:
+    - Customer asks for catalog, brochure, or "all products"
+    - Customer wants to browse products generally (not specific product)
+    - Customer says "kirim katalog", "lihat semua produk", "mau lihat dulu"
 
-    Returns JSON with update_state containing send_pdfs list.
+    DO NOT use this tool:
+    - If customer asks about SPECIFIC product (use send_product_images instead)
+    - If catalog was already sent in this conversation
+
+    Returns:
+        JSON with update_state containing send_pdfs list
     """
     logger.info("TOOL: send_catalog")
 

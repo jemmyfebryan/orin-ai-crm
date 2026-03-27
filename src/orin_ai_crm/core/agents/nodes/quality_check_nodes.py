@@ -549,8 +549,12 @@ async def node_final_message(state: AgentState):
     #                 current_execution_summary += f"[AI called tool: {tool_name}]\n"
 
     # logger.info(f"Built current execution summary: {len(messages)} recent messages")
-    
-    messages_history = state.get("messages_history")[-5:]
+
+    messages_history = state.get("messages_history")
+    if messages_history:
+        messages_history = messages_history[-5:]
+    else:
+        messages_history = []
     workflow_messages = state.get("messages")
 
     # PART 3: Combine both summaries

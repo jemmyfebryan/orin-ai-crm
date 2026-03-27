@@ -43,6 +43,7 @@ IMPORTANT ARCHITECTURAL CHANGE:
 """
 
 import os
+import asyncio
 from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -51,6 +52,7 @@ from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 
 from src.orin_ai_crm.core.models.schemas import AgentState
+from src.orin_ai_crm.core.agents.custom.hana_agent.custom_agent import create_custom_agent
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.agents.tools.agent_tools import (
@@ -89,6 +91,48 @@ quality_check_llm = get_llm("basic")        # Simple validation
 
 # Legacy single LLM (kept for backward compatibility in some tools)
 llm = get_llm("medium")
+
+
+# ============================================================================
+# CUSTOM AGENT REACT PROMPTS
+# ============================================================================
+# These prompts control how agents decide which tools to call and when to stop
+
+ECOMMERCE_REACT_PROMPT = """
+You are an ecommerce assistant helping customers with product information.
+
+IMPORTANT TOOL CALLING STRATEGY:
+When a customer asks about products, links, images, or details:
+1. FIRST call get_all_active_products to see available products
+2. THEN call additional tools based on what the customer needs:
+   - Links/Tokopedia/Shopee → call get_ecommerce_links for each product
+   - Images → call send_product_images with sort_orders (max 3 images)
+   - Details/Specs → call get_product_details for specific products
+   - Catalog → call send_catalog
+
+CRITICAL - DO NOT STOP AFTER FIRST TOOL:
+Many customers ask general questions like "ada linknya?" or "ada gambarnya?"
+- Just because you called get_all_active_products DOES NOT mean you're done
+- If customer asks for links, YOU MUST call get_ecommerce_links for each product
+- If customer asks for images, YOU MUST call send_product_images
+- Read the _agent_instructions in tool outputs - they tell you what to do next
+
+When to Stop:
+- Only stop after you've called ALL relevant tools for the customer's request
+- Customer asking "ada linknya?" → get_all_active_products → get_ecommerce_links → STOP
+- Customer asking "ada gambarnya?" → get_all_active_products → send_product_images → STOP
+- Customer asking "detail produk X" → get_product_details(X) → STOP
+
+Examples:
+- User: "ada linknya?"
+  → Call get_all_active_products → Call get_ecommerce_links for products 1,2,3 → STOP
+
+- User: "ada gambarnya?"
+  → Call get_all_active_products → Call send_product_images(sort_orders=[1,2,3]) → STOP
+
+- User: "detail ORIN A1"
+  → Call get_product_details(product_id=1) → STOP
+"""
 
 
 # ============================================================================
@@ -263,6 +307,32 @@ async def orchestrator_node(state: AgentState) -> Dict:
     agent_name = get_agent_name()
 
     # Fill in context variables
+    # Build a concise state summary instead of dumping entire state
+    state_summary = f"""
+Messages in conversation: {len(messages)}
+Customer ID: {state.get('customer_id', 'N/A')}
+Send Form: {state.get('send_form', False)}
+Human Takeover: {state.get('human_takeover', False)}
+Last 3 messages:
+"""
+    # Add last 3 messages to summary
+    for msg in messages[-3:]:
+        if hasattr(msg, 'type'):
+            msg_type = msg.type
+        elif isinstance(msg, dict):
+            msg_type = msg.get('type', msg.get('role', 'unknown'))
+        else:
+            msg_type = 'unknown'
+
+        if hasattr(msg, 'content'):
+            content = msg.content[:100]
+        elif isinstance(msg, dict):
+            content = str(msg.get('content', ''))[:100]
+        else:
+            content = str(msg)[:100]
+
+        state_summary += f"- [{msg_type}] {content}...\n"
+
     try:
         system_prompt = system_prompt.format(
             agent_name=agent_name,
@@ -275,7 +345,7 @@ async def orchestrator_node(state: AgentState) -> Dict:
             agents_called=agents_called,
             orchestrator_step=step,
             max_orchestrator_steps=max_steps,
-            state=state,
+            state=state_summary,  # Provide concise summary instead of full state
         )
     except KeyError as e:
         logger.error(f"Missing variable in orchestrator prompt: {e}")
@@ -302,8 +372,20 @@ async def orchestrator_node(state: AgentState) -> Dict:
         HumanMessage(content=latest_user_message or "Hello")
     ]
 
-    # Invoke the LLM with structured output
-    decision = await structured_llm.ainvoke(messages_for_llm)
+    # Invoke the LLM with structured output (with timeout)
+    try:
+        decision = await asyncio.wait_for(
+            structured_llm.ainvoke(messages_for_llm),
+            timeout=30.0  # 30 second timeout for orchestrator decision
+        )
+    except asyncio.TimeoutError:
+        logger.error(f"Orchestrator LLM timeout after 30s at step {step}, forcing 'final' decision")
+        # Create a fallback decision to go to final
+        decision = OrchestratorDecision(
+            next_agent="final",
+            reasoning=f"Orchestrator timeout at step {step}/{max_steps}",
+            plan="Proceeding to final message due to timeout"
+        )
 
     # Extract decision from validated OrchestratorDecision object
     next_agent = decision.next_agent
@@ -558,12 +640,14 @@ async def ecommerce_node(state: AgentState) -> Dict:
             pass
 
     # Create ecommerce agent with product tools
-    # Use advanced model for better tool calling (fixes hallucination issues)
-    agent = create_agent(
+    # Use custom agent with separate react prompt for better tool calling behavior
+    agent = create_custom_agent(
         model=ecommerce_llm,
         tools=ECOMMERCE_AGENT_TOOLS,
         system_prompt=system_prompt,
+        react_prompt=ECOMMERCE_REACT_PROMPT,
         state_schema=AgentState,
+        debug=False,
     )
 
     # Invoke the agent with current state

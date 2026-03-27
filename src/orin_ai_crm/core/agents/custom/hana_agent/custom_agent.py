@@ -135,6 +135,7 @@ Respond to the user in a friendly, helpful manner.
             logger.info(f"ENTER: agent_node with {len(state.get('messages', []))} messages")
 
         messages = state.get("messages", [])
+        messages_history = state.get("messages_history", [])
 
         # Build messages for LLM
         # Start with system prompt
@@ -144,7 +145,14 @@ Respond to the user in a friendly, helpful manner.
         combined_system = f"{system_prompt}\n\n{react_prompt}"
         all_messages.append(SystemMessage(content=combined_system))
 
-        # Add existing messages (skip SystemMessages to avoid duplicates)
+        # IMPORTANT: Add messages_history FIRST for conversation context
+        # Then add current messages
+        # This ensures LLM has context when user says "produknya" (the product)
+        for msg in messages_history:
+            if not isinstance(msg, SystemMessage):
+                all_messages.append(msg)
+
+        # Add current messages (skip SystemMessages to avoid duplicates)
         for msg in messages:
             if not isinstance(msg, SystemMessage):
                 all_messages.append(msg)

@@ -34,8 +34,8 @@ DEFAULT_PRODUCTS = [
         "tracking_type": "GPS Satelit",
         "monthly_fee": "25rb/bulan",
         "ecommerce_links": {
-            "tokopedia": "https://id.shp.ee/5mJ3NnE",
-            "shopee": "https://tk.tokopedia.com/ZSa1x5Rpd/"
+            "tokopedia": "https://tk.tokopedia.com/ZSuoPBGPs/",
+            "shopee": "https://id.shp.ee/5mJ3NnE"
         },
         "specifications": {
             "kuota_awal": "Gratis 1 bulan",
@@ -68,7 +68,7 @@ DEFAULT_PRODUCTS = [
         "tracking_type": "GPS Satelit",
         "monthly_fee": "25rb/bulan",
         "ecommerce_links": {
-            "tokopedia": "https://tk.tokopedia.com/ZSfrb4RGp/",
+            "tokopedia": "https://tk.tokopedia.com/ZSuofHsQF/",
             "tiktokshop": "https://vt.tokopedia.com/t/ZSHw7cTrBkss4-Of0ut/",
             "shopee": "https://id.shp.ee/gmGRm9J"
         },

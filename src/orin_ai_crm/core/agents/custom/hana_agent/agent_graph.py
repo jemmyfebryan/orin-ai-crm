@@ -298,12 +298,11 @@ async def orchestrator_node(state: AgentState) -> Dict:
     # Get customer context
     customer_data = state.get('customer_data', {})
     messages = state.get('messages', [])
+    messages_history = state.get('messages_history', [])
 
-    # # Build conversation summary (last 10 messages for context)
-    # conversation_summary = "\n".join([
-    #     f"{msg.type}: {msg.content[:100]}..."
-    #     for msg in messages[-10:] if hasattr(msg, 'content')
-    # ])
+    # Combine messages_history + messages for full conversation context
+    # This is CRITICAL for understanding responses like "boleh" (yes) to previous questions
+    all_messages = list(messages_history) + list(messages)
 
     # Get orchestrator prompt from DB
     system_prompt = await get_prompt_from_db("hana_orchestrator_agent")
@@ -316,15 +315,16 @@ async def orchestrator_node(state: AgentState) -> Dict:
 
     # Fill in context variables
     # Build a concise state summary instead of dumping entire state
+    # Include LAST 5 MESSAGES from full conversation (history + current)
     state_summary = f"""
-Messages in conversation: {len(messages)}
+Total messages in conversation (history + current): {len(all_messages)}
 Customer ID: {state.get('customer_id', 'N/A')}
 Send Form: {state.get('send_form', False)}
 Human Takeover: {state.get('human_takeover', False)}
-Last 3 messages:
+Last 5 messages from full conversation:
 """
-    # Add last 3 messages to summary
-    for msg in messages[-3:]:
+    # Add last 5 messages from combined history + current
+    for msg in all_messages[-5:]:
         if hasattr(msg, 'type'):
             msg_type = msg.type
         elif isinstance(msg, dict):
@@ -333,11 +333,11 @@ Last 3 messages:
             msg_type = 'unknown'
 
         if hasattr(msg, 'content'):
-            content = msg.content[:100]
+            content = msg.content[:150]
         elif isinstance(msg, dict):
-            content = str(msg.get('content', ''))[:100]
+            content = str(msg.get('content', ''))[:150]
         else:
-            content = str(msg)[:100]
+            content = str(msg)[:150]
 
         state_summary += f"- [{msg_type}] {content}...\n"
 
@@ -366,19 +366,55 @@ Last 3 messages:
     structured_llm = orchestrator_llm.with_structured_output(OrchestratorDecision)
 
     # Build messages for the LLM
-    from langchain_core.messages import SystemMessage, HumanMessage
+    from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 
-    # Get the latest human message for context
-    latest_user_message = ""
-    for msg in reversed(messages):
-        if hasattr(msg, 'type') and msg.type == "human":
-            latest_user_message = msg.content
-            break
+    # CRITICAL: Pass actual conversation messages to LLM for proper context
+    # Include messages_history + current messages so LLM sees full conversation
+    # This is essential for understanding responses like "boleh" (yes/okay)
+    messages_for_llm = [SystemMessage(content=system_prompt)]
 
-    messages_for_llm = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=latest_user_message or "Hello")
-    ]
+    # Add conversation history (last 5 messages for context)
+    # IMPORTANT: Filter out messages with tool_calls AND ToolMessages to avoid OpenAI API errors
+    # ToolMessages must be filtered because their parent tool_calls messages are also filtered
+    # Orchestrator only needs to see conversation content, not tool execution details
+    for msg in all_messages[-5:]:
+        # Skip messages with tool_calls (they were already executed)
+        if hasattr(msg, 'tool_calls') and msg.tool_calls:
+            continue
+
+        # Skip ToolMessages (responses to already-executed tool calls)
+        if isinstance(msg, ToolMessage):
+            continue
+
+        if isinstance(msg, AIMessage):
+            messages_for_llm.append(msg)
+        elif isinstance(msg, HumanMessage):
+            messages_for_llm.append(msg)
+        # Handle dict format messages
+        elif isinstance(msg, dict):
+            # Skip if it has tool_calls
+            if 'tool_calls' in msg and msg['tool_calls']:
+                continue
+
+            # Skip dict messages with role='tool'
+            role = msg.get('type') or msg.get('role', 'human')
+            if role == 'tool':
+                continue
+
+            content = msg.get('content', '')
+            if role == 'human':
+                messages_for_llm.append(HumanMessage(content=content))
+            else:
+                # For AI messages from dict, create AIMessage without tool_calls
+                messages_for_llm.append(AIMessage(content=content))
+
+    # Log context for debugging
+    if len(all_messages) > 1:
+        logger.info(f"Orchestrator receiving {len(messages_for_llm)} messages (after filtering tool_calls)")
+        for i, msg in enumerate(messages_for_llm[-3:]):  # Show last 3
+            msg_type = msg.type if hasattr(msg, 'type') else 'system'
+            msg_content = msg.content[:80] if hasattr(msg, 'content') else ''
+            logger.info(f"  Context msg {i+1}: [{msg_type}] {msg_content}...")
 
     # Invoke the LLM with structured output (with timeout)
     try:

@@ -44,6 +44,8 @@ IMPORTANT ARCHITECTURAL CHANGE:
 
 import os
 import asyncio
+import json
+import re
 from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
@@ -147,6 +149,54 @@ When to Stop:
 # ORCHESTRATOR DECISION SCHEMA
 # ============================================================================
 
+def extract_json_from_text(text: str) -> str:
+    """
+    Extract JSON object from text that may contain additional content.
+
+    Args:
+        text: Text that contains JSON, possibly with extra text before/after
+
+    Returns:
+        Extracted JSON string, or original text if no JSON found
+    """
+    # Try to find JSON object in the text
+    # Look for opening brace
+    start_idx = text.find("{")
+    if start_idx == -1:
+        return text
+
+    # Count braces to find matching closing brace
+    brace_count = 0
+    in_string = False
+    escape_next = False
+    for i in range(start_idx, len(text)):
+        char = text[i]
+
+        if escape_next:
+            escape_next = False
+            continue
+
+        if char == "\\":
+            escape_next = True
+            continue
+
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+
+        if not in_string:
+            if char == "{":
+                brace_count += 1
+            elif char == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    # Found matching closing brace
+                    return text[start_idx:i+1]
+
+    # If no complete JSON found, return original
+    return text
+
+
 class OrchestratorDecision(BaseModel):
     """Orchestrator routing decision schema with forced output structure."""
     next_agent: Literal["profiling", "sales", "ecommerce", "support", "final"] = Field(
@@ -216,6 +266,14 @@ async def agent_entry_handler(state: AgentState) -> Dict:
 
     logger.info("ENTER: agent_entry_handler")
 
+    # Debug: Check messages list at entry
+    messages_at_entry = state.get('messages', [])
+    # logger.info(f"state.get('messages') has {len(messages_at_entry)} messages at agent_entry_handler")
+    for i, msg in enumerate(messages_at_entry):
+        msg_type = type(msg).__name__
+        content = msg.content[:50] if hasattr(msg, 'content') else 'N/A'
+        logger.info(f"  messages[{i}]: [{msg_type}] {content}...")
+
     # If we don't have customer_id yet, get or create customer
     if not state.get('customer_id'):
         identifier = {
@@ -272,7 +330,30 @@ async def agent_entry_handler(state: AgentState) -> Dict:
 
     logger.info("EXIT: agent_entry_handler")
     logger.info(f"current state: {state}")
-    return state
+
+    # IMPORTANT: Don't return 'messages' to avoid triggering operator.add reducer
+    # which would duplicate messages. Only return fields we've modified.
+    result = {}
+    if 'customer_id' in state:
+        result['customer_id'] = state['customer_id']
+    if 'customer_data' in state:
+        result['customer_data'] = state['customer_data']
+    if 'send_form' in state:
+        result['send_form'] = state['send_form']
+    if 'orchestrator_step' in state:
+        result['orchestrator_step'] = state['orchestrator_step']
+    if 'max_orchestrator_steps' in state:
+        result['max_orchestrator_steps'] = state['max_orchestrator_steps']
+    if 'agents_called' in state:
+        result['agents_called'] = state['agents_called']
+    if 'orchestrator_plan' in state:
+        result['orchestrator_plan'] = state['orchestrator_plan']
+    if 'orchestrator_decision' in state:
+        result['orchestrator_decision'] = state['orchestrator_decision']
+    if 'human_takeover' in state:
+        result['human_takeover'] = state['human_takeover']
+
+    return result
 
 
 # ============================================================================
@@ -299,6 +380,23 @@ async def orchestrator_node(state: AgentState) -> Dict:
     customer_data = state.get('customer_data', {})
     messages = state.get('messages', [])
     messages_history = state.get('messages_history', [])
+
+    # Debug logging to understand message flow
+    # logger.info(f"messages_history has {len(messages_history)} messages")
+    # logger.info(f"messages has {len(messages)} messages")
+
+    # Show all messages in 'messages' list
+    for i, msg in enumerate(messages):
+        msg_type = type(msg).__name__
+        content = msg.content[:50] if hasattr(msg, 'content') else 'N/A'
+        # logger.info(f"  messages[{i}]: [{msg_type}] {content}...")
+
+    if messages_history:
+        last_history_content = messages_history[-1].content[:50] if hasattr(messages_history[-1], 'content') else 'N/A'
+        # logger.info(f"Last history message: {last_history_content}...")
+    if messages:
+        last_msg_content = messages[-1].content[:50] if hasattr(messages[-1], 'content') else 'N/A'
+        # logger.info(f"Last current message: {last_msg_content}...")
 
     # Combine messages_history + messages for full conversation context
     # This is CRITICAL for understanding responses like "boleh" (yes) to previous questions
@@ -430,6 +528,57 @@ Last 5 messages from full conversation:
             reasoning=f"Orchestrator timeout at step {step}/{max_steps}",
             plan="Proceeding to final message due to timeout"
         )
+    except Exception as e:
+        # Handle validation errors (e.g., invalid JSON from LLM)
+        error_msg = str(e)
+        if "json_invalid" in error_msg or "validation_error" in error_msg:
+            logger.error(f"Orchestrator LLM returned invalid JSON, attempting manual extraction")
+
+            # Try to get raw response and extract JSON manually
+            try:
+                # Get the raw LLM response without structured output
+                raw_response = await asyncio.wait_for(
+                    orchestrator_llm.ainvoke(messages_for_llm),
+                    timeout=30.0
+                )
+
+                if hasattr(raw_response, 'content'):
+                    content = raw_response.content
+                    logger.info(f"Raw LLM response: {content[:200]}...")
+
+                    # Extract JSON from the response
+                    json_str = extract_json_from_text(content)
+                    logger.info(f"Extracted JSON: {json_str[:200]}...")
+
+                    # Parse the JSON
+                    data = json.loads(json_str)
+                    decision = OrchestratorDecision(**data)
+                    logger.info("Successfully extracted and parsed JSON manually")
+                else:
+                    raise ValueError("Raw response has no content attribute")
+
+            except Exception as manual_error:
+                logger.error(f"Manual JSON extraction also failed: {manual_error}")
+
+                # Final fallback: try to extract next_agent from error message
+                next_agent = "final"
+                if "ecommerce" in error_msg.lower():
+                    next_agent = "ecommerce"
+                elif "profiling" in error_msg.lower():
+                    next_agent = "profiling"
+                elif "sales" in error_msg.lower():
+                    next_agent = "sales"
+                elif "support" in error_msg.lower():
+                    next_agent = "support"
+
+                decision = OrchestratorDecision(
+                    next_agent=next_agent,
+                    reasoning=f"Orchestrator LLM parsing error, using fallback routing",
+                    plan=f"Proceeding to {next_agent} due to LLM response parsing error"
+                )
+        else:
+            # Re-raise unexpected errors
+            raise
 
     # Extract decision from validated OrchestratorDecision object
     next_agent = decision.next_agent
@@ -441,12 +590,14 @@ Last 5 messages from full conversation:
     logger.info(f"Plan: {plan}")
 
     # Update state with decision
-    result = state.copy()
-    result["orchestrator_decision"] = decision.model_dump()
-    result["orchestrator_plan"] = plan
+    # Don't copy entire state to avoid triggering operator.add on messages
+    update = {
+        "orchestrator_decision": decision.model_dump(),
+        "orchestrator_plan": plan
+    }
 
     logger.info("EXIT: orchestrator_node")
-    return result
+    return update
 
 
 async def orchestrator_router(state: AgentState) -> str:
@@ -591,7 +742,31 @@ async def profiling_node(state: AgentState) -> Dict:
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
     logger.info("EXIT: profiling_node")
-    return result
+
+    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
+    # on messages field. Only return explicitly modified fields.
+    update = {}
+    if 'customer_data' in result:
+        update['customer_data'] = result['customer_data']
+    if 'agents_called' in result:
+        update['agents_called'] = result['agents_called']
+    if 'orchestrator_step' in result:
+        update['orchestrator_step'] = result['orchestrator_step']
+    if 'send_images' in result:
+        update['send_images'] = result['send_images']
+    if 'send_pdfs' in result:
+        update['send_pdfs'] = result['send_pdfs']
+    if 'send_form' in result:
+        update['send_form'] = result['send_form']
+    if 'human_takeover' in result:
+        update['human_takeover'] = result['human_takeover']
+    if 'session_ending_detected' in result:
+        update['session_ending_detected'] = result['session_ending_detected']
+
+    # Note: messages field is NOT returned here because it has operator.add reducer
+    # The agent already added messages to state via reducer, we don't trigger it again
+
+    return update
 
 
 async def sales_node(state: AgentState) -> Dict:
@@ -659,7 +834,29 @@ Important:
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
     logger.info("EXIT: sales_node")
-    return result
+
+    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
+    update = {}
+    if 'agents_called' in result:
+        update['agents_called'] = result['agents_called']
+    if 'orchestrator_step' in result:
+        update['orchestrator_step'] = result['orchestrator_step']
+    if 'send_images' in result:
+        update['send_images'] = result['send_images']
+    if 'send_pdfs' in result:
+        update['send_pdfs'] = result['send_pdfs']
+    if 'send_form' in result:
+        update['send_form'] = result['send_form']
+    if 'human_takeover' in result:
+        update['human_takeover'] = result['human_takeover']
+    if 'session_ending_detected' in result:
+        update['session_ending_detected'] = result['session_ending_detected']
+    if 'wants_meeting' in result:
+        update['wants_meeting'] = result['wants_meeting']
+    if 'existing_meeting_id' in result:
+        update['existing_meeting_id'] = result['existing_meeting_id']
+
+    return update
 
 
 async def ecommerce_node(state: AgentState) -> Dict:
@@ -709,7 +906,23 @@ async def ecommerce_node(state: AgentState) -> Dict:
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
     logger.info("EXIT: ecommerce_node")
-    return result
+
+    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
+    update = {}
+    if 'agents_called' in result:
+        update['agents_called'] = result['agents_called']
+    if 'orchestrator_step' in result:
+        update['orchestrator_step'] = result['orchestrator_step']
+    if 'send_images' in result:
+        update['send_images'] = result['send_images']
+    if 'send_pdfs' in result:
+        update['send_pdfs'] = result['send_pdfs']
+    if 'ecommerce_links' in result:
+        update['ecommerce_links'] = result['ecommerce_links']
+    if 'human_takeover' in result:
+        update['human_takeover'] = result['human_takeover']
+
+    return update
 
 
 async def support_node(state: AgentState) -> Dict:
@@ -757,7 +970,21 @@ async def support_node(state: AgentState) -> Dict:
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
     logger.info("EXIT: support_node")
-    return result
+
+    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
+    update = {}
+    if 'agents_called' in result:
+        update['agents_called'] = result['agents_called']
+    if 'orchestrator_step' in result:
+        update['orchestrator_step'] = result['orchestrator_step']
+    if 'send_images' in result:
+        update['send_images'] = result['send_images']
+    if 'send_pdfs' in result:
+        update['send_pdfs'] = result['send_pdfs']
+    if 'human_takeover' in result:
+        update['human_takeover'] = result['human_takeover']
+
+    return update
 
 
 # ============================================================================

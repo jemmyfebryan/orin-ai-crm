@@ -86,8 +86,28 @@ async def process_chat_request(
             history.append(HumanMessage(content=row.content))
         else:
             history.append(AIMessage(content=row.content))
-    ## Append current message as history too
-    history.append(HumanMessage(content=message))
+
+    logger.info(f"History fetched: {len(history)} messages")
+    if history:
+        last_msg_content = history[-1].content[:50] if hasattr(history[-1], 'content') else 'N/A'
+        # logger.info(f"Last history message: {last_msg_content}...")
+    # logger.info(f"Current message: {message[:50]}...")
+
+    # CRITICAL: Remove last message from history if it's the same as current message
+    # This happens when freshchat.py saves message to DB before calling process_chat_request
+    # So get_chat_history returns the just-saved message, causing duplication
+    if history and len(history) > 0:
+        last_history_msg = history[-1]
+        if hasattr(last_history_msg, 'content') and last_history_msg.content == message:
+            logger.info(f"Removing duplicate last message from history: {message[:50]}...")
+            history.pop()
+        elif hasattr(last_history_msg, 'content') and last_history_msg.content.strip() == message.strip():
+            logger.info(f"Removing duplicate last message (with whitespace stripped): {message[:50]}...")
+            history.pop()
+        else:
+            logger.info(f"Last history message differs from current message - keeping both")
+
+    # logger.info(f"History after duplicate check: {len(history)} messages")
 
     # 3. Load customer data
     customer_data = {
@@ -117,6 +137,11 @@ async def process_chat_request(
 
     # 6. Prepare state for agent
     current_messages = [HumanMessage(content=message)]
+
+    # Debug logging to check for duplication
+    # logger.info(f"Creating initial_state with {len(current_messages)} messages in 'messages' list")
+    # for i, msg in enumerate(current_messages):
+    #     logger.info(f"  current_messages[{i}]: {msg.content[:50]}...")
 
     initial_state = {
         "messages": current_messages,

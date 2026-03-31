@@ -1,4 +1,5 @@
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
+-Add agent for Chat API (tools from orinai-chat-app)
 
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)

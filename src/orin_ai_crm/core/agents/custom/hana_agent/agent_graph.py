@@ -42,21 +42,18 @@ IMPORTANT ARCHITECTURAL CHANGE:
 - This ensures: (1) Single execution, (2) Fresh data from DB, (3) No loops
 """
 
-import os
 import asyncio
 import json
-import re
 from typing import Dict, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, ValidationError
 
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
 from langchain.agents import create_agent
 
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.agents.custom.hana_agent.custom_agent import create_custom_agent
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.agents.config import llm_config, get_llm
+from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.agents.tools.agent_tools import (
     ORCHESTRATOR_TOOLS,
     PROFILING_AGENT_TOOLS,
@@ -200,7 +197,10 @@ def extract_json_from_text(text: str) -> str:
 class OrchestratorDecision(BaseModel):
     """Orchestrator routing decision schema with forced output structure."""
     next_agent: Literal["profiling", "sales", "ecommerce", "support", "final"] = Field(
-        description="Next agent to call: profiling, sales, ecommerce, support, or final"
+        description=(
+            "Next agent to call: profiling, sales, ecommerce, support, or final. "
+            "IMPORTANT: Use ONLY these exact values without any suffixes or prefixes."
+        )
     )
     reasoning: str = Field(
         description="Brief explanation of your decision"
@@ -208,6 +208,59 @@ class OrchestratorDecision(BaseModel):
     plan: str = Field(
         description="What happens next"
     )
+
+    @field_validator('next_agent', mode='before')
+    @classmethod
+    def normalize_next_agent(cls, v: str) -> str:
+        """
+        Normalize the next_agent value to handle LLM variations.
+
+        Different LLMs may return values like:
+        - 'profiling_agent' instead of 'profiling'
+        - 'sales_agent' instead of 'sales'
+        - 'ecommerce_agent' instead of 'ecommerce'
+        - 'support_agent' instead of 'support'
+        - 'final_agent' instead of 'final'
+
+        This validator strips common suffixes and normalizes the value.
+        """
+        if not isinstance(v, str):
+            raise ValueError(f"next_agent must be a string, got {type(v)}")
+
+        # Convert to lowercase and strip whitespace
+        normalized = v.lower().strip()
+
+        # Strip common suffixes that LLMs might add
+        # Gemini sometimes adds "_agent" suffix
+        suffixes_to_remove = ["_agent", "_node", "_workflow", " agent", " node"]
+        for suffix in suffixes_to_remove:
+            if normalized.endswith(suffix):
+                normalized = normalized[:-len(suffix)].strip()
+
+        # Map common variations to exact values
+        mapping = {
+            "profile": "profiling",
+            "sale": "sales",
+            "e-commerce": "ecommerce",
+            "ecommerce": "ecommerce",
+            "support": "support",
+            "finalize": "final",
+            "end": "final",
+            "done": "final",
+        }
+
+        # Apply mapping if needed
+        if normalized in mapping:
+            normalized = mapping[normalized]
+
+        # Validate that the normalized value is in the allowed list
+        allowed_values = ["profiling", "sales", "ecommerce", "support", "final"]
+        if normalized not in allowed_values:
+            raise ValueError(
+                f"next_agent must be one of {allowed_values}, got '{v}' (normalized to '{normalized}')"
+            )
+
+        return normalized
 
 
 # ============================================================================
@@ -528,8 +581,62 @@ Last 5 messages from full conversation:
             reasoning=f"Orchestrator timeout at step {step}/{max_steps}",
             plan="Proceeding to final message due to timeout"
         )
+    except ValidationError as e:
+        # Pydantic validation error - LLM returned invalid next_agent value
+        logger.error(f"Orchestrator LLM returned invalid value: {e}")
+        logger.error(f"Attempting to extract and normalize the value")
+
+        # Try to get raw response and fix the value
+        try:
+            # Get the raw LLM response without structured output
+            raw_response = await asyncio.wait_for(
+                orchestrator_llm.ainvoke(messages_for_llm),
+                timeout=30.0
+            )
+
+            if hasattr(raw_response, 'content'):
+                content = raw_response.content
+                logger.info(f"Raw LLM response: {content[:200]}...")
+
+                # Extract JSON from the response
+                json_str = extract_json_from_text(content)
+                logger.info(f"Extracted JSON: {json_str[:200]}...")
+
+                # Parse the JSON
+                data = json.loads(json_str)
+
+                # The validator should normalize it automatically, but let's log it
+                logger.info(f"Parsed data before validation: {data}")
+
+                # Try to create decision with normalized data
+                decision = OrchestratorDecision(**data)
+                logger.info(f"Successfully normalized and validated: {decision.next_agent}")
+            else:
+                raise ValueError("Raw response has no content attribute")
+
+        except Exception as manual_error:
+            logger.error(f"Manual normalization also failed: {manual_error}")
+
+            # Extract from error message or raw content
+            next_agent = "final"
+            if hasattr(raw_response, 'content'):
+                content = raw_response.content.lower()
+                if "profiling" in content:
+                    next_agent = "profiling"
+                elif "ecommerce" in content:
+                    next_agent = "ecommerce"
+                elif "sales" in content:
+                    next_agent = "sales"
+                elif "support" in content:
+                    next_agent = "support"
+
+            decision = OrchestratorDecision(
+                next_agent=next_agent,
+                reasoning=f"LLM returned invalid value, normalized to '{next_agent}'",
+                plan=f"Proceeding to {next_agent} after validation error recovery"
+            )
     except Exception as e:
-        # Handle validation errors (e.g., invalid JSON from LLM)
+        # Handle other errors (e.g., invalid JSON from LLM)
         error_msg = str(e)
         if "json_invalid" in error_msg or "validation_error" in error_msg:
             logger.error(f"Orchestrator LLM returned invalid JSON, attempting manual extraction")

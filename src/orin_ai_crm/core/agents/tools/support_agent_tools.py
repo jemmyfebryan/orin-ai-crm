@@ -60,9 +60,45 @@ Return JSON: {{"issue_type": "...", "severity": "...", "reasoning": "..."}}"""
     response = await llm.ainvoke([SystemMessage(content=prompt)])
 
     try:
-        result = json.loads(response.content)
+        # Handle different content formats from different LLM providers
+        # - OpenAI returns: str (JSON string)
+        # - Gemini 4.x returns: list[dict] with 'type', 'text', 'extras' keys
+        content = response.content
+
+        # Convert to string if it's a list (Gemini 4.x format)
+        if isinstance(content, list):
+            # Extract text from content blocks
+            content_str = ""
+            for block in content:
+                if isinstance(block, dict):
+                    # Gemini 4.x format: {'type': 'text', 'text': '...', 'extras': {...}}
+                    if 'text' in block:
+                        content_str += block['text']
+                elif hasattr(block, 'text'):
+                    content_str += block.text
+                elif isinstance(block, str):
+                    content_str += block
+                elif hasattr(block, 'content'):
+                    content_str += str(block.content)
+            content = content_str
+
+        # Strip markdown code blocks if present (```json ... ```)
+        if isinstance(content, str):
+            # Remove ```json and ``` markers
+            content = content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            elif content.startswith('```'):
+                content = content[3:]  # Remove ```
+            if content.endswith('```'):
+                content = content[:-3]  # Remove trailing ```
+            content = content.strip()
+
+        result = json.loads(str(content))
         return result
-    except:
+    except Exception as e:
+        logger.error(f"TOOL: classify_issue_type - ERROR: {str(e)}")
+        logger.error(f"TOOL: classify_issue_type - Response content type: {type(response.content)}")
         return {
             'issue_type': 'general',
             'severity': 'low',

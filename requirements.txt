@@ -27,8 +27,11 @@ distro==1.9.0
 executing==2.2.1
 fastapi==0.127.0
 fastjsonschema==2.21.2
+filetype==1.2.0
 flake8==7.3.0
 fqdn==1.5.1
+google-auth==2.49.1
+google-genai==1.69.0
 greenlet==3.3.1
 h11==0.16.0
 httpcore==1.0.9
@@ -65,6 +68,7 @@ jupyterlab_server==2.28.0
 jupyterlab_widgets==3.0.16
 langchain==1.2.0
 langchain-core==1.2.5
+langchain-google-genai==4.2.1
 langchain-mcp-adapters==0.2.1
 langchain-openai==1.1.6
 langgraph==1.0.5
@@ -88,7 +92,7 @@ notebook==7.5.5
 notebook_shim==0.2.4
 numpy==2.4.0
 openai==2.14.0
--e git+https://github.com/jemmyfebryan/orin-ai-crm.git@d0e4e007571a4be1a6198919129e35d5e88b25e6#egg=orin_ai_crm
+-e git+https://github.com/jemmyfebryan/orin-ai-crm.git@21617f50ad7a54567a59ba0dfe6f3e48ed4a09bf#egg=orin_ai_crm
 orjson==3.11.5
 ormsgpack==1.12.1
 packaging==25.0
@@ -103,6 +107,8 @@ prompt_toolkit==3.0.52
 psutil==7.2.0
 ptyprocess==0.7.0
 pure_eval==0.2.3
+pyasn1==0.6.3
+pyasn1_modules==0.4.2
 pycodestyle==2.14.0
 pycparser==2.23
 pydantic==2.12.5

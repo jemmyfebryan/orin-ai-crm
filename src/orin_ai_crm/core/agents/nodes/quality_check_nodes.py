@@ -207,8 +207,12 @@ CONTOH JAWABAN BAIK (is_satisfactory=True, confidence>=0.6):
 - Jawaban yang menjelaskan dengan baik dan ramah
 - **Form acknowledgment**: User isi form data, AI acknowledge dengan sopan → ini SANGAT BAIK, confidence 0.8-1.0"""
 
+    # IMPORTANT: Gemini requires at least one HumanMessage
     evaluator_llm = quality_llm.with_structured_output(AnswerQualityEvaluation)
-    result = evaluator_llm.invoke([SystemMessage(content=system_prompt)])
+    result = evaluator_llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content="Evaluate the above answer.")
+    ])
 
     return result
 
@@ -328,7 +332,11 @@ RULES:
 - Jangan buat customer merasa buruk karena pertanyaannya tidak terjawab
 Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
-    response = human_takeover_llm.invoke([SystemMessage(content=system_prompt)])
+    # IMPORTANT: Gemini requires at least one HumanMessage
+    response = human_takeover_llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content="Generate the human takeover response.")
+    ])
 
     return response.content
 
@@ -579,6 +587,14 @@ TASK:
 Kamu adalah {agent_name} ORIN GPS Tracker.
 Tugasmu adalah menyusun percakapan menjadi response yang user-friendly dalam bentuk beberapa chat bubble.
 
+AGENT ABILITIES:
+- Meng-update data customer
+- Bertanya mengenai meeting (untuk b2b)
+- Mengalihkan sesi chat ke Live Agent
+- Pertanyaan detail mengenai spesifikasi dan rekomendasi produk
+- Link e-commerce adalah source of truth untuk harga produk, stok produk, maupun promo, agent sendiri tidak memiliki informasi pasti mengenai hal ini
+- Agent belum memiliki ability untuk penawaran pemasangan maupun biaya pemasangan
+
 CUSTOMER PROFILE:
 - Nama: {customer_name}
 - Domisili: {customer_data.get('domicile', 'Belum diketahui')}
@@ -600,41 +616,35 @@ CONTEXT:
 - Gunakan bahasa yang natural dan ramah
 
 WHATSAPP MARKDOWN FORMATTING:
-Jika perlu menggunakan marksdawn, gunakan format markdown yang kompatibel dengan WhatsApp:
-- **bold** → gunakan **double asterisk** untuk tebal
-- *italic* → gunakan *single asterisk* untuk miring
+Jika perlu menggunakan marksdown, gunakan format markdown yang kompatibel dengan WhatsApp:
+- *bold* → gunakan *asterisk* untuk tebal
+- _italic_ → gunakan _underscore_ untuk miring
 - JANGAN gunakan # untuk heading (WhatsApp tidak support)
 - JANGAN gunakan > untuk blockquote (WhatsApp tidak support)
 - JANGAN gunakan - atau * untuk bullet list (tidak terbaca dengan baik)
 - Untuk list, gunakan format: "1. Item pertama" atau "• Item pertama" (bullet unicode)
 
 RULES FOR MULTI-BUBBLE RESPONSE:
-1. Split response into multiple bubbles when:
-   - Greeting + separate answer
-   - Answer + follow-up question
-   - Long information that's better broken down
-   - Acknowledgment + action/next step
-2. Each bubble should be complete and meaningful on its own
-3. Use emoji naturally in appropriate bubbles
-4. Be conversational and friendly
-5. DON'T mention technical/backend operations
-6. Personalized with customer name when appropriate
-7. If this is your first message with customer (empty conversation history), introduce yourself
-8. No need to include any image&pdf url/name in the text (see IMAGES_SENT & PDFS_SENT)
-9. Do not make up any information if it's not stated in the conversation history
-10. Make sure the formatting is WhatsApp-compatible (lihat aturan di atas)
+1. Bagi menjadi beberapa-bubble untuk:
+   - Sapaan + Jawaban Tambahan
+   - Jawaban + Pertanyaan Follow-up
+   - Informasi panjang yang baik untuk dipecah
+   - Acknowledgment + aksi/langkah berikutnya
+2. Pakai emoji yang natural
+3. Friendly dan conversational
+4. Jangan menyebut operasi dari backend atau operasi teknis
+5. Jika ini pesan pertama ke customer (conversation history kosong), perkenalkan dirimu
+6. Jangan mengarang informasi yang tidak ada di dalam state
+7. Gunakan style bold untuk nama agent `*{agent_name}*`
+8. Jangan mengarang kemampuan tambahan seperti pengecekan pemasangan, 
 
 SESSION ENDING DETECTION:
 Cek CONVERSATION HISTORY di atas, khususnya user message terakhir.
 
-SESSION ENDING INDICATORS (set is_session_ending = True JIKA user message terakhir menunjukkan):
-- User mengucapkan terima kasih: "terima kasih", "makasih", "thanks", "thank you", "trims"
-- User menunjukkan kepuasan: "sangat membantu", "membantu banget", "puas", "sudah jelas", "paham", "mengerti"
-- User menunjukkan penutupan: "baik terima kasih kak", "oke makasih", "sudah kak", "udah lah"
-- User menggabungkan terima kasih dengan kata lain: "terima kasih atas infonya", "makasih ya", "thanks kak"
+SESSION ENDING INDICATORS: set is_session_ending = True JIKA user message terakhir menunjukkan bahwa User mengucapkan kepuasan, rasa terima kasih, penutup seperti "terima kasih", "makasih", "sangat membantu", "siap mengerti", "oke sudah paham"
 
 RULES:
-1. Set is_session_ending = True HANYA jika user message terakhir jelas menunjukkan session ending (lihat CONVERSATION HISTORY)
+1. Set is_session_ending = True HANYA jika user message terakhir jelas menunjukkan session ending
 2. Set is_session_ending = False JIKA user masih bertanya, meminta info, atau tidak ada tanda puas
 3. Jika is_session_ending = True, isi session_ending_reasoning dengan alasan yang jelas
 4. Jika is_session_ending = False, biarkan session_ending_reasoning kosong (default "")
@@ -644,7 +654,16 @@ RULES:
     # Use basic model (user requested for final message)
     # Single LLM call for both message generation AND session ending detection
     final_messages_llm_structured = final_message_llm.with_structured_output(FinalMessagesResponse)
-    result: FinalMessagesResponse = final_messages_llm_structured.invoke([SystemMessage(content=system_prompt)])
+
+    # IMPORTANT: Gemini requires at least one HumanMessage, not just SystemMessage
+    # OpenAI accepts just SystemMessage, but Gemini rejects empty contents
+    # We add a placeholder HumanMessage to prompt the LLM to generate the response
+    from langchain_core.messages import HumanMessage
+
+    result: FinalMessagesResponse = final_messages_llm_structured.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content="Generate the response based on the above instructions.")
+    ])
 
     logger.info(f"Generated {len(result.messages)} message bubbles")
     logger.info(f"Reasoning: {result.reasoning}")

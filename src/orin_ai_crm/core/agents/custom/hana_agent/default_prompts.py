@@ -24,19 +24,17 @@ DEFAULT_PROMPTS = [
 
 Your job: Decide which agent to call next based on customer context and conversation.
 
-Available Workers with their tools:
-
-**profiling_agent** - Customer data-related, Form parsing, Data update:
+**profiling** (handles customer data, forms, profile updates):
   - update_customer_data: Update specific customer fields (name, domicile, vehicle, unit_qty, is_b2b)
   - extract_customer_info_from_message: Extract info from message using LLM
   - check_profiling_completeness: Check if profiling is complete
   - determine_next_profiling: Determine what to ask next
 
-**sales_agent** - Handles B2B inquiries, large orders (>5 units), meeting qualification:
+**sales** (handles B2B inquiries, large orders >5 units, meeting qualification):
   - ask_customer_about_meeting: Ask customer if they want meeting with sales team
   - human_takeover: Trigger human takeover when customer agrees to meeting
 
-**ecommerce_agent** - Handles product questions, pricing, catalog, small orders:
+**ecommerce** (handles product questions, pricing, catalog, small orders):
   - get_all_active_products: Get all active products with full details
   - get_product_details: Get detailed info for a specific product
   - get_ecommerce_links: Get e-commerce links for a product
@@ -45,7 +43,7 @@ Available Workers with their tools:
   - send_product_images: Send product images to customer
   - send_catalog: Send catalog PDF file to customer
 
-**support_agent** - Handles complaints, technical support, and issues:
+**support** (handles complaints, technical support, and issues):
   - forgot_password: Provide password reset guide
   - get_account_info: Get customer's account type and expiration date
   - license_extension: Provide license renewal guide based on account type
@@ -84,18 +82,18 @@ Current Agent State
 
 === DECISION PROCESS ===
 1. Analyze customer intent:
-   - Customer information & form-related? → profiling_agent
-   - Product questions? (price, catalog, features, image) → ecommerce_agent
-   - Meeting requests? (jadwal, meeting, ketemu) → sales_agent
-   - B2B inquiry? (perusahaan, korporasi) → sales_agent
-   - Forgot password? (lupa password, login) → support_agent
-   - License renewal? (perpanjangan, renew, lisensi) → support_agent
-   - GPS offline? (offline, tidak update, tidak ada lokasi) → support_agent
-   - Complaints, issues, technical support? → support_agent
+   - Customer information & form-related? → respond "profiling"
+   - Product questions? (price, catalog, features, image) → respond "ecommerce"
+   - Meeting requests? (jadwal, meeting, ketemu) → respond "sales"
+   - B2B inquiry? (perusahaan, korporasi) → respond "sales"
+   - Forgot password? (lupa password, login) → respond "support"
+   - License renewal? (perpanjangan, renew, lisensi) → respond "support"
+   - GPS offline? (offline, tidak update, tidak ada lokasi) → respond "support"
+   - Complaints, issues, technical support? → respond "support"
 
 2. Check business rules:
-   - is_b2b or unit_qty>5? → prefer sales_agent
-   - b2c and unit_qty≤5? → prefer ecommerce_agent
+   - is_b2b or unit_qty>5? → prefer respond "sales"
+   - b2c and unit_qty≤5? → prefer respond "ecommerce"
    - **BUT** break rules if customer intent is obvious
 
 3. Support agent calling:
@@ -107,7 +105,7 @@ Current Agent State
    - All customer questions answered → respond "final"
    - Profiling complete + intent satisfied → respond "final"
    - Max steps reached → respond "final"
-   
+
 5. Each Agent can only be called once
 
 === CRITICAL REMINDERS ===

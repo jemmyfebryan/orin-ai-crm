@@ -19,6 +19,12 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
 from src.orin_ai_crm.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -149,32 +155,47 @@ Respond to the user in a friendly, helpful manner.
         # Then add current messages
         # This ensures LLM has context when user says "produknya" (the product)
 
-        # CRITICAL: Filter messages_history to remove tool_calls and ToolMessages
-        # These are from previous agent runs and cause OpenAI API errors:
-        # "messages with role 'tool' must be a response to a preceeding message with 'tool_calls'"
+        # CRITICAL: Message filtering strategy differs by provider
+        # - OpenAI: Must filter out AIMessages with tool_calls to avoid orphaned tool errors
+        # - Gemini: MUST preserve AIMessages with tool_calls to keep thought_signature metadata
+        is_gemini = GEMINI_AVAILABLE and isinstance(model, ChatGoogleGenerativeAI)
+
         def should_include_history_message(msg):
-            """Check if history message should be included (filter out tool_calls and ToolMessages)"""
-            # Filter out AIMessages with tool_calls
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                return False
-            # Filter out dict messages with tool_calls
-            if isinstance(msg, dict) and 'tool_calls' in msg and msg['tool_calls']:
-                return False
-            # Filter out ToolMessages (they're responses to already-executed tool calls)
+            """
+            Check if history message should be included.
+
+            For OpenAI: Filter out AIMessages with tool_calls to avoid API errors
+            For Gemini: Keep AIMessages with tool_calls to preserve thought_signature (Gemini 3+ requirement)
+            """
+            # Always filter out ToolMessages (they're responses to already-executed tool calls)
             if isinstance(msg, ToolMessage):
                 return False
+
             # Filter out dict messages with role='tool'
             if isinstance(msg, dict) and msg.get('role') == 'tool':
                 return False
+
+            # For OpenAI: Filter out AIMessages with tool_calls
+            if not is_gemini:
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    return False
+                if isinstance(msg, dict) and 'tool_calls' in msg and msg['tool_calls']:
+                    return False
+
+            # For Gemini: Keep AIMessages with tool_calls (preserves thought_signature)
+            # The tool_calls metadata includes thought_signature required by Gemini 3+
             return True
 
-        # Add messages_history (filtering out tool_calls and ToolMessages)
+        # Add messages_history with provider-aware filtering
         for msg in messages_history:
             if not isinstance(msg, SystemMessage) and should_include_history_message(msg):
+                # Preserve the original message object completely (no conversion to dict)
+                # This ensures all metadata (thought_signature, additional_kwargs) is preserved
                 all_messages.append(msg)
 
         # Add current messages WITHOUT filtering
         # These are part of the current agent loop and include ToolMessages that the agent needs to see
+        # IMPORTANT: Preserve message objects exactly as-is to maintain all metadata
         for msg in messages:
             if not isinstance(msg, SystemMessage):
                 all_messages.append(msg)
@@ -182,6 +203,10 @@ Respond to the user in a friendly, helpful manner.
         if debug:
             logger.info(f"Calling LLM with {len(all_messages)} messages")
             logger.info(f"System prompt length: {len(combined_system)} chars")
+            if is_gemini:
+                logger.info(f"✓ Using Gemini - preserving AIMessage tool_calls (thought_signature)")
+            else:
+                logger.info(f"✓ Using OpenAI - filtering AIMessage tool_calls")
 
         # Bind tools to model and invoke
         try:

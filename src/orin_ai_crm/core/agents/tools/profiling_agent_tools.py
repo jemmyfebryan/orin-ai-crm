@@ -86,11 +86,47 @@ Return JSON with fields that were found (only include fields mentioned in the me
 
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=message)])
 
-        result = json.loads(response.content)
+        # Handle different content formats from different LLM providers
+        # - OpenAI returns: str (JSON string)
+        # - Gemini 4.x returns: list[dict] with 'type', 'text', 'extras' keys
+        content = response.content
+
+        # Convert to string if it's a list (Gemini 4.x format)
+        if isinstance(content, list):
+            # Extract text from content blocks
+            content_str = ""
+            for block in content:
+                if isinstance(block, dict):
+                    # Gemini 4.x format: {'type': 'text', 'text': '...', 'extras': {...}}
+                    if 'text' in block:
+                        content_str += block['text']
+                elif hasattr(block, 'text'):
+                    content_str += block.text
+                elif isinstance(block, str):
+                    content_str += block
+                elif hasattr(block, 'content'):
+                    content_str += str(block.content)
+            content = content_str
+
+        # Strip markdown code blocks if present (```json ... ```)
+        if isinstance(content, str):
+            # Remove ```json and ``` markers
+            content = content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            elif content.startswith('```'):
+                content = content[3:]  # Remove ```
+            if content.endswith('```'):
+                content = content[:-3]  # Remove trailing ```
+            content = content.strip()
+
+        result = json.loads(str(content))
         logger.info(f"TOOL: extract_customer_info_from_message - Extracted: {result}")
         return result
     except Exception as e:
         logger.error(f"TOOL: extract_customer_info_from_message - ERROR: {str(e)}")
+        logger.error(f"TOOL: extract_customer_info_from_message - Response content type: {type(response.content)}")
+        logger.error(f"TOOL: extract_customer_info_from_message - Response content: {response.content}")
         return {}
 
 

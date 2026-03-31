@@ -15,7 +15,7 @@ from langgraph.prebuilt import InjectedState
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config, get_llm
-from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name, get_prompt_from_db
 
 logger = get_logger(__name__)
 
@@ -42,8 +42,6 @@ async def ask_customer_about_meeting(
     Returns:
         dict with: message (str) - Friendly meeting invitation message
     """
-    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
-
     customer_data = state.get('customer_data', {})
     customer_name = customer_data.get('name', 'Kak')
     unit_qty = customer_data.get('unit_qty', 0)
@@ -56,19 +54,15 @@ async def ask_customer_about_meeting(
 
     # Generate friendly meeting invitation message
     if is_b2b:
-        context = f"karena Kakak adalah pelanggan B2B"
+        context = f"karena Kakak adalah pelanggan prioritas"
     elif unit_qty > 5:
         context = f"karena Kakak tertarik dengan {unit_qty} unit"
     else:
         context = "untuk kebutuhan Kakak"
 
-    message = f"""Baik kak {customer_name}! 😊
+    message = f"""Kami punya tim sales khusus yang bisa bantu Kakak {context}.
 
-Kami punya tim sales khusus yang bisa bantu Kakak {context}.
-
-Mau Kakak kalau {agent_name} jadwalkan meeting online dengan tim sales kami? Mereka bisa kasih penawaran khusus dan jawab pertanyaan lebih detail.
-
-Kira-kira kakak tertarik untuk meeting nggak ya? 🙏"""
+Apakah kakak berkenan untuk meeting online dengan tim sales kami? Mereka bisa kasih penawaran khusus dan jawab pertanyaan lebih detail🙏"""
 
     return {
         'message': message

@@ -47,6 +47,7 @@ import json
 from typing import Dict, Literal
 from pydantic import BaseModel, Field, field_validator, ValidationError
 
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 from langchain.agents import create_agent
 
@@ -205,8 +206,8 @@ class OrchestratorDecision(BaseModel):
     reasoning: str = Field(
         description="Brief explanation of your decision"
     )
-    plan: str = Field(
-        description="What happens next"
+    instruction: str = Field(
+        description="Your instruction to the next agent in 1st person. Speak as if you are directly telling the agent what to do. Example: 'Extract the customer's domicile from their message' or 'Ask the customer about their vehicle type'"
     )
 
     @field_validator('next_agent', mode='before')
@@ -374,8 +375,8 @@ async def agent_entry_handler(state: AgentState) -> Dict:
         state['max_orchestrator_steps'] = 5
     if 'agents_called' not in state:
         state['agents_called'] = []
-    if 'orchestrator_plan' not in state:
-        state['orchestrator_plan'] = ""
+    if 'orchestrator_instruction' not in state:
+        state['orchestrator_instruction'] = ""
     if 'orchestrator_decision' not in state:
         state['orchestrator_decision'] = {}
     if 'human_takeover' not in state:
@@ -399,8 +400,8 @@ async def agent_entry_handler(state: AgentState) -> Dict:
         result['max_orchestrator_steps'] = state['max_orchestrator_steps']
     if 'agents_called' in state:
         result['agents_called'] = state['agents_called']
-    if 'orchestrator_plan' in state:
-        result['orchestrator_plan'] = state['orchestrator_plan']
+    if 'orchestrator_instruction' in state:
+        result['orchestrator_instruction'] = state['orchestrator_instruction']
     if 'orchestrator_decision' in state:
         result['orchestrator_decision'] = state['orchestrator_decision']
     if 'human_takeover' in state:
@@ -579,7 +580,7 @@ Last 5 messages from full conversation:
         decision = OrchestratorDecision(
             next_agent="final",
             reasoning=f"Orchestrator timeout at step {step}/{max_steps}",
-            plan="Proceeding to final message due to timeout"
+            instruction="Proceed to final message due to timeout"
         )
     except ValidationError as e:
         # Pydantic validation error - LLM returned invalid next_agent value
@@ -633,7 +634,7 @@ Last 5 messages from full conversation:
             decision = OrchestratorDecision(
                 next_agent=next_agent,
                 reasoning=f"LLM returned invalid value, normalized to '{next_agent}'",
-                plan=f"Proceeding to {next_agent} after validation error recovery"
+                instruction=f"Proceed to {next_agent} after validation error recovery"
             )
     except Exception as e:
         # Handle other errors (e.g., invalid JSON from LLM)
@@ -681,7 +682,7 @@ Last 5 messages from full conversation:
                 decision = OrchestratorDecision(
                     next_agent=next_agent,
                     reasoning=f"Orchestrator LLM parsing error, using fallback routing",
-                    plan=f"Proceeding to {next_agent} due to LLM response parsing error"
+                    instruction=f"Proceed to {next_agent} due to LLM response parsing error"
                 )
         else:
             # Re-raise unexpected errors
@@ -690,17 +691,17 @@ Last 5 messages from full conversation:
     # Extract decision from validated OrchestratorDecision object
     next_agent = decision.next_agent
     reasoning = decision.reasoning
-    plan = decision.plan
+    instruction = decision.instruction
 
     logger.info(f"Orchestrator decision: {next_agent}")
     logger.info(f"Reasoning: {reasoning}")
-    logger.info(f"Plan: {plan}")
+    logger.info(f"Instruction: {instruction}")
 
     # Update state with decision
     # Don't copy entire state to avoid triggering operator.add on messages
     update = {
         "orchestrator_decision": decision.model_dump(),
-        "orchestrator_plan": plan
+        "orchestrator_instruction": instruction
     }
 
     logger.info("EXIT: orchestrator_node")
@@ -776,23 +777,47 @@ async def profiling_node(state: AgentState) -> Dict:
 
     This is the PROFILING agent - handles customer onboarding,
     data collection, and profile updates.
+
+    This node creates a fresh state with only the instruction from orchestrator.
+    The sub-agent executes with this fresh state and returns ToolMessages which are
+    appended to the main orchestrator's messages via operator.add.
     """
     logger.info("ENTER: profiling_node")
 
-    # === CRITICAL: Load customer profile FIRST (before LLM) ===
-    customer_id = state.get('customer_id')
+    # Get instruction from orchestrator
+    orchestrator_decision = state.get('orchestrator_decision', {})
+    instruction = orchestrator_decision.get('instruction', 'Continue the conversation naturally.')
+
+    logger.info(f"Orchestrator instruction: {instruction[:100]}...")
+
+    # === Create FRESH state for sub-agent ===
+    # Copy all state keys to preserve important data
+    fresh_state = dict(state)
+
+    # CRITICAL: Remove existing messages and replace with only instruction
+    # Use HumanMessage (not AIMessage) - it's like orchestrator (human) instructing the agent
+    # This is more natural and robust for LLMs
+    from langchain_core.messages import HumanMessage
+    fresh_state['messages'] = [HumanMessage(content=instruction)]
+
+    logger.info(f"Fresh state created for profiling agent with 1 message (instruction)")
+    logger.info(f"Instruction: {instruction[:100]}...")
+    logger.info(f"Preserved state keys: customer_id, customer_data, etc.")
+
+    # === Load customer profile FIRST (before LLM) ===
+    customer_id = fresh_state.get('customer_id')
     if customer_id:
         try:
-            profile_result = await get_customer_profile.ainvoke({'state': state})
+            profile_result = await get_customer_profile.ainvoke({'state': fresh_state})
             logger.info(f"Customer profile loaded: {profile_result}")
 
             # Update state with fresh customer data from database
-            if 'customer_data' in state:
-                state['customer_data'].update(profile_result)
+            if 'customer_data' in fresh_state:
+                fresh_state['customer_data'].update(profile_result)
             else:
-                state['customer_data'] = profile_result
+                fresh_state['customer_data'] = profile_result
 
-            logger.info(f"State updated with customer data: {state['customer_data']}")
+            logger.info(f"Fresh state updated with customer data: {fresh_state['customer_data']}")
         except Exception as e:
             logger.error(f"Failed to load customer profile: {e}")
 
@@ -820,8 +845,9 @@ async def profiling_node(state: AgentState) -> Dict:
         state_schema=AgentState,
     )
 
-    # Invoke the agent
-    result = await agent.ainvoke(state, recursion_limit=8)
+    # Invoke the agent with FRESH state (only instruction as message)
+    logger.info("Invoking profiling agent with fresh state...")
+    result = await agent.ainvoke(fresh_state, recursion_limit=8)
 
     # Apply tool state updates (e.g., send_images from send_product_images tool)
     result = await apply_tool_state_updates(result)
@@ -848,30 +874,30 @@ async def profiling_node(state: AgentState) -> Dict:
     # Increment orchestrator step
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
+    # Extract ToolMessages from result to append to main orchestrator messages
+    # from langchain_core.messages import ToolMessage
+    # tool_messages = [msg for msg in result.get('messages', []) if isinstance(msg, ToolMessage)]
+    # logger.info(f"Profiling agent produced {len(tool_messages)} ToolMessages")
+
     logger.info("EXIT: profiling_node")
 
-    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
-    # on messages field. Only return explicitly modified fields.
-    update = {}
+    # Return state updates and ToolMessages to append
+    # ToolMessages will be appended to main orchestrator messages via operator.add
+    update = {
+        'messages': result.get('messages', [])  # Only ToolMessages, not AIMessages
+    }
     if 'customer_data' in result:
         update['customer_data'] = result['customer_data']
     if 'agents_called' in result:
         update['agents_called'] = result['agents_called']
     if 'orchestrator_step' in result:
         update['orchestrator_step'] = result['orchestrator_step']
-    if 'send_images' in result:
-        update['send_images'] = result['send_images']
-    if 'send_pdfs' in result:
-        update['send_pdfs'] = result['send_pdfs']
     if 'send_form' in result:
         update['send_form'] = result['send_form']
     if 'human_takeover' in result:
         update['human_takeover'] = result['human_takeover']
     if 'session_ending_detected' in result:
         update['session_ending_detected'] = result['session_ending_detected']
-
-    # Note: messages field is NOT returned here because it has operator.add reducer
-    # The agent already added messages to state via reducer, we don't trigger it again
 
     return update
 
@@ -884,30 +910,34 @@ async def sales_node(state: AgentState) -> Dict:
     1. Ask if customer wants meeting with sales team
     2. If YES → trigger human takeover (live agents handle meetings)
     3. If NO → continue to ecommerce for product recommendations
+
+    This node creates a fresh state with only the instruction from orchestrator.
     """
     logger.info("ENTER: sales_node")
+
+    # Get instruction from orchestrator
+    orchestrator_decision = state.get('orchestrator_decision', {})
+    instruction = orchestrator_decision.get('instruction', 'Continue the conversation naturally.')
+
+    logger.info(f"Orchestrator instruction: {instruction[:100]}...")
+
+    # === Create FRESH state for sub-agent ===
+    fresh_state = dict(state)
+
+    # CRITICAL: Remove existing messages and replace with only instruction
+    # Use HumanMessage (not AIMessage) - it's like orchestrator (human) instructing the agent
+    from langchain_core.messages import HumanMessage
+    fresh_state['messages'] = [HumanMessage(content=instruction)]
+
+    logger.info(f"Fresh state created for sales agent with 1 message (instruction)")
+    logger.info(f"Instruction: {instruction[:100]}...")
 
     # Get sales agent prompt from database
     system_prompt = await get_prompt_from_db("hana_sales_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_sales_agent prompt from DB, using fallback")
         agent_name = get_agent_name()
-        system_prompt = f"""You are {agent_name} from ORIN GPS Tracker.
-
-You are handling B2B or high-volume customers (5+ units).
-
-Your task:
-1. Greet the customer warmly
-2. Ask if they want a meeting with our sales team for special pricing
-3. If they agree to meeting → use the trigger_human_takeover tool
-4. If they don't want meeting → let them know you can provide product information
-
-Important:
-- Be friendly and helpful
-- Don't pressure them
-- If they want meeting, trigger human takeover immediately
-- If they don't, acknowledge and let them know product info is available
-"""
+        system_prompt = f"""You are {agent_name}, sales agent from ORIN GPS Tracker."""
     else:
         # Format agent name into the prompt
         agent_name = get_agent_name()
@@ -926,8 +956,9 @@ Important:
         state_schema=AgentState,
     )
 
-    # Invoke the agent with current state
-    result = await agent.ainvoke(state, recursion_limit=10)
+    # Invoke the agent with FRESH state (only instruction as message)
+    logger.info("Invoking sales agent with fresh state...")
+    result = await agent.ainvoke(fresh_state, recursion_limit=10)
 
     # Apply tool state updates (e.g., human_takeover flag)
     result = await apply_tool_state_updates(result)
@@ -940,20 +971,21 @@ Important:
     # Increment orchestrator step
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
+    # Extract ToolMessages from result to append to main orchestrator messages
+    # from langchain_core.messages import ToolMessage
+    # tool_messages = [msg for msg in result.get('messages', []) if isinstance(msg, ToolMessage)]
+    # logger.info(f"Sales agent produced {len(tool_messages)} ToolMessages")
+
     logger.info("EXIT: sales_node")
 
-    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
-    update = {}
+    # Return state updates and ToolMessages to append
+    update = {
+        'messages': result.get('messages', [])  # Only ToolMessages, not AIMessages
+    }
     if 'agents_called' in result:
         update['agents_called'] = result['agents_called']
     if 'orchestrator_step' in result:
         update['orchestrator_step'] = result['orchestrator_step']
-    if 'send_images' in result:
-        update['send_images'] = result['send_images']
-    if 'send_pdfs' in result:
-        update['send_pdfs'] = result['send_pdfs']
-    if 'send_form' in result:
-        update['send_form'] = result['send_form']
     if 'human_takeover' in result:
         update['human_takeover'] = result['human_takeover']
     if 'session_ending_detected' in result:
@@ -969,15 +1001,39 @@ Important:
 async def ecommerce_node(state: AgentState) -> Dict:
     """
     Ecommerce node - handles B2C and small order product inquiries.
+
+    This node creates a fresh state with only the instruction from orchestrator.
     """
     logger.info("ENTER: ecommerce_node")
+
+    # Get instruction from orchestrator
+    orchestrator_decision = state.get('orchestrator_decision', {})
+    instruction = orchestrator_decision.get('instruction', 'Continue the conversation naturally.')
+
+    logger.info(f"Orchestrator instruction: {instruction[:100]}...")
+
+    # === Create FRESH state for sub-agent ===
+    fresh_state = dict(state)
+
+    # CRITICAL: Remove existing messages and replace with only instruction
+    # Use HumanMessage (not AIMessage) - it's like orchestrator (human) instructing the agent
+    # from langchain_core.messages import HumanMessage
+    fresh_state['messages'] = [HumanMessage(content=instruction)]
+
+    # CRITICAL: Clear messages_history for custom_agent to avoid context confusion
+    # The custom_agent should only see the instruction, not the full conversation history
+    fresh_state['messages_history'] = []
+
+    # logger.info(f"Fresh state created for ecommerce agent with 1 message (instruction)")
+    # logger.info(f"messages_history cleared (empty)")
+    logger.info(f"Instruction: {instruction[:100]}...")
 
     # Get ecommerce agent prompt from database
     system_prompt = await get_prompt_from_db("hana_ecommerce_agent")
     if not system_prompt:
         logger.warning("Failed to load hana_ecommerce_agent prompt from DB, using fallback")
         agent_name = get_agent_name()
-        system_prompt = f"You are {agent_name}, Customer Service AI from ORIN GPS Tracker."
+        system_prompt = f"You are {agent_name}, Ecommerce agent from ORIN GPS Tracker."
     else:
         # Format agent name into the prompt
         agent_name = get_agent_name()
@@ -998,8 +1054,9 @@ async def ecommerce_node(state: AgentState) -> Dict:
         debug=False,
     )
 
-    # Invoke the agent with current state
-    result = await agent.ainvoke(state, recursion_limit=10)
+    # Invoke the agent with FRESH state (only instruction as message)
+    logger.info("Invoking ecommerce agent with fresh state...")
+    result = await agent.ainvoke(fresh_state, recursion_limit=10)
 
     # Apply tool state updates (e.g., send_images from send_product_images tool)
     result = await apply_tool_state_updates(result)
@@ -1012,10 +1069,17 @@ async def ecommerce_node(state: AgentState) -> Dict:
     # Increment orchestrator step
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
+    # Extract ToolMessages from result to append to main orchestrator messages
+    # from langchain_core.messages import ToolMessage
+    # tool_messages = [msg for msg in result.get('messages', []) if isinstance(msg, ToolMessage)]
+    # logger.info(f"Ecommerce agent produced {len(tool_messages)} ToolMessages")
+
     logger.info("EXIT: ecommerce_node")
 
-    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
-    update = {}
+    # Return state updates and ToolMessages to append
+    update = {
+        'messages': result.get('messages', [])  # Only ToolMessages, not AIMessages
+    }
     if 'agents_called' in result:
         update['agents_called'] = result['agents_called']
     if 'orchestrator_step' in result:
@@ -1035,8 +1099,27 @@ async def ecommerce_node(state: AgentState) -> Dict:
 async def support_node(state: AgentState) -> Dict:
     """
     Support node - handles complaints, technical support, and issues.
+
+    This node creates a fresh state with only the instruction from orchestrator.
     """
     logger.info("ENTER: support_node")
+
+    # Get instruction from orchestrator
+    orchestrator_decision = state.get('orchestrator_decision', {})
+    instruction = orchestrator_decision.get('instruction', 'Continue the conversation naturally.')
+
+    logger.info(f"Orchestrator instruction: {instruction[:100]}...")
+
+    # === Create FRESH state for sub-agent ===
+    fresh_state = dict(state)
+
+    # CRITICAL: Remove existing messages and replace with only instruction
+    # Use HumanMessage (not AIMessage) - it's like orchestrator (human) instructing the agent
+    from langchain_core.messages import HumanMessage
+    fresh_state['messages'] = [HumanMessage(content=instruction)]
+
+    logger.info(f"Fresh state created for support agent with 1 message (instruction)")
+    logger.info(f"Instruction: {instruction[:100]}...")
 
     # Get support agent prompt from database
     system_prompt = await get_prompt_from_db("hana_support_agent")
@@ -1062,8 +1145,9 @@ async def support_node(state: AgentState) -> Dict:
         state_schema=AgentState,
     )
 
-    # Invoke the agent with current state
-    result = await agent.ainvoke(state, recursion_limit=10)
+    # Invoke the agent with FRESH state (only instruction as message)
+    logger.info("Invoking support agent with fresh state...")
+    result = await agent.ainvoke(fresh_state, recursion_limit=10)
 
     # Apply tool state updates
     result = await apply_tool_state_updates(result)
@@ -1076,10 +1160,17 @@ async def support_node(state: AgentState) -> Dict:
     # Increment orchestrator step
     result["orchestrator_step"] = state.get("orchestrator_step", 0) + 1
 
+    # Extract ToolMessages from result to append to main orchestrator messages
+    # from langchain_core.messages import ToolMessage
+    # tool_messages = [msg for msg in result.get('messages', []) if isinstance(msg, ToolMessage)]
+    # logger.info(f"Support agent produced {len(tool_messages)} ToolMessages")
+
     logger.info("EXIT: support_node")
 
-    # IMPORTANT: Don't return entire result dict to avoid triggering operator.add reducer
-    update = {}
+    # Return state updates and ToolMessages to append
+    update = {
+        'messages': result.get('messages', [])  # Only ToolMessages, not AIMessages
+    }
     if 'agents_called' in result:
         update['agents_called'] = result['agents_called']
     if 'orchestrator_step' in result:

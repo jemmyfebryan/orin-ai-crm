@@ -8,6 +8,7 @@ This module provides a custom ReAct agent implementation that separates:
 This gives finer control over agent behavior compared to LangChain's default create_agent().
 """
 
+import asyncio
 from typing import Dict, Any, Optional, Sequence, Union
 from typing_extensions import TypedDict
 import operator
@@ -105,27 +106,29 @@ Respond to the user in a friendly, helpful manner.
         messages = state.get("messages", [])
 
         if not messages:
+            logger.warning("⚠️ should_continue: No messages in state, ending loop")
             return "end"
 
         last_message = messages[-1]
 
+        logger.info(f"🔄 should_continue: Last message type={type(last_message).__name__}")
+
         # If last message is from AI and has tool calls, continue to tools
         if isinstance(last_message, AIMessage):
             if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-                if debug:
-                    logger.info(f"Agent has tool calls: {last_message.tool_calls}")
+                tool_names = [call.get('name', 'unknown') for call in last_message.tool_calls]
+                logger.info(f"✅ Agent has tool_calls: {tool_names} → continue to tools")
                 return "continue"
             else:
-                if debug:
-                    logger.info("Agent has no tool calls, ending loop")
+                logger.info("⏹️ Agent has NO tool_calls → ending loop")
                 return "end"
 
         # If last message is from tool, go back to agent
         if isinstance(last_message, ToolMessage):
-            if debug:
-                logger.info(f"Tool result received, continuing to agent")
+            logger.info(f"🔧 Tool result received (name={last_message.name}) → continue to agent")
             return "continue"
 
+        logger.info(f"⏹️ Unknown message type, ending loop")
         return "end"
 
     # Create tool node once (handles InjectedState properly)
@@ -137,11 +140,21 @@ Respond to the user in a friendly, helpful manner.
 
         This node combines system_prompt + react_prompt for the LLM.
         """
-        if debug:
-            logger.info(f"ENTER: agent_node with {len(state.get('messages', []))} messages")
+        logger.info("=" * 60)
+        logger.info("🤖 ENTER: agent_node")
+        logger.info("=" * 60)
 
         messages = state.get("messages", [])
         messages_history = state.get("messages_history", [])
+
+        logger.info(f"📥 Current messages: {len(messages)}")
+        logger.info(f"📚 History messages: {len(messages_history)}")
+
+        # Log message types for debugging
+        for i, msg in enumerate(messages):
+            msg_type = type(msg).__name__
+            content_preview = str(msg.content)[:80] if hasattr(msg, 'content') else 'N/A'
+            logger.info(f"  [{i}] {msg_type}: {content_preview}...")
 
         # Build messages for LLM
         # Start with system prompt
@@ -210,23 +223,53 @@ Respond to the user in a friendly, helpful manner.
 
         # Bind tools to model and invoke
         try:
-            # Bind tools to model
+            logger.info("🔗 Binding tools to model...")
+
             if tools:
                 model_with_tools = model.bind_tools(tools)
+                logger.info(f"✓ Bound {len(tools)} tools to model")
             else:
                 model_with_tools = model
+                logger.info("⚠️ No tools to bind")
 
-            response = await model_with_tools.ainvoke(all_messages, config)
+            logger.info("📞 Invoking LLM...")
+            import time
+            start_time = time.time()
 
-            if debug:
-                logger.info(f"LLM response type: {type(response).__name__}")
-                if hasattr(response, 'tool_calls'):
-                    logger.info(f"Tool calls: {response.tool_calls}")
+            # Add timeout to prevent hanging (30 seconds)
+            try:
+                response = await asyncio.wait_for(
+                    model_with_tools.ainvoke(all_messages, config),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.error("LLM invocation timeout")
+                # Return error message to allow agent to continue
+                error_msg = AIMessage(content="I'm sorry, but I'm taking too long to respond. Please try again...")
+                return {"messages": [error_msg]}
+
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ LLM response received in {elapsed_time:.2f}s")
+
+            logger.info(f"📦 Response type: {type(response).__name__}")
+
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                tool_names = [call.get('name', 'unknown') for call in response.tool_calls]
+                logger.info(f"🔧 Tool calls: {tool_names}")
+            else:
+                logger.info("💬 Response is text (no tool calls)")
+
+            if hasattr(response, 'content'):
+                content_preview = str(response.content)[:150]
+                logger.info(f"📝 Content preview: {content_preview}...")
+
+            logger.info("⬆️ EXIT: agent_node (returning response)")
+            logger.info("=" * 60)
 
             return {"messages": [response]}
 
         except Exception as e:
-            logger.error(f"Error in agent_node: {e}", exc_info=True)
+            logger.error(f"❌ Error in agent_node: {e}", exc_info=True)
             # Return error message
             error_msg = AIMessage(content=f"I encountered an error: {str(e)}")
             return {"messages": [error_msg]}
@@ -237,16 +280,41 @@ Respond to the user in a friendly, helpful manner.
 
         Uses LangChain's built-in ToolNode which properly handles InjectedState.
         """
-        if debug:
-            logger.info("ENTER: tool_node")
-            messages = state.get("messages", [])
-            if messages:
-                last_message = messages[-1]
-                if isinstance(last_message, AIMessage) and hasattr(last_message, 'tool_calls'):
-                    logger.info(f"Executing {len(last_message.tool_calls)} tool calls")
+        logger.info("=" * 60)
+        logger.info("🔧 ENTER: tool_node")
+
+        messages = state.get("messages", [])
+        if messages:
+            last_message = messages[-1]
+            if isinstance(last_message, AIMessage) and hasattr(last_message, 'tool_calls'):
+                tool_count = len(last_message.tool_calls)
+                tool_names = [call.get('name', 'unknown') for call in last_message.tool_calls]
+                logger.info(f"🔨 Executing {tool_count} tool(s): {tool_names}")
+            else:
+                logger.warning("⚠️ tool_node called but last message has no tool_calls")
+        else:
+            logger.warning("⚠️ tool_node called but no messages in state")
 
         # Use the pre-created ToolNode instance which handles InjectedState correctly
+        logger.info("📞 Invoking ToolNode...")
+        import time
+        start_time = time.time()
+
         result = await tool_node_instance.ainvoke(state, config)
+
+        elapsed_time = time.time() - start_time
+        logger.info(f"✅ ToolNode completed in {elapsed_time:.2f}s")
+
+        # Log tool results
+        if 'messages' in result:
+            tool_messages = [msg for msg in result['messages'] if isinstance(msg, ToolMessage)]
+            logger.info(f"📦 ToolNode returned {len(tool_messages)} tool messages")
+            for tm in tool_messages:
+                content_preview = str(tm.content)[:100] if tm.content else 'empty'
+                logger.info(f"  [{tm.name}]: {content_preview}...")
+
+        logger.info("⬆️ EXIT: tool_node")
+        logger.info("=" * 60)
 
         # ToolNode returns a dict with messages
         return result

@@ -505,6 +505,8 @@ async def node_final_message(state: AgentState):
 
     logger.info("=" * 50)
     logger.info("ENTER: node_final_message")
+    
+    logger.info(f"Final Node AgentState: {state}")
 
     customer_data = state.get("customer_data", {})
     customer_id = customer_data.get("id")

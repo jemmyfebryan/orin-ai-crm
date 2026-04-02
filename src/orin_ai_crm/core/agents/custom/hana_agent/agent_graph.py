@@ -199,15 +199,15 @@ class OrchestratorDecision(BaseModel):
     """Orchestrator routing decision schema with forced output structure."""
     next_agent: Literal["profiling", "sales", "ecommerce", "support", "final"] = Field(
         description=(
-            "Next agent to call: profiling, sales, ecommerce, support, or final. "
-            "IMPORTANT: Use ONLY these exact values without any suffixes or prefixes."
+            "Agent yang akan dipanggil berikutnya: profiling, sales, ecommerce, support, or final. "
+            "Use ONLY these exact values without any suffixes or prefixes."
         )
     )
     reasoning: str = Field(
-        description="Brief explanation of your decision"
+        description="Penjelasan mengenai decision yang dibuat"
     )
     instruction: str = Field(
-        description="Your instruction to the next agent in 1st person. Speak as if you are directly telling the agent what to do. Example: 'Extract the customer's domicile from their message' or 'Ask the customer about their vehicle type'"
+        description="Instruksi kepada next agent dalam point of view orang pertama. Bicara seperti apa yang ingin kamu bilang ke next_agent agar next_agent mendapatkan konteks dari pertanyaan customer."
     )
 
     @field_validator('next_agent', mode='before')

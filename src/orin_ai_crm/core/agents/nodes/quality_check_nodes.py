@@ -2,7 +2,7 @@
 Quality Check Node - Evaluates AI answers and triggers human takeover if needed
 """
 
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -582,8 +582,49 @@ async def node_final_message(state: AgentState):
     # Get agent name for dynamic messaging
     agent_name = get_agent_name()
 
+    # Get current datetime in WIB (Waktu Indonesia Barat)
+    now_wib = datetime.now(WIB)
+
+    # Indonesian day and month names
+    hari_indo = {
+        "Monday": "Senin",
+        "Tuesday": "Selasa",
+        "Wednesday": "Rabu",
+        "Thursday": "Kamis",
+        "Friday": "Jumat",
+        "Saturday": "Sabtu",
+        "Sunday": "Minggu"
+    }
+
+    bulan_indo = {
+        "January": "Januari",
+        "February": "Februari",
+        "March": "Maret",
+        "April": "April",
+        "May": "Mei",
+        "June": "Juni",
+        "July": "Juli",
+        "August": "Agustus",
+        "September": "September",
+        "October": "Oktober",
+        "November": "November",
+        "December": "Desember"
+    }
+
+    # Format date in Indonesian: "Kamis, 2 April 2026"
+    day_en = now_wib.strftime("%A")
+    month_en = now_wib.strftime("%B")
+    day_indo = hari_indo.get(day_en, day_en)
+    month_indo = bulan_indo.get(month_en, month_en)
+    today = f"{day_indo}, {now_wib.day} {month_indo} {now_wib.year}"
+
+    # Format time: "19:30" (24-hour format)
+    datetime_now = now_wib.strftime("%H:%M")
+
     # Build system prompt for LLM
     system_prompt = f"""{agent_persona}
+ENVIRONMENT CONTEXT:
+Hari, Tanggal: {today}, {datetime_now}
 
 TASK:
 Kamu adalah {agent_name} ORIN GPS Tracker.

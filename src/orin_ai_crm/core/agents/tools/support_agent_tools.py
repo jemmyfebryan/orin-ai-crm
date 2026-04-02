@@ -7,17 +7,21 @@ These tools are used by the LangGraph agent for support-related operations.
 
 import os
 import json
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 from datetime import timedelta, timezone
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from langgraph.prebuilt import InjectedState
+import httpx
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
+from src.orin_ai_crm.core.agents.tools.vps_tools import query_vps_db
+from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -331,6 +335,8 @@ async def device_troubleshooting(
     - Customer reports GPS device is offline
     - Customer says GPS not updating
     - Customer reports device not showing location
+    
+    This tool is specific for GPS troubleshooting guide, other problem can use ask_technical_support tool instead
 
     Args:
         state: Agent state (contains customer_id)
@@ -340,8 +346,6 @@ async def device_troubleshooting(
     Returns:
         dict with: message (str), update_state (dict, optional), device_type (str)
     """
-    from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
-    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
     logger.info(f"TOOL: device_troubleshooting - device_name: {device_name}")
 
@@ -612,6 +616,193 @@ async def list_customer_devices(
     }
 
 
+@tool
+async def ask_technical_support(
+    state: Annotated[dict, InjectedState],
+    question: str
+) -> dict:
+    """
+    Ask the technical customer service by calling external API with customer's API tokens.
+
+    Use this tool when customer asks about:
+    Waktu operasional (jam kerja, durasi idle/moving), utilisasi kendaraan, jarak tempuh (KM), perilaku berkendara (overspeed, braking, cornering), analisis kecepatan, estimasi BBM, data statis gps lokasi/kecepatan, alert notifikasi (speeding, geofence, device on/off), laporan kendaraan (Excel), dan akun (password, status, expired)
+    
+    This tool will:
+    1. Get customer's phone number from state
+    2. Query VPS DB for all API tokens associated with the phone number
+    3. Send conversation history + question to technical support API for each token
+    4. Return responses from all successful API calls
+
+    Args:
+        state: Agent state (contains phone_number and messages_history)
+        question: The specific question or instruction to ask technical support (will be appended as last user message)
+
+    Returns:
+        dict with: responses (list of str) - List of successful responses from technical support,
+                    or error message if all requests failed
+    """
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    logger.info("TOOL: ask_technical_support")
+    logger.info(f"Question to technical support: {question[:100]}...")
+
+    # Get phone_number from state
+    phone_number = state.get("phone_number")
+
+    if not phone_number:
+        logger.error("TOOL: ask_technical_support - No phone_number in state!")
+        return {
+            'responses': [],
+            'error': 'Maaf, belum bisa identifikasi nomor telepon Kakak. Tolong hubungi CS kami ya 🙏'
+        }
+
+    logger.info(f"Querying VPS DB for api_token with phone_number: {phone_number}")
+
+    # Query VPS DB for api_tokens from users table
+    sql_query = f"SELECT api_token FROM users WHERE phone_number = '{phone_number}' AND deleted_at IS NULL"
+    result = await query_vps_db(sql_query)
+
+    if not result:
+        logger.error(f"TOOL: ask_technical_support - VPS DB query failed for phone_number: {phone_number}")
+        return {
+            'responses': [],
+            'error': 'Maaf, terjadi kesalahan saat menghubungi technical support. Silakan hubungi CS kami ya 🙏'
+        }
+
+    # VPS DB returns data in "rows" key
+    rows = result.get("rows", [])
+    api_tokens = [row.get("api_token") for row in rows if row.get("api_token")]
+
+    if not api_tokens:
+        logger.warning(f"No api_tokens found for phone_number: {phone_number}")
+        return {
+            'responses': [],
+            'error': 'Maaf, belum bisa menemukan akun technical support Kakak. Silakan hubungi CS kami ya 🙏'
+        }
+
+    logger.info(f"Found {len(api_tokens)} api_tokens for phone_number: {phone_number}")
+
+    # Get messages_history from state and convert to OpenAI format
+    messages_history = state.get("messages_history", [])
+
+    # Convert LangChain messages to OpenAI format (only HumanMessage and AIMessage)
+    openai_messages = []
+    for msg in messages_history:
+        if isinstance(msg, HumanMessage):
+            openai_messages.append({
+                "role": "user",
+                "content": msg.content
+            })
+        elif isinstance(msg, AIMessage):
+            openai_messages.append({
+                "role": "assistant",
+                "content": msg.content
+            })
+
+    # Append the question as the last user message
+    # This ensures the orchestrator instruction affects what the technical support receives
+    openai_messages.append({
+        "role": "user",
+        "content": question
+    })
+
+    logger.info(f"Converted {len(openai_messages)} messages to OpenAI format (including question)")
+
+    # Prepare API endpoint
+    orinai_api_ip = os.getenv("ORINAI_API_IP", "localhost")
+    orinai_api_port = os.getenv("ORINAI_API_PORT", "8085")
+    api_url = f"http://{orinai_api_ip}:{orinai_api_port}/chat_api"
+
+    logger.info(f"Calling technical support API at: {api_url}")
+
+    # Make async POST requests for each api_token
+    successful_responses = []
+    errors = []
+
+    async def call_api_for_token(api_token: str) -> Optional[str]:
+        """Call API for a single token and return response or None if failed."""
+        try:
+            headers = {
+                "Authorization": f"Bearer {api_token}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "messages": openai_messages
+            }
+
+            logger.info(f"Calling API for token {api_token[:10]}... with {len(openai_messages)} messages")
+
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(
+                    api_url,
+                    json=payload,
+                    headers=headers
+                )
+
+                logger.info(f"Response status: {response.status_code} for token {api_token[:10]}...")
+                logger.info(f"Response headers: {dict(response.headers)}")
+
+                response.raise_for_status()
+
+                # Parse response JSON
+                response_json = response.json()
+                logger.info(f"Response JSON for token {api_token[:10]}...: {str(response_json)[:200]}...")
+
+                # Extract response from response_json.data.response
+                if "data" in response_json and isinstance(response_json["data"], dict):
+                    api_response = response_json["data"].get("response", "")
+                    logger.info(f"API call successful for token {api_token[:10]}...")
+                    return api_response
+                else:
+                    logger.warning(f"Unexpected response format for token {api_token[:10]}...: {response_json}")
+                    return None
+
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout for token {api_token[:10]}... after 2 minutes")
+            errors.append("Request timeout after 2 minutes")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP status error for token {api_token[:10]}...: {e.response.status_code} - {e.response.text[:200]}")
+            errors.append(f"HTTP {e.response.status_code}: {e.response.text[:100]}")
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error for token {api_token[:10]}...: {type(e).__name__}: {str(e)}")
+            errors.append(f"{type(e).__name__}: {str(e)}")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling API for token {api_token[:10]}...: {type(e).__name__}: {str(e)}")
+            errors.append(f"{type(e).__name__}: {str(e)}")
+            return None
+
+    # Call API for each token concurrently
+    import asyncio
+    tasks = [call_api_for_token(token) for token in api_tokens]
+    results = await asyncio.gather(*tasks)
+
+    # Filter out None responses (failed calls)
+    successful_responses = [r for r in results if r is not None]
+
+    logger.info(f"Successful responses: {len(successful_responses)}/{len(api_tokens)}")
+
+    if not successful_responses:
+        # All requests failed
+        error_msg = f"Maaf, semua percobaan menghubungi technical support gagal. Silakan hubungi CS kami ya 🙏"
+        if errors:
+            # Log errors but don't expose to customer
+            logger.error(f"All API calls failed. Errors: {errors}")
+        return {
+            'responses': [],
+            'error': error_msg
+        }
+
+    # Return list of successful responses
+    return {
+        'responses': successful_responses
+    }
+
+
 # List of support tools for easy import
 SUPPORT_TOOLS = [
     human_takeover,
@@ -621,6 +812,7 @@ SUPPORT_TOOLS = [
     device_troubleshooting,
     get_company_profile,
     list_customer_devices,
+    ask_technical_support,
 ]
 
 # Export human_takeover separately for sales_agent

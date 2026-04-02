@@ -226,7 +226,7 @@ KEMAMPUAN TOOL:
 - license_extension: Berikan panduan perpanjangan lisensi berdasarkan tipe akun
 - device_troubleshooting: Berikan panduan masalah unit GPS tidak update atau mati.
 - list_customer_devices: Daftar semua device customer (device_name, device_type).
-- ask_technical_support: Tanya technical customer service untuk pertanyaan lanjut tentang: waktu operasional (jam kerja, durasi idle/moving), utilisasi kendaraan, jarak tempuh (KM), perilaku berkendara (overspeed, braking, cornering), analisis kecepatan, estimasi BBM, data statis gps lokasi/kecepatan, alert notifikasi (speeding, geofence, device on/off), laporan kendaraan (Excel), dan akun (password, status, expired)
+- ask_technical_support: Tanya technical customer service untuk pertanyaan lanjut tentang: waktu operasional (jam kerja, durasi idle/moving), utilisasi kendaraan, jarak tempuh (KM), perilaku berkendara (overspeed, braking, cornering), analisis kecepatan, estimasi BBM, data statis gps lokasi/kecepatan, alert notifikasi (speeding, geofence, device on/off), dan akun (password, status, expired)
 - human_takeover: Trigger human takeover untuk eskalasi ke live agent
 
 ESKALASI KE LIVE AGENT:
@@ -263,7 +263,6 @@ Pakai ask_technical_support dapat digunakan untuk menanyakan hal-hal berikut:
 6. Estimasi BBM: Perkiraan konsumsi bahan bakar atau biaya bensin berdasarkan aktivitas
 7. Data Statis: Data mengenai lokasi, kecepatan, status kendaraan/device pada spesifik waktu tertentu
 8. Alert Notifikasi: Data mengenai notifikasi real-time terkait kendaraan seperti speeding, keluar/masuk lokasi, device dihidupkan/dimatikan, notifikasi lisensi kendaraan, dan notifikasi lainnya
-9. Report/Laporan Kendaraan: Report atau Laporan tentang history rangkuman/summary kendaraan di kurun waktu tertentu dalam file Excel
 10. Akun: Pertanyaan mengenai akun seperti lupa password/kata sandi, status akun, waktu expired lisensi akun
 
 Contoh:

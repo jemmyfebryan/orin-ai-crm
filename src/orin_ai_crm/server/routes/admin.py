@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select, or_
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import Response
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product
@@ -351,6 +352,81 @@ async def reset_products_endpoint_v2():
         )
 
 
+@router.get("/products/download")
+async def download_products_endpoint():
+    """
+    Download all products from database as a Python file.
+
+    This generates a Python file with DEFAULT_PRODUCTS list that can be used
+    to update the hardcoded default_products.py file.
+
+    Returns:
+        Python file with DEFAULT_PRODUCTS list
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Product).where(Product.is_active == True).order_by(Product.sort_order.asc(), Product.name.asc())
+            )
+            products = result.scalars().all()
+
+            # Generate Python file content
+            lines = [
+                '"""',
+                'Default Products for ORIN GPS Tracker',
+                '',
+                'This file contains the default product catalog.',
+                'These products are loaded into the database on first startup or when reset.',
+                '',
+                'Auto-generated from database on: ' + datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                '"""',
+                '',
+                'DEFAULT_PRODUCTS = ['
+            ]
+
+            for p in products:
+                lines.append('    {')
+                lines.append(f'        "name": "{p.name}",')
+                lines.append(f'        "sku": "{p.sku}",')
+                lines.append(f'        "category": "{p.category}",')
+                lines.append(f'        "subcategory": "{p.subcategory}",')
+                lines.append(f'        "vehicle_type": "{p.vehicle_type}",')
+                lines.append(f'        "description": """{p.description}""",')
+                lines.append(f'        "features": {json.dumps(json.loads(p.features) if p.features else {}, indent=8, ensure_ascii=False)},')
+                lines.append(f'        "price": "{p.price}",')
+                lines.append(f'        "installation_type": "{p.installation_type}",')
+                lines.append(f'        "can_shutdown_engine": {str(p.can_shutdown_engine).lower()},')
+                lines.append(f'        "is_realtime_tracking": {str(p.is_realtime_tracking).lower()},')
+                lines.append(f'        "ecommerce_links": {json.dumps(json.loads(p.ecommerce_links) if p.ecommerce_links else {}, indent=8, ensure_ascii=False)},')
+                lines.append(f'        "images": {json.dumps(json.loads(p.images) if p.images else [], indent=8, ensure_ascii=False)},')
+                lines.append(f'        "specifications": {json.dumps(json.loads(p.specifications) if p.specifications else {}, indent=8, ensure_ascii=False)},')
+                lines.append(f'        "compatibility": {json.dumps(json.loads(p.compatibility) if p.compatibility else {}, indent=8, ensure_ascii=False)},')
+                lines.append(f'        "is_active": {str(p.is_active).lower()},')
+                lines.append(f'        "sort_order": {p.sort_order}')
+                lines.append('    },')
+
+            lines.append(']')
+
+            python_content = '\n'.join(lines)
+
+            return Response(
+                content=python_content,
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename=default_products.py"
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Error in download_products_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response(
+            content=f"Error: {str(e)}",
+            status_code=500
+        )
+
+
 # ============================================================================
 # PROMPT MANAGEMENT ENDPOINTS
 # ============================================================================
@@ -465,4 +541,71 @@ async def reset_prompts_endpoint():
             deleted=0,
             created=0,
             errors=[str(e)]
+        )
+
+
+@router.get("/prompts/download")
+async def download_prompts_endpoint():
+    """
+    Download all prompts from database as a Python file.
+
+    This generates a Python file with DEFAULT_PROMPTS list that can be used
+    to update the hardcoded default_prompts.py file.
+
+    Returns:
+        Python file with DEFAULT_PROMPTS list
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Prompt).where(Prompt.is_active == True)
+            )
+            prompts = result.scalars().all()
+
+            # Generate Python file content
+            lines = [
+                '"""',
+                'Default Prompts for Hana AI Agent',
+                '',
+                'This file contains the default system prompts for all Hana agents.',
+                'These prompts are loaded into the database on first startup or when reset.',
+                '',
+                'Auto-generated from database on: ' + datetime.now(WIB).strftime('%Y-%m-%d %H:%M:%S %Z'),
+                '"""',
+                '',
+                'DEFAULT_PROMPTS = ['
+            ]
+
+            for p in prompts:
+                # Escape triple quotes in prompt_text
+                prompt_text_escaped = p.prompt_text.replace('"""', '\\"\\"\\"')
+
+                lines.append('    {')
+                lines.append(f'        "prompt_key": "{p.prompt_key}",')
+                lines.append(f'        "prompt_name": "{p.prompt_name}",')
+                lines.append(f'        "prompt_text": """{prompt_text_escaped}""",')
+                lines.append(f'        "description": "{p.description}",')
+                lines.append(f'        "prompt_type": "{p.prompt_type}",')
+                lines.append(f'        "is_active": {str(p.is_active).lower()}')
+                lines.append('    },')
+
+            lines.append(']')
+
+            python_content = '\n'.join(lines)
+
+            return Response(
+                content=python_content,
+                media_type="text/plain",
+                headers={
+                    "Content-Disposition": f"attachment; filename=default_prompts.py"
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"Error in download_prompts_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return Response(
+            content=f"Error: {str(e)}",
+            status_code=500
         )

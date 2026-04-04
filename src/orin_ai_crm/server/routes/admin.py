@@ -11,6 +11,7 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
 from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
+from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, execute_with_retry
 from src.orin_ai_crm.server.schemas.admin import (
     ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
     PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse,
@@ -24,6 +25,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
+@retry_db_operation(max_retries=3)
 async def soft_delete_customer_by_phone(phone_number: str) -> dict:
     """
     Soft delete a customer by phone number.

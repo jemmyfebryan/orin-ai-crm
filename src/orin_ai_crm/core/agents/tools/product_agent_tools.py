@@ -19,6 +19,7 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Product, ProductInquiry
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
+from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 import json
 
 logger = get_logger(__name__)
@@ -331,7 +332,7 @@ Generate the SQL query for: {question}"""
         # Execute the query
         async with AsyncSessionLocal() as db:
             # Use mappings() to get dict-like rows
-            result = await db.execute(text(generated_query))
+            result = await execute_with_retry(db.execute, text(generated_query), max_retries=3)
             result_mappings = result.mappings()
 
             # Convert to list of dicts
@@ -501,7 +502,7 @@ async def get_all_active_products() -> dict:
             Product.is_active == True
         ).order_by(Product.sort_order.asc(), Product.name.asc())
 
-        result = await db.execute(query)
+        result = await execute_with_retry(db.execute, query, max_retries=3)
         products = result.scalars().all()
 
         product_list = []
@@ -584,7 +585,7 @@ async def search_products(
             )
 
         query = query.order_by(Product.sort_order.asc())
-        result = await db.execute(query)
+        result = await execute_with_retry(db.execute, query, max_retries=3)
         products = result.scalars().all()
 
         product_list = []

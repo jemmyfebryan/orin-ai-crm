@@ -11,6 +11,7 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
+from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 from sqlalchemy import update
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
 
@@ -353,7 +354,7 @@ async def set_human_takeover_flag(customer_id: int):
         async with AsyncSessionLocal() as db:
             # Update human_takeover flag
             stmt = update(Customer).where(Customer.id == customer_id).values(human_takeover=True)
-            await db.execute(stmt)
+            await execute_with_retry(db.execute, stmt, max_retries=3)
             await db.commit()
 
             logger.info(f"Human takeover flag SET for customer_id: {customer_id}")
@@ -756,7 +757,7 @@ follow https://instagram.com/vastel.co.id"""
         try:
             async with AsyncSessionLocal() as db:
                 stmt = update(Customer).where(Customer.id == customer_id).values(is_onboarded=True)
-                await db.execute(stmt)
+                await execute_with_retry(db.execute, stmt, max_retries=3)
                 await db.commit()
                 logger.info(f"Is Onboarded SET to TRUE for customer_id: {customer_id}")
         except Exception as e:

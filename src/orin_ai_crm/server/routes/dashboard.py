@@ -12,6 +12,7 @@ from src.orin_ai_crm.core.models.database import (
     AsyncSessionLocal, Customer, LeadRouting,
     CustomerMeeting, ProductInquiry, IntentClassification, ChatLog
 )
+from src.orin_ai_crm.core.utils.db_retry import retry_db_operation
 from src.orin_ai_crm.server.schemas.dashboard import (
     DashboardResponse, OverviewMetrics,
     ConversationTrendsCard, ConversationTrendPoint,
@@ -50,6 +51,7 @@ COLORS = {
 
 
 @router.get("/dashboard", response_model=DashboardResponse)
+@retry_db_operation(max_retries=3)
 async def get_dashboard():
     """
     Get comprehensive dashboard data with all metrics and charts.

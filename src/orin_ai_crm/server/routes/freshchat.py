@@ -19,7 +19,8 @@ from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT, pending_timeouts
 from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
-from src.orin_ai_crm.core.models.database import Customer, AsyncSessionLocal
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal
+from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -144,7 +145,8 @@ async def process_freshchat_agent_task(
                         .order_by(desc(ChatSession.created_at))
                         .limit(len(ai_replies))
                     )
-                    db_result = await db.execute(query)
+                    # Use retry logic for database query
+                    db_result = await execute_with_retry(db.execute, query, max_retries=3)
                     rows = db_result.scalars().all()
                     # Reverse to get oldest->newest order
                     ai_reply_ids = list(reversed(rows))
@@ -383,7 +385,8 @@ async def process_freshchat_webhook_task(
                     .order_by(desc(ChatSession.created_at))
                     .limit(batch_message_count)
                 )
-                result = await db.execute(query)
+                # Use retry logic for database query
+                result = await execute_with_retry(db.execute, query, max_retries=3)
                 rows = result.scalars().all()
                 # Reverse to get oldest->newest order
                 user_message_ids = list(reversed(rows))

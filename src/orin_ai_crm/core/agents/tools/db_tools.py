@@ -5,9 +5,11 @@ from sqlalchemy import select
 
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, ChatSession, ChatLog, Customer, WIB
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.utils.db_retry import retry_db_operation
 
 logger = get_logger(__name__)
 
+@retry_db_operation(max_retries=3)
 async def get_or_create_customer(
     phone_number: Optional[str] = None,
     lid_number: Optional[str] = None,
@@ -98,6 +100,7 @@ async def get_or_create_customer(
     }
 
 
+@retry_db_operation(max_retries=3)
 async def get_chat_history(customer_id: int, limit: int = 20):
     """
     Mengambil riwayat chat paling baru dari database.
@@ -133,6 +136,7 @@ async def get_chat_history(customer_id: int, limit: int = 20):
     
 
 
+@retry_db_operation(max_retries=3)
 async def save_message_to_db(customer_id: Optional[int], role: str, content: str, content_type: str = "text") -> Optional[int]:
     """
     Simpan pesan ke database dengan customer_id.
@@ -288,6 +292,7 @@ async def get_customer_devices(customer_id: int) -> List[dict]:
     return devices
 
 
+@retry_db_operation(max_retries=3)
 async def soft_delete_customer(phone_number: str) -> dict:
     """
     Soft delete a customer by setting their deleted_at timestamp.
@@ -364,6 +369,7 @@ async def soft_delete_customer(phone_number: str) -> dict:
         }
 
 
+@retry_db_operation(max_retries=3)
 async def create_chat_log(
     customer_id: Optional[int],
     conversation_id: str,
@@ -413,6 +419,7 @@ async def create_chat_log(
         return chat_log.id
 
 
+@retry_db_operation(max_retries=3)
 async def update_chat_log(
     chat_log_id: int,
     status: str,

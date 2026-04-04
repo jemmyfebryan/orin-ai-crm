@@ -17,6 +17,7 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, LeadRouting
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
+from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, execute_with_retry
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -439,6 +440,7 @@ async def search_vehicle_in_vps(vehicle_name: str) -> dict:
 
 
 @tool
+@retry_db_operation(max_retries=3)
 async def create_lead_routing(
     customer_id: int,
     route_type: str,
@@ -468,7 +470,7 @@ async def create_lead_routing(
             (LeadRouting.customer_id == customer_id) &
             (LeadRouting.status == "pending")
         )
-        result = await db.execute(query)
+        result = await execute_with_retry(db.execute, query, max_retries=3)
         existing = result.scalars().first()
 
         if existing:

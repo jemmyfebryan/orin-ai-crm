@@ -16,15 +16,17 @@ DB_URL = f"mysql+aiomysql://{os.getenv('DB_USERNAME')}:{os.getenv('DB_PASSWORD')
 engine = create_async_engine(
     DB_URL,
     echo=False,
-    # pool_pre_ping removed - causes issues with aiomysql when connections are in bad state
-    pool_recycle=1800,          # Recycle connections after 30 minutes (less than typical MySQL wait_timeout)
-    pool_size=5,                # Number of connections to maintain
-    max_overflow=10,            # Additional connections beyond pool_size when needed
-    pool_timeout=30,            # Timeout for getting connection from pool
+    pool_pre_ping=True,         # Enable connection health checks before using
+    pool_recycle=3600,          # Recycle connections after 1 hour (increased from 30min)
+    pool_size=10,               # Increased pool size for better concurrency
+    max_overflow=20,            # More overflow connections for traffic spikes
+    pool_timeout=60,            # Increased timeout for getting connection from pool
     connect_args={
         "connect_timeout": 10,  # Connection timeout in seconds
         "autocommit": False,
         "charset": "utf8mb4",
+        "read_timeout": 30,     # Read timeout in seconds
+        "write_timeout": 30,    # Write timeout in seconds
     }
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

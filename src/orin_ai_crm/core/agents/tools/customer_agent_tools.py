@@ -11,6 +11,7 @@ from langchain_core.tools import tool
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
+from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -41,7 +42,7 @@ async def get_customer_profile(
 
     async with AsyncSessionLocal() as db:
         query = select(Customer).where(Customer.id == customer_id)
-        result = await db.execute(query)
+        result = await execute_with_retry(db.execute, query, max_retries=3)
         customer = result.scalars().first()
 
         if not customer:
@@ -111,7 +112,7 @@ async def update_customer_data(
 
         async with AsyncSessionLocal() as db:
             query = select(Customer).where(Customer.id == customer_id)
-            result = await db.execute(query)
+            result = await execute_with_retry(db.execute, query, max_retries=3)
             customer = result.scalars().first()
 
             if not customer:

@@ -25,8 +25,6 @@ engine = create_async_engine(
         "connect_timeout": 10,  # Connection timeout in seconds
         "autocommit": False,
         "charset": "utf8mb4",
-        "read_timeout": 30,     # Read timeout in seconds
-        "write_timeout": 30,    # Write timeout in seconds
     }
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

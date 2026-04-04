@@ -131,3 +131,50 @@ class ResetPromptsResponse(BaseModel):
     deleted: int
     created: int
     errors: list[str]
+
+
+# ============================================================================
+# CHAT HISTORY ENDPOINT SCHEMAS
+# ============================================================================
+
+class ContactItem(BaseModel):
+    """Single contact/customer item."""
+    id: int
+    phone_number: Optional[str] = None
+    name: Optional[str] = None
+    domicile: Optional[str] = None
+    vehicle: Optional[str] = None  # Combined from vehicle_id and vehicle_alias
+    unit_qty: Optional[int] = None
+    human_takeover: bool = False  # Whether human takeover is enabled
+    created_at: Optional[str] = None  # ISO format datetime
+    last_message_time: Optional[str] = None  # ISO format datetime
+
+
+class GetContactsResponse(BaseModel):
+    """Response schema for get-contacts endpoint."""
+    success: bool
+    contacts: list[ContactItem]
+    count: int
+
+
+class ChatMessageItem(BaseModel):
+    """Single chat message item."""
+    role: str  # 'user' or 'assistant' (mapped from 'ai')
+    content: str
+    timestamp: str  # ISO format datetime
+
+
+class GetChatHistoryResponse(BaseModel):
+    """Response schema for get-chat-history endpoint."""
+    success: bool
+    customer_id: int
+    messages: list[ChatMessageItem]
+    count: int
+
+
+class ToggleHumanTakeoverResponse(BaseModel):
+    """Response schema for toggle-human-takeover endpoint."""
+    success: bool
+    message: str
+    customer_id: int
+    human_takeover: bool  # The new state after toggle

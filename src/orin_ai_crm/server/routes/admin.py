@@ -3,27 +3,29 @@ Admin endpoints for customer management, product reset, and prompt management.
 """
 import json
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, desc, func
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product, ChatSession
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
 from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
 from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, execute_with_retry
 from src.orin_ai_crm.server.schemas.admin import (
     ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
     PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse,
-    ProductItem, GetProductsResponse, UpdateProductRequest, UpdateProductResponse
+    ProductItem, GetProductsResponse, UpdateProductRequest, UpdateProductResponse,
+    ContactItem, GetContactsResponse, ChatMessageItem, GetChatHistoryResponse,
+    ToggleHumanTakeoverResponse
 )
 
 # Setup WIB timezone (UTC+7)
 WIB = timezone(timedelta(hours=7))
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(prefix="/admin")
 
 
 @retry_db_operation(max_retries=3)
@@ -608,4 +610,230 @@ async def download_prompts_endpoint():
         return Response(
             content=f"Error: {str(e)}",
             status_code=500
+        )
+
+
+# ============================================================================
+# CHAT HISTORY ENDPOINTS
+# ============================================================================
+
+@router.get("/contacts", response_model=GetContactsResponse)
+async def get_contacts_endpoint():
+    """
+    Get all customers with their chat information.
+
+    Returns all customers where deleted_at IS NULL, sorted by last_message_time DESC.
+    Includes vehicle information (combining vehicle_id and vehicle_alias) and
+    the timestamp of their most recent message.
+    """
+    try:
+        logger.info("Fetching contacts list...")
+
+        async with AsyncSessionLocal() as db:
+            # Subquery to get the last message time for each customer
+            last_message_subquery = (
+                select(
+                    ChatSession.customer_id,
+                    func.max(ChatSession.created_at).label('last_msg_time')
+                )
+                .group_by(ChatSession.customer_id)
+                .subquery()
+            )
+
+            # Main query: customers with their last message time
+            query = (
+                select(
+                    Customer.id,
+                    Customer.phone_number,
+                    Customer.name,
+                    Customer.domicile,
+                    Customer.vehicle_id,
+                    Customer.vehicle_alias,
+                    Customer.unit_qty,
+                    Customer.human_takeover,
+                    Customer.created_at,
+                    last_message_subquery.c.last_msg_time
+                )
+                .outerjoin(last_message_subquery, Customer.id == last_message_subquery.c.customer_id)
+                .where(Customer.deleted_at.is_(None))
+                .order_by(desc(last_message_subquery.c.last_msg_time))
+            )
+
+            result = await db.execute(query)
+            rows = result.all()
+
+            contacts = []
+            for row in rows:
+                # Combine vehicle_id and vehicle_alias into a single vehicle field
+                vehicle = None
+                if row.vehicle_alias:
+                    vehicle = row.vehicle_alias
+                elif row.vehicle_id and row.vehicle_id != -1:
+                    vehicle = f"Vehicle ID: {row.vehicle_id}"
+
+                contacts.append(ContactItem(
+                    id=row.id,
+                    phone_number=row.phone_number,
+                    name=row.name,
+                    domicile=row.domicile,
+                    vehicle=vehicle,
+                    unit_qty=row.unit_qty,
+                    human_takeover=row.human_takeover if row.human_takeover is not None else False,
+                    created_at=row.created_at.isoformat() if row.created_at else None,
+                    last_message_time=row.last_msg_time.isoformat() if row.last_msg_time else None
+                ))
+
+            logger.info(f"Found {len(contacts)} contacts")
+
+            return GetContactsResponse(
+                success=True,
+                contacts=contacts,
+                count=len(contacts)
+            )
+
+    except Exception as e:
+        logger.error(f"Error in get_contacts_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return GetContactsResponse(
+            success=False,
+            contacts=[],
+            count=0
+        )
+
+
+@router.get("/contacts/{customer_id}/chat-history", response_model=GetChatHistoryResponse)
+async def get_chat_history_endpoint(customer_id: int):
+    """
+    Get all chat messages for a specific customer.
+
+    Returns all messages for the given customer_id, sorted by timestamp ASC.
+    Maps 'ai' role to 'assistant' for frontend consistency.
+    """
+    try:
+        logger.info(f"Fetching chat history for customer_id: {customer_id}")
+
+        async with AsyncSessionLocal() as db:
+            # First check if customer exists
+            customer_query = select(Customer).where(
+                Customer.id == customer_id,
+                Customer.deleted_at.is_(None)
+            )
+            customer_result = await db.execute(customer_query)
+            customer = customer_result.scalars().first()
+
+            if not customer:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Customer with id {customer_id} not found or has been deleted"
+                )
+
+            # Get all chat sessions for this customer
+            query = (
+                select(ChatSession)
+                .where(ChatSession.customer_id == customer_id)
+                .order_by(ChatSession.created_at.asc())
+            )
+
+            result = await db.execute(query)
+            chat_sessions = result.scalars().all()
+
+            # Convert to response format
+            messages = []
+            for session in chat_sessions:
+                # Map 'ai' role to 'assistant' for frontend
+                role = session.message_role
+                if role == 'ai':
+                    role = 'assistant'
+
+                messages.append(ChatMessageItem(
+                    role=role,
+                    content=session.content,
+                    timestamp=session.created_at.isoformat() if session.created_at else None
+                ))
+
+            logger.info(f"Found {len(messages)} messages for customer_id: {customer_id}")
+
+            return GetChatHistoryResponse(
+                success=True,
+                customer_id=customer_id,
+                messages=messages,
+                count=len(messages)
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_chat_history_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return GetChatHistoryResponse(
+            success=False,
+            customer_id=customer_id,
+            messages=[],
+            count=0
+        )
+
+
+@router.put("/contacts/{customer_id}/human-takeover", response_model=ToggleHumanTakeoverResponse)
+async def toggle_human_takeover_endpoint(customer_id: int):
+    """
+    Toggle human takeover status for a specific customer.
+
+    When human_takeover is enabled, the AI system will route messages directly
+    to human agents instead of processing them with AI agents.
+
+    Args:
+        customer_id: The customer ID to toggle human takeover for
+
+    Returns:
+        ToggleHumanTakeoverResponse with the new human_takeover state
+    """
+    try:
+        logger.info(f"Toggling human_takeover for customer_id: {customer_id}")
+
+        async with AsyncSessionLocal() as db:
+            # Check if customer exists
+            customer_query = select(Customer).where(
+                Customer.id == customer_id,
+                Customer.deleted_at.is_(None)
+            )
+            customer_result = await db.execute(customer_query)
+            customer = customer_result.scalars().first()
+
+            if not customer:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Customer with id {customer_id} not found or has been deleted"
+                )
+
+            # Toggle human_takeover status
+            new_status = not customer.human_takeover
+            customer.human_takeover = new_status
+            customer.updated_at = datetime.now(WIB)
+
+            await db.commit()
+            await db.refresh(customer)
+
+            status_text = "enabled" if new_status else "disabled"
+            logger.info(f"Human takeover {status_text} for customer_id: {customer_id}")
+
+            return ToggleHumanTakeoverResponse(
+                success=True,
+                message=f"Human takeover {status_text} for customer {customer_id}",
+                customer_id=customer_id,
+                human_takeover=new_status
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in toggle_human_takeover_endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return ToggleHumanTakeoverResponse(
+            success=False,
+            message=f"Error: {str(e)}",
+            customer_id=customer_id,
+            human_takeover=False
         )

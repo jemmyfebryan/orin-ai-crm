@@ -22,6 +22,7 @@ from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, g
 from src.orin_ai_crm.core.agents.tools.vps_tools import query_vps_db
 from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+from src.orin_ai_crm.core.utils.phone_utils import build_phone_number_sql_conditions
 from sqlalchemy import select
 
 logger = get_logger(__name__)
@@ -661,7 +662,9 @@ async def ask_technical_support(
     logger.info(f"Querying VPS DB for api_token with phone_number: {phone_number}")
 
     # Query VPS DB for api_tokens from users table
-    sql_query = f"SELECT api_token FROM users WHERE phone_number = '{phone_number}' AND deleted_at IS NULL"
+    # Use phone number variations to handle different formats in VPS DB
+    phone_conditions = build_phone_number_sql_conditions(phone_number)
+    sql_query = f"SELECT api_token FROM users WHERE ({phone_conditions}) AND deleted_at IS NULL"
     result = await query_vps_db(sql_query)
 
     if not result:
@@ -676,7 +679,7 @@ async def ask_technical_support(
     api_tokens = [row.get("api_token") for row in rows if row.get("api_token")]
 
     if not api_tokens:
-        logger.warning(f"No api_tokens found for phone_number: {phone_number}")
+        logger.warning(f"No api_tokens found for phone_number: {phone_number} (tried multiple format variations)")
         return {
             'responses': [],
             'error': 'Maaf, belum bisa menemukan akun technical support Kakak. Silakan hubungi CS kami ya 🙏'

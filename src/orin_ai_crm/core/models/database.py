@@ -18,9 +18,9 @@ engine = create_async_engine(
     echo=False,
     pool_pre_ping=True,         # Enable connection health checks before using
     pool_recycle=3600,          # Recycle connections after 1 hour (increased from 30min)
-    pool_size=10,               # Increased pool size for better concurrency
-    max_overflow=20,            # More overflow connections for traffic spikes
-    pool_timeout=60,            # Increased timeout for getting connection from pool
+    pool_size=20,               # Increased pool size for better concurrency (was 10)
+    max_overflow=30,            # More overflow connections for traffic spikes (was 20)
+    pool_timeout=120,           # Increased timeout for getting connection from pool (was 60)
     connect_args={
         "connect_timeout": 10,  # Connection timeout in seconds
         "autocommit": False,

@@ -158,7 +158,7 @@
                     required
                     autofocus
                 >
-                <div class="hint">Format: Country code + number (without + or spaces)</div>
+                <div class="hint">Format: Country code + number (e.g., +628123456789 or 628123456789)</div>
             </div>
 
             <div class="form-group">
@@ -186,10 +186,10 @@
     </div>
 
     <script>
-        // Auto-format phone number (remove spaces, +, etc.)
+        // Auto-format phone number (only remove spaces and parentheses, keep +)
         const phoneInput = document.getElementById('phone_number');
         phoneInput.addEventListener('input', function(e) {
-            this.value = this.value.replace(/[\s\+\-\(\)]/g, '');
+            this.value = this.value.replace(/[\s\-\(\)]/g, '');
         });
     </script>
 </body>

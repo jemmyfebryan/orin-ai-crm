@@ -42,6 +42,9 @@ def retry_db_operation(
     """
     Decorator to retry database operations with exponential backoff.
 
+    This is the standard retry decorator for background tasks and general database operations.
+    For user-facing endpoints, use retry_db_endpoint instead.
+
     Args:
         max_retries: Maximum number of retry attempts (default: 3)
         base_delay: Initial delay in seconds (default: 0.5)
@@ -125,6 +128,111 @@ def retry_db_operation(
             if raise_on_failure:
                 raise DatabaseConnectionError(
                     f"Database operation failed after {max_retries} attempts"
+                )
+            return None  # type: ignore
+
+        return wrapper
+    return decorator
+
+
+def retry_db_endpoint(
+    max_retries: int = 10,
+    base_delay: float = 2.0,
+    backoff_factor: float = 1.5,
+    raise_on_failure: bool = True,
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """
+    Decorator to retry database operations for user-facing endpoints with aggressive retry.
+
+    This decorator is designed for endpoints where it's better to wait longer than to fail.
+    It uses more retries and longer delays compared to retry_db_operation.
+
+    Total wait time with defaults: ~90 seconds (2s + 3s + 4.5s + 6.75s + ...)
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 10)
+        base_delay: Initial delay in seconds (default: 2.0)
+        backoff_factor: Multiplier for delay after each retry (default: 1.5)
+        raise_on_failure: Whether to raise exception after all retries (default: True)
+
+    Returns:
+        Decorated function that retries on connection errors
+
+    Example:
+        @retry_db_endpoint()
+        @router.get("/contacts")
+        async def get_contacts_endpoint():
+            async with AsyncSessionLocal() as db:
+                # ... database operations ...
+                pass
+    """
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        @functools.wraps(func)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            last_exception = None
+            delay = base_delay
+
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (
+                    DisconnectionError,
+                    OperationalError,
+                    InterfaceError,
+                    TimeoutError,
+                ) as e:
+                    last_exception = e
+
+                    # Check if this is a connection-related error
+                    error_msg = str(e).lower()
+                    is_connection_error = any(
+                        keyword in error_msg
+                        for keyword in [
+                            "tcptransport closed",
+                            "can't connect",
+                            "lost connection",
+                            "connection pool",
+                            "mysql server has gone away",
+                            "already closed",
+                            "connection was closed",
+                            "operational error",
+                        ]
+                    )
+
+                    if not is_connection_error:
+                        # Not a connection error, raise immediately
+                        logger.error(f"Non-connection DB error in endpoint {func.__name__}: {str(e)}")
+                        raise
+
+                    # This is a connection error, retry
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            f"Endpoint {func.__name__}: DB connection error "
+                            f"(attempt {attempt + 1}/{max_retries}): {str(e)}\n"
+                            f"Retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        delay *= backoff_factor
+                    else:
+                        logger.error(
+                            f"Endpoint {func.__name__}: DB connection failed after {max_retries} attempts: {str(e)}"
+                        )
+
+                except SQLAlchemyError as e:
+                    # Other SQLAlchemy errors - don't retry, raise immediately
+                    logger.error(f"Endpoint {func.__name__}: SQLAlchemy error: {str(e)}")
+                    raise
+
+            # All retries exhausted
+            if raise_on_failure and last_exception:
+                raise DatabaseConnectionError(
+                    f"Endpoint {func.__name__}: Database operation failed after {max_retries} attempts: {str(last_exception)}"
+                ) from last_exception
+
+            # Return None or raise depending on configuration
+            if raise_on_failure:
+                raise DatabaseConnectionError(
+                    f"Endpoint {func.__name__}: Database operation failed after {max_retries} attempts"
                 )
             return None  # type: ignore
 

@@ -1,9 +1,11 @@
 """
 Application lifespan management - startup and shutdown events.
 """
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import text
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.models.database import engine, Base
@@ -19,6 +21,7 @@ async def lifespan(app: FastAPI):
     Manage application lifespan events.
 
     Startup:
+    - Verify database connection
     - Create database tables
     - Initialize default products if empty
     - Initialize default prompts if empty
@@ -28,6 +31,24 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("Application startup...")
+
+    # Verify database connection with retries
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("✅ Database connection verified")
+            break
+        except Exception as e:
+            logger.error(f"❌ Database connection attempt {attempt + 1}/{max_attempts}: {e}")
+            if attempt < max_attempts - 1:
+                logger.info(f"Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+            else:
+                logger.error("❌ Failed to connect to database after multiple attempts")
+                raise Exception("Database connection failed. Please check your database configuration.")
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

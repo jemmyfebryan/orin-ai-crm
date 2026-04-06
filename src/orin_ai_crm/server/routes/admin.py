@@ -9,10 +9,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product, ChatSession
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Prompt, Product, ChatSession, engine
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
 from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
-from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, execute_with_retry
+from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, retry_db_endpoint, execute_with_retry
 from src.orin_ai_crm.server.schemas.admin import (
     ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
     PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse,
@@ -91,6 +91,7 @@ async def soft_delete_customer_by_phone(phone_number: str) -> dict:
         }
 
 
+@retry_db_endpoint()
 @router.post("/delete-customer", response_model=ResetCustomerResponse)
 async def delete_customer_endpoint(req: ResetCustomerRequest):
     """
@@ -147,6 +148,7 @@ async def delete_customer_endpoint(req: ResetCustomerRequest):
         )
 
 
+@retry_db_endpoint()
 @router.post("/reset-products", response_model=ResetProductsResponse)
 async def reset_products_endpoint():
     """
@@ -183,6 +185,7 @@ async def reset_products_endpoint():
 # PRODUCT MANAGEMENT ENDPOINTS
 # ============================================================================
 
+@retry_db_endpoint()
 @router.get("/products", response_model=GetProductsResponse)
 async def get_products_endpoint():
     """
@@ -238,6 +241,7 @@ async def get_products_endpoint():
         )
 
 
+@retry_db_endpoint()
 @router.put("/products/{product_id}", response_model=UpdateProductResponse)
 async def update_product_endpoint(product_id: int, req: UpdateProductRequest):
     """
@@ -323,6 +327,7 @@ async def update_product_endpoint(product_id: int, req: UpdateProductRequest):
         )
 
 
+@retry_db_endpoint()
 @router.post("/products/reset", response_model=ResetProductsResponse)
 async def reset_products_endpoint_v2():
     """
@@ -354,6 +359,7 @@ async def reset_products_endpoint_v2():
         )
 
 
+@retry_db_endpoint()
 @router.get("/products/download")
 async def download_products_endpoint():
     """
@@ -433,6 +439,7 @@ async def download_products_endpoint():
 # PROMPT MANAGEMENT ENDPOINTS
 # ============================================================================
 
+@retry_db_endpoint()
 @router.get("/prompts", response_model=GetPromptsResponse)
 async def get_prompts_endpoint():
     """
@@ -476,6 +483,7 @@ async def get_prompts_endpoint():
         )
 
 
+@retry_db_endpoint()
 @router.put("/prompts/{prompt_key}", response_model=UpdatePromptResponse)
 async def update_prompt_endpoint(prompt_key: str, req: UpdatePromptRequest):
     """
@@ -515,6 +523,7 @@ async def update_prompt_endpoint(prompt_key: str, req: UpdatePromptRequest):
         )
 
 
+@retry_db_endpoint()
 @router.post("/prompts/reset", response_model=ResetPromptsResponse)
 async def reset_prompts_endpoint():
     """
@@ -546,6 +555,7 @@ async def reset_prompts_endpoint():
         )
 
 
+@retry_db_endpoint()
 @router.get("/prompts/download")
 async def download_prompts_endpoint():
     """
@@ -617,6 +627,7 @@ async def download_prompts_endpoint():
 # CHAT HISTORY ENDPOINTS
 # ============================================================================
 
+@retry_db_endpoint()
 @router.get("/contacts", response_model=GetContactsResponse)
 async def get_contacts_endpoint():
     """
@@ -702,6 +713,7 @@ async def get_contacts_endpoint():
         )
 
 
+@retry_db_endpoint()
 @router.get("/contacts/{customer_id}/chat-history", response_model=GetChatHistoryResponse)
 async def get_chat_history_endpoint(customer_id: int):
     """
@@ -775,6 +787,7 @@ async def get_chat_history_endpoint(customer_id: int):
         )
 
 
+@retry_db_endpoint()
 @router.put("/contacts/{customer_id}/human-takeover", response_model=ToggleHumanTakeoverResponse)
 async def toggle_human_takeover_endpoint(customer_id: int):
     """
@@ -837,3 +850,40 @@ async def toggle_human_takeover_endpoint(customer_id: int):
             customer_id=customer_id,
             human_takeover=False
         )
+
+
+# ============================================================================
+# DATABASE HEALTH CHECK ENDPOINT
+# ============================================================================
+
+@router.get("/health/db")
+async def db_health_check():
+    """
+    Check database connection pool health.
+
+    Returns detailed information about the connection pool status,
+    including current size, checked in/out connections, and overflow status.
+    Useful for monitoring database connection health and debugging pool exhaustion issues.
+    """
+    try:
+        pool = engine.pool
+
+        return {
+            "status": "healthy",
+            "pool": {
+                "size": pool.size(),
+                "checked_in": pool.checkedin(),
+                "checked_out": pool.checkedout(),
+                "overflow": pool.overflow(),
+                "max_overflow": pool.max_overflow,
+            },
+            "healthy": pool.checkedout() < (pool.size() + pool.max_overflow)
+        }
+
+    except Exception as e:
+        logger.error(f"Error checking database health: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "pool": None
+        }

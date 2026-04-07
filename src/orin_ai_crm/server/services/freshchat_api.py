@@ -284,8 +284,8 @@ async def notify_live_agent_takeover(
     Returns:
         bool: True if successful, False otherwise
     """
-    # Get agent name from database
-    agent_name = await get_agent_name()
+    # Get agent name from database (sync function, no await needed)
+    agent_name = get_agent_name()
 
     # Format the message
     if customer_name:
@@ -330,8 +330,8 @@ async def notify_live_agent_release(
     Returns:
         bool: True if successful, False otherwise
     """
-    # Get agent name from database
-    agent_name = await get_agent_name()
+    # Get agent name from database (sync function, no await needed)
+    agent_name = get_agent_name()
 
     # Format the message
     if customer_name:

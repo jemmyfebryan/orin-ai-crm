@@ -6,6 +6,7 @@ import httpx
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.server.config.settings import settings
+from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
 
 logger = get_logger(__name__)
 
@@ -265,4 +266,96 @@ async def send_pdf_to_freshchat(
             await asyncio.sleep(wait_time)
             return await send_pdf_to_freshchat(conversation_id, pdf_url, retry_count + 1)
         return False
+
+
+async def notify_live_agent_takeover(
+    customer_name: str,
+    customer_phone: str,
+    retry_count: int = 0
+) -> bool:
+    """
+    Send notification to live agent when human takeover is triggered.
+
+    Args:
+        customer_name: Customer's name
+        customer_phone: Customer's phone number
+        retry_count: Current retry attempt number
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Get agent name from database
+    agent_name = await get_agent_name()
+
+    # Format the message
+    if customer_name:
+        message = f"{agent_name} dimatikan untuk customer Kak {customer_name} ({customer_phone}), mohon Live Agent untuk segera mengambil alih sesi pesan!"
+    else:
+        message = f"{agent_name} dimatikan untuk customer dengan nomor {customer_phone}, mohon Live Agent untuk segera mengambil alih sesi pesan!"
+
+    # Check if live agent user ID is configured
+    if not settings.live_agent_user_id:
+        logger.warning("LIVE_AGENT_USER_ID not configured, skipping live agent notification")
+        return False
+
+    # Send message to live agent conversation
+    logger.info(f"Sending takeover notification to live agent for customer: {customer_name} ({customer_phone})")
+    success = await send_message_to_freshchat(
+        conversation_id=settings.live_agent_user_id,
+        message_content=message,
+        retry_count=retry_count
+    )
+
+    if success:
+        logger.info(f"✅ Takeover notification sent successfully to live agent")
+    else:
+        logger.error(f"❌ Failed to send takeover notification after retries")
+
+    return success
+
+
+async def notify_live_agent_release(
+    customer_name: str,
+    customer_phone: str,
+    retry_count: int = 0
+) -> bool:
+    """
+    Send notification to live agent when human takeover is released (AI takes back over).
+
+    Args:
+        customer_name: Customer's name
+        customer_phone: Customer's phone number
+        retry_count: Current retry attempt number
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # Get agent name from database
+    agent_name = await get_agent_name()
+
+    # Format the message
+    if customer_name:
+        message = f"{agent_name} kembali dihidupkan untuk customer Kak {customer_name} ({customer_phone})!"
+    else:
+        message = f"{agent_name} kembali dihidupkan untuk customer dengan nomor {customer_phone}!"
+
+    # Check if live agent user ID is configured
+    if not settings.live_agent_user_id:
+        logger.warning("LIVE_AGENT_USER_ID not configured, skipping live agent notification")
+        return False
+
+    # Send message to live agent conversation
+    logger.info(f"Sending release notification to live agent for customer: {customer_name} ({customer_phone})")
+    success = await send_message_to_freshchat(
+        conversation_id=settings.live_agent_user_id,
+        message_content=message,
+        retry_count=retry_count
+    )
+
+    if success:
+        logger.info(f"✅ Release notification sent successfully to live agent")
+    else:
+        logger.error(f"❌ Failed to send release notification after retries")
+
+    return success
 

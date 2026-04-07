@@ -18,6 +18,7 @@ class Settings:
         self.agent_id_bot = os.getenv("AGENT_ID_BOT", "")
         self.freshchat_webhook_token = os.getenv("FRESHCHAT_WEBHOOK_TOKEN", "")
         self.freshchat_api_version = os.getenv("FRESHCHAT_API_VERSION", "v2")
+        self.live_agent_user_id = os.getenv("LIVE_AGENT_USER_ID", "")
 
         # Freshchat Webhook Security - parse comma-separated to list
         webhook_ips = os.getenv("FRESHCHAT_WEBHOOK_ALLOWED_IPS", "")

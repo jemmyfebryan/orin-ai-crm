@@ -12,8 +12,9 @@ from src.orin_ai_crm.core.agents.config import get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.models.schemas import AgentState
 from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
-from sqlalchemy import update
+from sqlalchemy import update, select
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
+from src.orin_ai_crm.server.services.freshchat_api import notify_live_agent_takeover, notify_live_agent_release
 
 logger = get_logger(__name__)
 
@@ -343,23 +344,86 @@ Generate response HANYA dengan pesan yang akan dikirim ke customer."""
 
 async def set_human_takeover_flag(customer_id: int):
     """
-    Set human_takeover flag to True for a customer.
+    Set human_takeover flag to True for a customer and notify live agent.
 
     Args:
         customer_id: The customer's ID
     """
     logger.info(f"set_human_takeover_flag called - customer_id: {customer_id}")
 
+    customer_name = None
+    customer_phone = None
+
     try:
         async with AsyncSessionLocal() as db:
+            # Get customer details first for notification
+            customer_stmt = select(Customer).where(Customer.id == customer_id)
+            customer_result = await db.execute(customer_stmt)
+            customer = customer_result.scalars().first()
+
+            if customer:
+                customer_name = customer.name or customer.contact_name
+                customer_phone = customer.phone_number or customer.lid_number
+
             # Update human_takeover flag
             stmt = update(Customer).where(Customer.id == customer_id).values(human_takeover=True)
             await execute_with_retry(db.execute, stmt, max_retries=3)
             await db.commit()
 
             logger.info(f"Human takeover flag SET for customer_id: {customer_id}")
+
+        # Send notification to live agent (outside of database transaction)
+        # This runs even if notification fails - the flag is already set in DB
+        if customer_phone:
+            await notify_live_agent_takeover(
+                customer_name=customer_name or "",
+                customer_phone=customer_phone
+            )
+
     except Exception as e:
         logger.error(f"Failed to set human_takeover flag: {str(e)}")
+
+
+async def set_human_release_flag(customer_id: int):
+    """
+    Set human_takeover flag to False for a customer (releasing back to AI) and notify live agent.
+
+    Args:
+        customer_id: The customer's ID
+    """
+    logger.info(f"set_human_release_flag called - customer_id: {customer_id}")
+
+    customer_name = None
+    customer_phone = None
+
+    try:
+        async with AsyncSessionLocal() as db:
+            # Get customer details first for notification
+            customer_stmt = select(Customer).where(Customer.id == customer_id)
+            customer_result = await db.execute(customer_stmt)
+            customer = customer_result.scalars().first()
+
+            if customer:
+                customer_name = customer.name or customer.contact_name
+                customer_phone = customer.phone_number or customer.lid_number
+
+            # Update human_takeover flag
+            stmt = update(Customer).where(Customer.id == customer_id).values(human_takeover=False)
+            await execute_with_retry(db.execute, stmt, max_retries=3)
+            await db.commit()
+
+            logger.info(f"Human takeover flag RELEASED for customer_id: {customer_id}")
+
+        # Send notification to live agent (outside of database transaction)
+        # This runs even if notification fails - the flag is already set in DB
+        if customer_phone:
+            await notify_live_agent_release(
+                customer_name=customer_name or "",
+                customer_phone=customer_phone
+            )
+
+    except Exception as e:
+        logger.error(f"Failed to release human_takeover flag: {str(e)}")
 
 
 async def node_quality_check(state: AgentState):

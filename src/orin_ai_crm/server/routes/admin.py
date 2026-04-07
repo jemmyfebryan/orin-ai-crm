@@ -13,6 +13,7 @@ from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, Pr
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import reset_products_to_default
 from src.orin_ai_crm.core.agents.tools.prompt_tools import reset_prompts_to_default, update_prompt_in_db
 from src.orin_ai_crm.core.utils.db_retry import retry_db_operation, retry_db_endpoint, execute_with_retry
+from src.orin_ai_crm.server.services.freshchat_api import notify_live_agent_takeover, notify_live_agent_release
 from src.orin_ai_crm.server.schemas.admin import (
     ResetCustomerRequest, ResetCustomerResponse, ResetProductsResponse,
     PromptItem, GetPromptsResponse, UpdatePromptRequest, UpdatePromptResponse, ResetPromptsResponse,
@@ -796,6 +797,8 @@ async def toggle_human_takeover_endpoint(customer_id: int):
     When human_takeover is enabled, the AI system will route messages directly
     to human agents instead of processing them with AI agents.
 
+    This will also send a notification to the live agent via Freshchat.
+
     Args:
         customer_id: The customer ID to toggle human takeover for
 
@@ -820,6 +823,10 @@ async def toggle_human_takeover_endpoint(customer_id: int):
                     detail=f"Customer with id {customer_id} not found or has been deleted"
                 )
 
+            # Get customer details for notification before changing status
+            customer_name = customer.name or customer.contact_name
+            customer_phone = customer.phone_number or customer.lid_number
+
             # Toggle human_takeover status
             new_status = not customer.human_takeover
             customer.human_takeover = new_status
@@ -830,6 +837,22 @@ async def toggle_human_takeover_endpoint(customer_id: int):
 
             status_text = "enabled" if new_status else "disabled"
             logger.info(f"Human takeover {status_text} for customer_id: {customer_id}")
+
+            # Send notification to live agent (outside of database transaction)
+            # This runs even if notification fails - the flag is already set in DB
+            if customer_phone:
+                if new_status:
+                    # Human takeover enabled
+                    await notify_live_agent_takeover(
+                        customer_name=customer_name or "",
+                        customer_phone=customer_phone
+                    )
+                else:
+                    # Human takeover disabled (released back to AI)
+                    await notify_live_agent_release(
+                        customer_name=customer_name or "",
+                        customer_phone=customer_phone
+                    )
 
             return ToggleHumanTakeoverResponse(
                 success=True,

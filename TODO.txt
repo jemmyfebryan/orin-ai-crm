@@ -1,13 +1,13 @@
 -"Selamat malam, Kak Sinyooo! :)" tidak perlu dikasih '!' dibelakang nama, terlalu excited (?)
 -New flow untuk tanya apakah sudah ada akun orin/belum, harus add kolom baru ke customers table
 -Customer baru bilang hi/halo, jangan reply dulu, tunggu 3 menit baru follow Update
--Kalau SiOrin ga bisa kasih jawaban, selalu arahkan ke https://orin.id/panduan dan info akan kami arahkan ke Agen yang lebih mengerti permasalahan Kakak ya, mohon maaf.
 
 -Hapus waiting message "Mohon tunggu sebentar ..." (Done)
 -Agent name from Siorin to SiOrin (Done)
 -Tambahkan kolom 'user_id' untuk mapping ke devsites_orin (Done)
 -Jika punya akun orin, prompt untuk connect ke data orin, make new row di customers table (Done)
 -Jika belum punya, interactive tanya data diri (Done)
+-Kalau SiOrin ga bisa kasih jawaban, selalu arahkan ke https://orin.id/panduan dan info akan kami arahkan ke Agen yang lebih mengerti permasalahan Kakak ya, mohon maaf.
 
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover (Done)
 -Add agent for Chat API (tools from orinai-chat-app) (Done)

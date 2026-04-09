@@ -324,10 +324,13 @@ CUSTOMER: {customer_context}
 CONTEXT:
 AI tidak bisa menjawab pertanyaan ini dengan memuaskan. Sekarang live agent dari ORIN GPS Tracker akan mengambil alih untuk membantu.
 
+Sebagai informasi tambahan, customer bisa mengunjungi panduan umum di: https://orin.id/panduan
+
 RULES:
 - Pesan harus sopan dan ramah
 - Jelaskan bahwa live agent akan segera membantu
 - Berikan harapan kapan live agent akan membalas (misal: "segera", "dalam waktu singkat")
+- Sertakan link panduan: https://orin.id/panduan sebagai referensi sementara menunggu live agent
 - Gunakan emoji secara wajar
 - Personalized dengan nama customer
 - Jangan terlalu formal, natural seperti chat WhatsApp
@@ -340,7 +343,29 @@ Generate response HANYA dengan pesan yang akan dikirim ke customer."""
         HumanMessage(content="Generate the human takeover response.")
     ])
 
-    return response.content
+    # Handle different content formats from different LLM providers
+    # - OpenAI returns: str (direct text)
+    # - Gemini 4.x returns: list[dict] with 'type', 'text', 'extras' keys
+    content = response.content
+
+    # Convert to string if it's a list (Gemini 4.x format)
+    if isinstance(content, list):
+        # Extract text from content blocks
+        content_str = ""
+        for block in content:
+            if isinstance(block, dict):
+                # Gemini 4.x format: {'type': 'text', 'text': '...', 'extras': {...}}
+                if 'text' in block:
+                    content_str += block['text']
+            elif hasattr(block, 'text'):
+                content_str += block.text
+            elif isinstance(block, str):
+                content_str += block
+            elif hasattr(block, 'content'):
+                content_str += str(block.content)
+        content = content_str
+
+    return content
 
 async def set_human_takeover_flag(customer_id: int):
     """

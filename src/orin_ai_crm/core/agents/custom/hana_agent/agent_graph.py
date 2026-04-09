@@ -72,6 +72,10 @@ from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import (
     node_final_message,
     node_human_takeover
 )
+from src.orin_ai_crm.core.agents.nodes.intent_classification import (
+    node_intent_classification,
+    intent_router
+)
 
 logger = get_logger(__name__)
 
@@ -1195,15 +1199,24 @@ def build_hana_agent_graph():
     Build AI agent graph with Orchestrator-Worker pattern.
 
     Graph Structure:
-    1. Entry → orchestrator_node (decides first agent)
-    2. orchestrator_node → orchestrator_router (routes to worker)
-    3. Worker (profiling/sales/ecommerce/support) → orchestrator_node (back to orchestrator)
-    4. Loop: orchestrator → worker → orchestrator → worker → ...
-    5. When orchestrator says "final" → final_message (generates WhatsApp bubbles)
-    6. final_message → quality_check (evaluates actual WhatsApp bubbles user will see)
-    7. quality_check → END (send to user) OR human_takeover
-    8. When human_takeover flag is set → human_takeover (bypasses quality_check)
-    9. human_takeover → END
+    1. intent_classification → Classifies user message (greeting/other)
+    2. If greeting → Schedule follow-up after 10s → END (no immediate response)
+    3. If other → agent_entry_handler → orchestrator_node (decides first agent)
+    4. orchestrator_node → orchestrator_router (routes to worker)
+    5. Worker (profiling/sales/ecommerce/support) → orchestrator_node (back to orchestrator)
+    6. Loop: orchestrator → worker → orchestrator → worker → ...
+    7. When orchestrator says "final" → final_message (generates WhatsApp bubbles)
+    8. final_message → quality_check (evaluates actual WhatsApp bubbles user will see)
+    9. quality_check → END (send to user) OR human_takeover
+    10. When human_takeover flag is set → human_takeover (bypasses quality_check)
+    11. human_takeover → END
+
+    The intent_classification node:
+    - Classifies user message as "greeting" or "other"
+    - "greeting": Simple greetings like "Hi", "Hello" with no important information
+    - "other": Messages with actual content/information
+    - If greeting: Schedules follow-up message after 10s, ends workflow
+    - If other: Cancels any pending follow-up, continues to normal agent flow
 
     The orchestrator:
     - Analyzes customer context and conversation intent
@@ -1225,6 +1238,7 @@ def build_hana_agent_graph():
     workflow = StateGraph(AgentState)
 
     # Add nodes
+    workflow.add_node("intent_classification", node_intent_classification)
     workflow.add_node("agent_entry", agent_entry_handler)
     workflow.add_node("orchestrator", orchestrator_node)
     workflow.add_node("profiling_node", profiling_node)
@@ -1235,8 +1249,20 @@ def build_hana_agent_graph():
     workflow.add_node("final_message", node_final_message)
     workflow.add_node("human_takeover", node_human_takeover)
 
-    # Set entry point
-    workflow.set_entry_point("agent_entry")
+    # Set entry point to intent classification
+    workflow.set_entry_point("intent_classification")
+
+    # Intent classification → END or agent_entry
+    # If greeting: END (follow-up will be sent by background task)
+    # If other: agent_entry (continue normal flow)
+    workflow.add_conditional_edges(
+        "intent_classification",
+        intent_router,
+        {
+            "END": END,
+            "agent_entry": "agent_entry"
+        }
+    )
 
     # Entry handler → Orchestrator (traffic controller)
     workflow.add_edge("agent_entry", "orchestrator")

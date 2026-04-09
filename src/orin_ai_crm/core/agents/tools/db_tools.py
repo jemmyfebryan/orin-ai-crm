@@ -167,8 +167,8 @@ async def get_or_create_customer(
                         await db.commit()
                         logger.info(f"Customer {customer.id} updated with VPS user_id: {vps_user_id}")
 
-    # Determine send_form: False if VPS user exists (already a customer), otherwise based on is_onboarded
-    send_form = False if vps_user_id else (not customer.is_onboarded if customer.is_onboarded else True)
+    # Always set send_form to False - using interactive profiling instead
+    send_form = False
 
     return {
         'customer_id': customer.id,
@@ -182,7 +182,7 @@ async def get_or_create_customer(
         'contact_name': customer.contact_name or '',
         'human_takeover': customer.human_takeover if customer.human_takeover else False,
         'user_id': vps_user_id,  # VPS user ID from users table
-        'send_form': send_form  # Don't send form if VPS user exists
+        'send_form': send_form  # Always False - using interactive profiling
     }
 
 

@@ -146,21 +146,30 @@ async def check_profiling_completeness(
     - Need to check if we have enough customer data to proceed
     - Determining if profiling is done
     - Deciding between SALES vs ECOMMERCE route
+    - Finding which field to ask next (interactive profiling)
 
     Profiling is considered complete if at least ONE of:
     - domicile (location)
     - unit_qty (number of units, > 0)
     - vehicle_alias (vehicle type)
 
+    NOTE: 'name' is always known (contact_name, phone_number), so we skip asking for it.
+    Priority for asking: domicile → vehicle_alias → unit_qty
+
     Args:
-        name: Customer name
+        name: Customer name (always known, not checked)
         domicile: Customer location
         vehicle_alias: Vehicle type
         unit_qty: Number of units
         is_b2b: Business customer flag
 
     Returns:
-        dict with: is_complete (bool), missing_fields (list), recommended_route (str)
+        dict with:
+            - is_complete (bool): Whether profiling is complete
+            - missing_field (str or None): The next field to ask (domicile, vehicle_alias, or unit_qty)
+            - recommended_route (str or None): "SALES" or "ECOMMERCE" if complete
+            - unit_qty (int): Number of units
+            - is_b2b (bool): Business customer flag
     """
     profile = {
         'name': name,
@@ -174,12 +183,12 @@ async def check_profiling_completeness(
 
         # Check if we have enough data to proceed
         # At least one of: domicile, unit_qty (>0), or vehicle_alias
-        has_name = bool(profile.get('name'))
+        # NOTE: has_name is always True since name/contact_name/phone_number are always filled
         has_domicile = bool(profile.get('domicile'))
         has_unit_qty = profile.get('unit_qty', 0) > 0
         has_vehicle_alias = bool(profile.get('vehicle_alias'))
 
-        is_complete = has_name and (has_domicile or has_unit_qty or has_vehicle_alias)
+        is_complete = has_domicile or has_unit_qty or has_vehicle_alias
 
         # Determine route based on unit_qty
         # - If unit_qty >= 5 OR is_b2b = True → SALES
@@ -192,29 +201,29 @@ async def check_profiling_completeness(
         else:
             recommended_route = None
 
-        # For logging: what's missing
-        missing_fields = []
-        if not has_name:
-            missing_fields.append('name')
-        if not has_domicile:
-            missing_fields.append('domicile')
-        if not has_unit_qty:
-            missing_fields.append('unit_qty')
-        if not has_vehicle_alias:
-            missing_fields.append('vehicle_alias')
+        # Determine which field to ask next (priority: domicile → vehicle_alias → unit_qty)
+        # Skip 'name' since it's always known
+        missing_field = None
+        if not is_complete:
+            if not has_domicile:
+                missing_field = 'domicile'
+            elif not has_vehicle_alias:
+                missing_field = 'vehicle_alias'
+            elif not has_unit_qty:
+                missing_field = 'unit_qty'
 
         result = {
             'is_complete': is_complete,
-            # 'missing_fields': missing_fields,
-            # 'recommended_route': recommended_route,
-            # 'unit_qty': unit_qty,
-            # 'is_b2b': is_b2b,
-            # 'has_name': has_name,
-            # 'has_domicile': has_domicile,
-            # 'has_unit_qty': has_unit_qty,
-            # 'has_vehicle_alias': has_vehicle_alias
+            'missing_field': missing_field,  # ONE field at a time for interactive profiling
+            'recommended_route': recommended_route,
+            'unit_qty': unit_qty,
+            'is_b2b': is_b2b,
+            'has_domicile': has_domicile,
+            'has_unit_qty': has_unit_qty,
+            'has_vehicle_alias': has_vehicle_alias,
         }
-        if recommended_route: result['update_state'] = {'route': recommended_route}
+        if recommended_route:
+            result['update_state'] = {'route': recommended_route}
         logger.info(f"TOOL: check_profiling_completeness - DONE - result: {result}")
         return result
     except Exception as e:
@@ -223,11 +232,13 @@ async def check_profiling_completeness(
         traceback.print_exc()
         return {
             'is_complete': False,
-            # 'missing_fields': None,
-            # 'has_name': None,
-            # 'has_domicile': None,
-            # 'has_unit_qty': None,
-            # 'has_vehicle_alias': None,
+            'missing_field': 'domicile',  # Default to asking domicile on error
+            'recommended_route': None,
+            'unit_qty': 0,
+            'is_b2b': False,
+            'has_domicile': False,
+            'has_unit_qty': False,
+            'has_vehicle_alias': False,
         }
 
 

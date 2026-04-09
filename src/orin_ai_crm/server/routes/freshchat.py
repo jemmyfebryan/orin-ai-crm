@@ -289,11 +289,14 @@ async def send_timeout_message(conversation_id: str):
     """
     Send a timeout message to customer if processing takes too long.
     This function is called after 10 seconds if processing hasn't completed.
+
+    NOTE: Temporarily disabled - client doesn't want this message anymore.
     """
-    agent_name = get_agent_name()
-    timeout_message = f"Mohon tunggu sebentar ya, {agent_name} akan segera membalas..."
-    logger.info(f"Sending timeout message to conversation {conversation_id}")
-    await send_message_to_freshchat(conversation_id, timeout_message)
+    # agent_name = get_agent_name()
+    # timeout_message = f"Mohon tunggu sebentar ya, {agent_name} akan segera membalas..."
+    logger.info(f"Timeout message would be sent to conversation {conversation_id} (currently disabled)")
+    # TEMPORARILY DISABLED: Client doesn't want this message
+    # await send_message_to_freshchat(conversation_id, timeout_message)
 
 
 async def process_freshchat_webhook_task(

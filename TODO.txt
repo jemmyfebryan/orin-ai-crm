@@ -1,6 +1,14 @@
--Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover
--Add agent for Chat API (tools from orinai-chat-app)
+-Hapus waiting message "Mohon tunggu sebentar ..."
+-Agent name from Siorin to SiOrin
+-"Selamat malam, Kak Sinyooo! :)" tidak perlu dikasih '!' dibelakang nama, terlalu excited
+-New flow untuk tanya apakah sudah ada akun orin/belum, harus add kolom baru ke customers table
+-Jika punya akun orin, prompt untuk connect ke data orin, make new row di customers table
+-Jika belum punya, interactive tanya data diri
+-Customer baru bilang hi/halo, jangan reply dulu, tunggu 3 menit baru follow Update
+-Kalau SiOrin ga bisa kasih jawaban, selalu arahkan ke https://orin.id/panduan dan info akan kami arahkan ke Agen yang lebih mengerti permasalahan Kakak ya, mohon maaf.
 
+-Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover (Done)
+-Add agent for Chat API (tools from orinai-chat-app) (Done)
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)
 -TEST WEBHOOK (Done)
 -Knowledge tentang ORIN (Done)

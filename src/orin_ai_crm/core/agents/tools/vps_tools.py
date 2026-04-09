@@ -601,3 +601,84 @@ async def get_vps_user_id_by_phone(phone_number: str) -> Optional[int]:
     logger.info(f"Found VPS user_id: {user_id} for phone_number: {phone_number}")
 
     return user_id
+
+
+async def get_vps_user_details(vps_user_id: int) -> Optional[dict]:
+    """
+    Get detailed user information from VPS database by user ID.
+
+    This function fetches:
+    - User's city (for domicile)
+    - All device names for this user
+    - Device count
+
+    Args:
+        vps_user_id: VPS user ID
+
+    Returns:
+        dict with:
+            - city (str): User's city from VPS users table
+            - device_names (list): List of device names from VPS devices table
+            - unit_qty (int): Count of devices
+            OR None if error
+    """
+    logger.info(f"get_vps_user_details called - vps_user_id: {vps_user_id}")
+
+    if not vps_user_id:
+        logger.warning("Empty vps_user_id provided")
+        return None
+
+    # Step 1: Get user's city from users table
+    user_query = f"SELECT city FROM users WHERE id = {vps_user_id} AND deleted_at IS NULL LIMIT 1"
+
+    logger.info(f"VPS Query for user city: {user_query}")
+
+    user_result = await query_vps_db(user_query)
+
+    if not user_result:
+        logger.warning(f"VPS DB returned invalid result for user_id: {vps_user_id}")
+        return None
+
+    users = user_result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for user_id: {vps_user_id}")
+        return None
+
+    city = users[0].get("city") or ""
+    logger.info(f"Found city: '{city}' for user_id: {vps_user_id}")
+
+    # Step 2: Get all device names for this user
+    device_query = f"""
+        SELECT device_name
+        FROM devices
+        WHERE user_id = {vps_user_id}
+        AND deleted_at IS NULL
+        ORDER BY device_name ASC
+    """
+
+    logger.info(f"VPS Query for devices: {device_query}")
+
+    device_result = await query_vps_db(device_query)
+
+    if not device_result:
+        logger.warning(f"VPS DB returned invalid result for devices query")
+        return {
+            'city': city,
+            'device_names': [],
+            'unit_qty': 0
+        }
+
+    devices = device_result.get("rows", [])
+
+    # Extract device names
+    device_names = [device.get("device_name") for device in devices if device.get("device_name")]
+    unit_qty = len(device_names)
+
+    logger.info(f"Found {unit_qty} devices for user_id: {vps_user_id}: {device_names}")
+
+    return {
+        'city': city,
+        'device_names': device_names,
+        'unit_qty': unit_qty
+    }

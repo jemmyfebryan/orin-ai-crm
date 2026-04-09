@@ -86,16 +86,24 @@ async def get_or_create_customer(
             db.expunge(customer)
             logger.info(f"New customer CREATED: id={customer.id}")
 
-    # Query VPS DB for user ID (outside of database transaction)
+    # Query VPS DB for user ID and details (outside of database transaction)
     # This happens every time to ensure we have the latest VPS user connection
     vps_user_id = None
+    vps_details = None
+
     if phone_number:
-        from src.orin_ai_crm.core.agents.tools.vps_tools import get_vps_user_id_by_phone
+        from src.orin_ai_crm.core.agents.tools.vps_tools import get_vps_user_id_by_phone, get_vps_user_details
+
+        # Step 1: Get VPS user ID
         vps_user_id = await get_vps_user_id_by_phone(phone_number)
 
-        # If VPS user found and customer's user_id is different, update it
-        if vps_user_id and customer.user_id != vps_user_id:
-            logger.info(f"Updating customer {customer.id} with VPS user_id: {vps_user_id}")
+        # Step 2: If VPS user found, fetch additional details
+        if vps_user_id:
+            vps_details = await get_vps_user_details(vps_user_id)
+
+            # Step 3: Update customer with VPS data
+            logger.info(f"Updating customer {customer.id} with VPS data: user_id={vps_user_id}, details={vps_details}")
+
             async with AsyncSessionLocal() as db:
                 # Re-attach customer to this session
                 customer_query = select(Customer).where(Customer.id == customer.id)
@@ -103,9 +111,61 @@ async def get_or_create_customer(
                 db_customer = result.scalars().first()
 
                 if db_customer:
+                    # Update user_id
                     db_customer.user_id = vps_user_id
+
+                    # Update domicile from VPS city
+                    if vps_details and 'city' in vps_details:
+                        db_customer.domicile = vps_details['city']
+                        logger.info(f"Updated domicile: {vps_details['city']}")
+
+                    # Update vehicle_alias from VPS devices (separated by ";")
+                    if vps_details and 'device_names' in vps_details:
+                        device_names = vps_details['device_names']
+                        vehicle_alias = ";".join(device_names) if device_names else ""
+                        db_customer.vehicle_alias = vehicle_alias
+                        logger.info(f"Updated vehicle_alias: {vehicle_alias}")
+
+                    # Update unit_qty from VPS device count
+                    if vps_details and 'unit_qty' in vps_details:
+                        db_customer.unit_qty = vps_details['unit_qty']
+                        logger.info(f"Updated unit_qty: {vps_details['unit_qty']}")
+
+                    # Update is_b2b based on unit_qty > 5
+                    if vps_details and 'unit_qty' in vps_details:
+                        db_customer.is_b2b = vps_details['unit_qty'] > 5
+                        logger.info(f"Updated is_b2b: {db_customer.is_b2b} (unit_qty={vps_details['unit_qty']})")
+
+                    # Update is_onboarded to True (user exists in VPS)
+                    db_customer.is_onboarded = True
+                    logger.info(f"Updated is_onboarded: True")
+
                     await db.commit()
-                    logger.info(f"Customer {customer.id} updated with VPS user_id: {vps_user_id}")
+                    await db.refresh(db_customer)
+                    logger.info(f"Customer {customer.id} updated with VPS data")
+
+                    # Update the local customer object with the new values
+                    customer.user_id = db_customer.user_id
+                    customer.domicile = db_customer.domicile
+                    customer.vehicle_alias = db_customer.vehicle_alias
+                    customer.unit_qty = db_customer.unit_qty
+                    customer.is_b2b = db_customer.is_b2b
+                    customer.is_onboarded = db_customer.is_onboarded
+                    logger.info(f"Local customer object updated with new values")
+        else:
+            # No VPS user found, just update user_id if needed
+            if customer.user_id != vps_user_id:
+                logger.info(f"Updating customer {customer.id} with VPS user_id: {vps_user_id}")
+                async with AsyncSessionLocal() as db:
+                    # Re-attach customer to this session
+                    customer_query = select(Customer).where(Customer.id == customer.id)
+                    result = await db.execute(customer_query)
+                    db_customer = result.scalars().first()
+
+                    if db_customer:
+                        db_customer.user_id = vps_user_id
+                        await db.commit()
+                        logger.info(f"Customer {customer.id} updated with VPS user_id: {vps_user_id}")
 
     return {
         'customer_id': customer.id,

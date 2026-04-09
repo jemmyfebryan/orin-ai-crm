@@ -18,41 +18,41 @@ def test_filter_final_messages():
 
     test_cases = [
         {
-            "name": "Remove exclamation after customer name",
+            "name": "Replace exclamation after customer name with comma",
             "customer_name": "Budi",
             "input_messages": [
                 "Halo kak Budi! Ada yang bisa saya bantu?",
                 "Terima kasih Budi! sudah saya catat.",
             ],
             "expected_output": [
-                "Halo kak Budi Ada yang bisa saya bantu?",
-                "Terima kasih Budi sudah saya catat.",
+                "Halo kak Budi, Ada yang bisa saya bantu?",
+                "Terima kasih Budi, sudah saya catat.",
             ]
         },
         {
-            "name": "Remove exclamation with 'Kak' prefix",
+            "name": "Replace exclamation with 'Kak' prefix",
             "customer_name": "Siti",
             "input_messages": [
                 "Kak Siti! Mohon tunggu sebentar ya.",
                 "Halo Kak Siti! Selamat datang di ORIN.",
             ],
             "expected_output": [
-                "Kak Siti Mohon tunggu sebentar ya.",
-                "Halo Kak Siti Selamat datang di ORIN.",
+                "Kak Siti, Mohon tunggu sebentar ya.",
+                "Halo Kak Siti, Selamat datang di ORIN.",
             ]
         },
         {
-            "name": "Remove exclamation with 'Kakak' prefix",
+            "name": "Replace exclamation with 'Kakak' prefix",
             "customer_name": "Andi",
             "input_messages": [
                 "Kakak Andi! Silakan cek katalog di atas.",
             ],
             "expected_output": [
-                "Kakak Andi Silakan cek katalog di atas.",
+                "Kakak Andi, Silakan cek katalog di atas.",
             ]
         },
         {
-            "name": "No exclamation to remove",
+            "name": "No exclamation to replace",
             "customer_name": "Rina",
             "input_messages": [
                 "Halo Rina, apa kabar?",
@@ -80,7 +80,7 @@ def test_filter_final_messages():
                 "Halo Dewi! Ada promo! Cek katalog ya!",
             ],
             "expected_output": [
-                "Halo Dewi Ada promo! Cek katalog ya!",
+                "Halo Dewi, Ada promo! Cek katalog ya!",
             ]
         },
     ]

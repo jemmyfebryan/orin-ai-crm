@@ -27,7 +27,7 @@ def filter_final_messages(final_messages: list[str], customer_name: str = "") ->
     to fix common formatting issues without re-prompting the LLM.
 
     Current filters:
-    - Remove exclamation mark after customer name: "{name}!" → "{name}"
+    - Replace exclamation mark after customer name with comma: "{name}!" → "{name},"
 
     Args:
         final_messages: List of message strings from node_final_message
@@ -44,18 +44,18 @@ def filter_final_messages(final_messages: list[str], customer_name: str = "") ->
     for message in final_messages:
         filtered_message = message
 
-        # Filter: Remove exclamation mark after customer name
-        # Example: "Halo kak Budi!" → "Halo kak Budi"
-        # But: "Halo kak Budi! Apa kabar?" → "Halo kak Budi Apa kabar?"
-        # We only remove '!' if it appears immediately after customer name
+        # Filter: Replace exclamation mark after customer name with comma
+        # Example: "Halo kak Budi! Ada yang bisa saya bantu?" → "Halo kak Budi, Ada yang bisa saya bantu?"
+        # But: "Halo kak Budi! Apa kabar?" → "Halo kak Budi, Apa kabar?"
+        # We only replace '!' immediately after customer name
         if customer_name:
-            # Remove '!' after customer name
-            filtered_message = filtered_message.replace(f"{customer_name}!", customer_name)
+            # Replace '!' after customer name with ','
+            filtered_message = filtered_message.replace(f"{customer_name}!", f"{customer_name},")
 
             # Also handle common variations with "kak" prefix
-            filtered_message = filtered_message.replace(f"kak {customer_name}!", f"kak {customer_name}")
-            filtered_message = filtered_message.replace(f"Kak {customer_name}!", f"Kak {customer_name}")
-            filtered_message = filtered_message.replace(f"Kakak {customer_name}!", f"Kakak {customer_name}")
+            filtered_message = filtered_message.replace(f"kak {customer_name}!", f"kak {customer_name},")
+            filtered_message = filtered_message.replace(f"Kak {customer_name}!", f"Kak {customer_name},")
+            filtered_message = filtered_message.replace(f"Kakak {customer_name}!", f"Kakak {customer_name},")
 
         filtered_messages.append(filtered_message)
 

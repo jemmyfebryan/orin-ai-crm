@@ -105,16 +105,23 @@ async def send_first_follow_up_message(
     """
     Send first follow-up message to customer after 3 minutes of inactivity.
 
-    Message: "Halo kak, ada yang bisa {agent_name} bantu? 😊"
+    Message fetched from database: first_follow_up_message
     """
     logger.info(f"send_first_follow_up_message called - customer_id: {customer_id}")
 
     # Import here to avoid circular dependency
     from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
     from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
-    # Generate first follow-up message
-    follow_up_text = f"Halo kak, ada yang bisa {agent_name} bantu? 😊"
+    # Fetch first follow-up message from database
+    follow_up_template = await get_prompt_from_db("first_follow_up_message")
+    if not follow_up_template:
+        logger.warning("first_follow_up_message not found in DB, using default")
+        follow_up_template = "Halo kak, ada yang bisa {agent_name} bantu? 😊"
+
+    # Format message with agent_name
+    follow_up_text = follow_up_template.format(agent_name=agent_name)
 
     try:
         # Use the Freshchat conversation ID provided
@@ -147,16 +154,20 @@ async def send_second_follow_up_message(
     """
     Send second follow-up message to customer after 6 minutes of inactivity.
 
-    Message: "Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya"
+    Message fetched from database: second_follow_up_message
     """
     logger.info(f"send_second_follow_up_message called - customer_id: {customer_id}")
 
     # Import here to avoid circular dependency
     from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
     from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
 
-    # Generate second follow-up message
-    follow_up_text = "Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya"
+    # Fetch second follow-up message from database
+    follow_up_text = await get_prompt_from_db("second_follow_up_message")
+    if not follow_up_text:
+        logger.warning("second_follow_up_message not found in DB, using default")
+        follow_up_text = "Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya"
 
     try:
         # Use the Freshchat conversation ID provided

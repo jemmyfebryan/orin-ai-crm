@@ -314,5 +314,17 @@ Pelayanan meliputi penjualan, pemasangan, garansi dan layanan Transport Manageme
 ✓ Harga kompetitif
 ✓ Bisa matikan mesin jarak jauh""",
         "description": "Company profile information for customer inquiries"
+    },
+    {
+        "prompt_key": "first_follow_up_message",
+        "prompt_name": "First Follow-Up Message (After Greeting)",
+        "prompt_text": """Halo kak, ada yang bisa {agent_name} bantu? 😊""",
+        "description": "First follow-up message sent after 3 minutes of customer greeting"
+    },
+    {
+        "prompt_key": "second_follow_up_message",
+        "prompt_name": "Second Follow-Up Message (After Greeting)",
+        "prompt_text": """Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya""",
+        "description": "Second follow-up message sent after 6 minutes of customer greeting"
     }
 ]

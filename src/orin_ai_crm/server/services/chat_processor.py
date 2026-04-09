@@ -205,8 +205,16 @@ async def process_chat_request(
         customer_name = customer_data.get('name', '')
         ai_replies = filter_final_messages(ai_replies, customer_name)
 
-    # If still no content, this is an error
-    if not ai_replies:
+    # Check if this was a greeting (no reply expected)
+    classification = final_state.get("classification", {})
+    intent = classification.get("intent", "")
+
+    if intent == "greeting":
+        logger.info("Intent classification was 'greeting' - no immediate reply sent (follow-up will be sent after 3 minutes)")
+        # Return empty replies for greetings (follow-up will be sent by background task)
+        ai_replies = []
+    # If still no content and not a greeting, this is an error
+    elif not ai_replies:
         logger.error("No AI reply found in final state!")
         ai_replies = ["Maaf, terjadi kesalahan sistem. Silakan coba lagi."]
 

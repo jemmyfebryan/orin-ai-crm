@@ -95,10 +95,11 @@ async def send_follow_up_message(
     customer_id: int,
     phone_number: str,
     lid_number: str,
+    conversation_id: str,
     agent_name: str
 ):
     """
-    Send a follow-up message to customer after 10 seconds of inactivity.
+    Send a follow-up message to customer after 3 minutes of inactivity.
 
     This function is called by the background task scheduled after greeting.
     """
@@ -112,26 +113,10 @@ async def send_follow_up_message(
     follow_up_text = f"Halo kak, ada yang bisa {agent_name} bantu? 😊"
 
     try:
-        # Get conversation ID from phone/lid number
-        # We need to get the Freshchat conversation ID
-        from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
-        from sqlalchemy import select
-
-        async with AsyncSessionLocal() as db:
-            stmt = select(Customer).where(Customer.id == customer_id)
-            result = await db.execute(stmt)
-            customer = result.scalars().first()
-
-            if not customer:
-                logger.error(f"Customer not found: {customer_id}")
-                return
-
-            # Get or create conversation ID
-            conversation_id = phone_number or lid_number
-
-            if not conversation_id:
-                logger.error(f"No conversation ID for customer: {customer_id}")
-                return
+        # Use the Freshchat conversation ID provided
+        if not conversation_id:
+            logger.error(f"No conversation_id provided for customer: {customer_id}")
+            return
 
         # Send follow-up message via Freshchat
         await send_message_to_freshchat(
@@ -152,6 +137,7 @@ async def schedule_follow_up_message(
     customer_id: int,
     phone_number: str,
     lid_number: str,
+    conversation_id: str,
     delay_seconds: int = 10
 ):
     """
@@ -163,6 +149,7 @@ async def schedule_follow_up_message(
         customer_id: Customer ID
         phone_number: Phone number for Freshchat
         lid_number: LID number for Freshchat
+        conversation_id: Freshchat conversation ID (UUID)
         delay_seconds: Delay before sending follow-up (default: 10 seconds)
 
     Returns:
@@ -181,6 +168,7 @@ async def schedule_follow_up_message(
             customer_id=customer_id,
             phone_number=phone_number,
             lid_number=lid_number,
+            conversation_id=conversation_id,
             agent_name=agent_name,
             delay_seconds=delay_seconds
         )
@@ -197,6 +185,7 @@ async def _follow_up_delay(
     customer_id: int,
     phone_number: str,
     lid_number: str,
+    conversation_id: str,
     agent_name: str,
     delay_seconds: int
 ):
@@ -215,6 +204,7 @@ async def _follow_up_delay(
                 customer_id=customer_id,
                 phone_number=phone_number,
                 lid_number=lid_number,
+                conversation_id=conversation_id,
                 agent_name=agent_name
             )
 
@@ -275,6 +265,7 @@ async def node_intent_classification(state):
     customer_id = state.get('customer_id')
     phone_number = state.get('phone_number')
     lid_number = state.get('lid_number')
+    conversation_id = state.get('conversation_id')  # Freshchat conversation ID
     messages = state.get('messages', [])
 
     # Get user's last message
@@ -324,6 +315,7 @@ async def node_intent_classification(state):
                 customer_id=customer_id,
                 phone_number=phone_number or "",
                 lid_number=lid_number or "",
+                conversation_id=conversation_id or "",  # Pass Freshchat conversation ID
                 delay_seconds=180
             )
 

@@ -23,6 +23,7 @@ async def process_chat_request(
     contact_name: Optional[str],
     is_new_chat: bool,
     skip_user_save: bool = False,
+    conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Process a chat request using the agentic AI workflow.
@@ -36,6 +37,7 @@ async def process_chat_request(
         contact_name: User's contact name
         is_new_chat: Whether this is a new conversation
         skip_user_save: If True, skip saving user message to DB (used for batched messages)
+        conversation_id: Freshchat conversation ID (for follow-up messages)
 
     Returns:
         Dict containing:
@@ -154,6 +156,7 @@ async def process_chat_request(
         "customer_data": customer_data,
         "send_form": send_form,
         "route": "DEFAULT",
+        "conversation_id": conversation_id,  # Freshchat conversation ID for follow-up messages
         # Initialize empty lists for images and PDFs
         "send_images": [],
         "send_pdfs": [],

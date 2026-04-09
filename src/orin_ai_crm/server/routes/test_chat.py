@@ -281,7 +281,8 @@ async def send_message_api(request: Request, req: SendMessageRequest):
             message=req.message,
             contact_name=req.contact_name,
             is_new_chat=True,
-            skip_user_save=True  # Already saved above
+            skip_user_save=True,  # Already saved above
+            conversation_id=None  # Test endpoint doesn't have real Freshchat conversation
         )
 
         logger.info(f"Test chat processed for customer_id={customer_id}: {len(result.get('replies', []))} AI replies")

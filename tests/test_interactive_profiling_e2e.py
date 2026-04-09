@@ -43,7 +43,8 @@ async def test_interactive_profiling_e2e():
             lid_number=None,
             message=message_1,
             contact_name="",
-            is_new_chat=True
+            is_new_chat=True,
+            conversation_id=None  # Test doesn't have real Freshchat conversation
         )
 
         print(f"\nAgent Response:")
@@ -81,7 +82,8 @@ async def test_interactive_profiling_e2e():
             lid_number=None,
             message=message_2,
             contact_name="",
-            is_new_chat=False
+            is_new_chat=False,
+            conversation_id=None  # Test doesn't have real Freshchat conversation
         )
 
         print(f"\nAgent Response:")
@@ -112,7 +114,8 @@ async def test_interactive_profiling_e2e():
             lid_number=None,
             message=message_3,
             contact_name="",
-            is_new_chat=False
+            is_new_chat=False,
+            conversation_id=None  # Test doesn't have real Freshchat conversation
         )
 
         print(f"\nAgent Response:")

@@ -40,6 +40,7 @@ async def chat_agent_endpoint(req: ChatAgentRequest):
             message=req.message,
             contact_name=req.contact_name,
             is_new_chat=req.is_new_chat,
+            conversation_id=None  # /chat-agent endpoint doesn't have Freshchat conversation
         )
 
         return ChatAgentResponse(

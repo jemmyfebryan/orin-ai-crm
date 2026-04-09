@@ -38,6 +38,8 @@ class AgentState(TypedDict):
     session_ending_detected: bool  # Flag to indicate user expressed satisfaction/closing (triggers review request)
     # Intent classification result
     classification: Optional[dict]  # Intent classification result from node_intent_classification
+    # Freshchat conversation tracking
+    conversation_id: Optional[str]  # Freshchat conversation ID (for follow-up messages)
 
 class CustomerProfile(BaseModel):
     name: Optional[str] = Field(default="", description="Nama pelanggan, kosongkan jika belum ada")

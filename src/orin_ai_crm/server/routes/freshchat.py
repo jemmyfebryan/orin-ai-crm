@@ -75,6 +75,7 @@ async def process_freshchat_agent_task(
             contact_name=contact_name,
             is_new_chat=is_new_chat,
             skip_user_save=skip_user_save,
+            conversation_id=conversation_id,  # Pass Freshchat conversation ID
         )
 
         # 2. CANCEL TIMEOUT TASK before sending final messages

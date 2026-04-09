@@ -1,6 +1,6 @@
--Hapus waiting message "Mohon tunggu sebentar ..."
--Agent name from Siorin to SiOrin
--"Selamat malam, Kak Sinyooo! :)" tidak perlu dikasih '!' dibelakang nama, terlalu excited
+-Hapus waiting message "Mohon tunggu sebentar ..." (Done)
+-Agent name from Siorin to SiOrin (Done)
+-"Selamat malam, Kak Sinyooo! :)" tidak perlu dikasih '!' dibelakang nama, terlalu excited (?)
 -New flow untuk tanya apakah sudah ada akun orin/belum, harus add kolom baru ke customers table
 -Jika punya akun orin, prompt untuk connect ke data orin, make new row di customers table
 -Jika belum punya, interactive tanya data diri

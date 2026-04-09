@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy import select
 
 from src.orin_ai_crm.core.logger import get_logger
+from src.orin_ai_crm.core.utils.phone_utils import build_phone_number_sql_conditions
 
 logger = get_logger(__name__)
 
@@ -554,3 +555,49 @@ async def get_customer_devices_from_vps(phone_number: str) -> List[dict]:
 
     logger.info(f"Found {len(formatted_devices)} devices for user_id: {user_id}")
     return formatted_devices
+
+
+async def get_vps_user_id_by_phone(phone_number: str) -> Optional[int]:
+    """
+    Get VPS user ID by phone number.
+
+    This function queries the VPS database to find a user matching the given phone number
+    and returns their user ID. It handles multiple phone number formats (with +62, 62, 0 prefix).
+
+    Args:
+        phone_number: Customer's phone number (can be in various formats)
+
+    Returns:
+        VPS user ID (int) if found, None if not found or on error
+    """
+    logger.info(f"get_vps_user_id_by_phone called - phone_number: {phone_number}")
+
+    if not phone_number:
+        logger.warning("Empty phone_number provided")
+        return None
+
+    # Use the existing phone utility to build SQL conditions
+    phone_conditions = build_phone_number_sql_conditions(phone_number)
+
+    # Query VPS DB for user ID
+    sql_query = f"SELECT id FROM users WHERE ({phone_conditions}) AND deleted_at IS NULL LIMIT 1"
+
+    logger.info(f"VPS Query for user ID: {sql_query}")
+
+    result = await query_vps_db(sql_query)
+
+    if not result:
+        logger.warning(f"VPS DB returned invalid result for phone_number: {phone_number}")
+        return None
+
+    # VPS DB API returns data in "rows" key
+    users = result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for phone_number: {phone_number}")
+        return None
+
+    user_id = users[0].get("id")
+    logger.info(f"Found VPS user_id: {user_id} for phone_number: {phone_number}")
+
+    return user_id

@@ -44,6 +44,7 @@ class Customer(Base):
     is_b2b = Column(Boolean, default=False)
     is_onboarded = Column(Boolean, default=False)
     human_takeover = Column(Boolean, default=False)  # Flag untuk human takeover when AI cannot handle
+    user_id = Column(Integer, nullable=True)  # VPS user ID from users table
     deleted_at = Column(DateTime, nullable=True, index=True)  # Soft delete timestamp (indexed for performance)
     created_at = Column(DateTime, default=lambda: datetime.now(WIB))
     updated_at = Column(DateTime, default=lambda: datetime.now(WIB), onupdate=lambda: datetime.now(WIB))

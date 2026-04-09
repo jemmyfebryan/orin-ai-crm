@@ -24,11 +24,11 @@ async def get_or_create_customer(
     - You need customer_id for other operations
 
     Returns:
-        dict with: customer_id, name, domicile, vehicle_id, vehicle_alias, unit_qty, is_b2b, is_onboarded
+        dict with: customer_id, name, domicile, vehicle_id, vehicle_alias, unit_qty, is_b2b, is_onboarded, user_id
 
     Example:
         Input: phone_number="628123456789", contact_name="Budi"
-        Output: {customer_id: 123, name: "Budi", domicile: "Jakarta", ...}
+        Output: {customer_id: 123, name: "Budi", domicile: "Jakarta", ..., user_id: 456}
     """
     logger.info(f"TOOL: get_or_create_customer - phone: {phone_number}, lid: {lid_number}, contact: {contact_name}")
 
@@ -86,6 +86,27 @@ async def get_or_create_customer(
             db.expunge(customer)
             logger.info(f"New customer CREATED: id={customer.id}")
 
+    # Query VPS DB for user ID (outside of database transaction)
+    # This happens every time to ensure we have the latest VPS user connection
+    vps_user_id = None
+    if phone_number:
+        from src.orin_ai_crm.core.agents.tools.vps_tools import get_vps_user_id_by_phone
+        vps_user_id = await get_vps_user_id_by_phone(phone_number)
+
+        # If VPS user found and customer's user_id is different, update it
+        if vps_user_id and customer.user_id != vps_user_id:
+            logger.info(f"Updating customer {customer.id} with VPS user_id: {vps_user_id}")
+            async with AsyncSessionLocal() as db:
+                # Re-attach customer to this session
+                customer_query = select(Customer).where(Customer.id == customer.id)
+                result = await db.execute(customer_query)
+                db_customer = result.scalars().first()
+
+                if db_customer:
+                    db_customer.user_id = vps_user_id
+                    await db.commit()
+                    logger.info(f"Customer {customer.id} updated with VPS user_id: {vps_user_id}")
+
     return {
         'customer_id': customer.id,
         'name': customer.name or '',
@@ -96,7 +117,8 @@ async def get_or_create_customer(
         'is_b2b': customer.is_b2b if customer.is_b2b else False,
         'is_onboarded': customer.is_onboarded if customer.is_onboarded else False,
         'contact_name': customer.contact_name or '',
-        'human_takeover': customer.human_takeover if customer.human_takeover else False
+        'human_takeover': customer.human_takeover if customer.human_takeover else False,
+        'user_id': vps_user_id  # VPS user ID from users table
     }
 
 

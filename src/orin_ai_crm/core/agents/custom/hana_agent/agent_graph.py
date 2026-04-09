@@ -356,6 +356,7 @@ async def agent_entry_handler(state: AgentState) -> Dict:
             'unit_qty': customer.get('unit_qty', 0),
             'is_b2b': customer.get('is_b2b', False),
             'is_onboarded': customer.get('is_onboarded', False),
+            'user_id': customer.get('user_id'),  # VPS user ID
         }
 
         # Update state with customer info

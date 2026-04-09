@@ -52,36 +52,34 @@ async def classify_user_intent(user_message: str) -> IntentClassification:
     """
     logger.info(f"classify_user_intent called - message: {user_message[:100]}...")
 
+    # Import here to avoid circular dependency
+    from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+
     agent_name = get_agent_name()
 
-    system_prompt = f"""You are {agent_name}, an AI assistant from ORIN GPS Tracker.
+    # Fetch intent classification prompt from database
+    system_prompt_template = await get_prompt_from_db("intent_classification_prompt")
+    if not system_prompt_template:
+        logger.warning("intent_classification_prompt not found in DB, using default")
+        system_prompt_template = """You are {agent_name}, an AI assistant from ORIN GPS Tracker.
 
 TASK:
 Classify the user's message intent into one of two categories:
 
-1. "greeting" - Simple greeting with NO important information, such as:
+1. "greeting" - Simple greeting, such as:
    - "Hi", "Hello", "Halo"
    - "Halo kak", "Hi kak"
-   - "Saya pengguna orin", "I'm an orin user"
+   - "Saya pengguna orin"
    - "Minta tolong", "Help me", "Tolong"
    - "Halo test", "Testing"
    - "P", "Pagi", "Siang", "Sore", "Malam"
-   - Any greeting WITHOUT specific questions, requests, or information needs
 
-2. "other" - Messages with actual content/information, such as:
-   - Product inquiries: "Info produk OBU V", "Berapa harga GPS", "Saya mau pasang GPS"
-   - Technical issues: "GPS saya tidak aktif", "Tidak bisa tracking"
-   - Specific questions: "Apakah ada fitur X", "Bagaimana cara setting"
-   - Complaints, requests for support, detailed conversations
-   - Any message that shows a clear intent or needs a response
-
-RULES:
-- Be LENIENT with "greeting" classification - if unsure, classify as "greeting"
-- If message contains ANY specific question, product mention, or clear intent, classify as "other"
-- Single words or very short phrases without context → "greeting"
-- Messages asking for help but WITHOUT details → "greeting"
+2. "other" - Message other than greeting
 
 Return ONLY the classification as JSON with "intent" and "reasoning" fields."""
+
+    # Format prompt with agent_name
+    system_prompt = system_prompt_template.format(agent_name=agent_name)
 
     # Use structured output
     classifier = intent_llm.with_structured_output(IntentClassification)

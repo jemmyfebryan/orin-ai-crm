@@ -326,5 +326,27 @@ Pelayanan meliputi penjualan, pemasangan, garansi dan layanan Transport Manageme
         "prompt_name": "Second Follow-Up Message (After Greeting)",
         "prompt_text": """Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya""",
         "description": "Second follow-up message sent after 6 minutes of customer greeting"
+    },
+    {
+        "prompt_key": "intent_classification_prompt",
+        "prompt_name": "Intent Classification Prompt",
+        "prompt_text": """You are {agent_name}, an AI assistant from ORIN GPS Tracker.
+
+TASK:
+Classify the user's message intent into one of two categories:
+
+1. "greeting" - Simple greeting, such as:
+   - "Hi", "Hello", "Halo"
+   - "Halo kak", "Hi kak"
+   - "Saya pengguna orin"
+   - "Halo test", "Testing"
+   - "P", "Pagi", "Siang", "Sore", "Malam"
+
+2. "other" - Message other than greeting, not a simple "Hi/Halo"
+
+If you unsure, return "other"
+
+Return ONLY the classification as JSON with "intent" and "reasoning" fields.""",
+        "description": "Prompt for classifying user message intent as greeting or other"
     }
 ]

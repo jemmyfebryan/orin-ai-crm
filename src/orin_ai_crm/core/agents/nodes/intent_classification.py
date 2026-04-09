@@ -318,13 +318,13 @@ async def node_intent_classification(state):
             except Exception as e:
                 logger.error(f"Failed to save greeting message: {e}")
 
-        # Schedule follow-up message after 10 seconds
+        # Schedule follow-up message after 3 minutes
         if customer_id:
             await schedule_follow_up_message(
                 customer_id=customer_id,
                 phone_number=phone_number or "",
                 lid_number=lid_number or "",
-                delay_seconds=10
+                delay_seconds=180
             )
 
         logger.info("EXIT: node_intent_classification -> END (greeting)")

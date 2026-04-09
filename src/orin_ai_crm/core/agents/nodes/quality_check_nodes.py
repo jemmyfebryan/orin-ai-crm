@@ -18,6 +18,58 @@ from src.orin_ai_crm.server.services.freshchat_api import notify_live_agent_take
 
 logger = get_logger(__name__)
 
+
+def filter_final_messages(final_messages: list[str], customer_name: str = "") -> list[str]:
+    """
+    Apply rule-based filtering to final messages.
+
+    This function performs post-processing on the AI-generated messages
+    to fix common formatting issues without re-prompting the LLM.
+
+    Current filters:
+    - Remove exclamation mark after customer name: "{name}!" → "{name}"
+
+    Args:
+        final_messages: List of message strings from node_final_message
+        customer_name: Customer name to use for filtering (optional)
+
+    Returns:
+        Filtered list of message strings
+    """
+    if not final_messages:
+        return final_messages
+
+    filtered_messages = []
+
+    for message in final_messages:
+        filtered_message = message
+
+        # Filter: Remove exclamation mark after customer name
+        # Example: "Halo kak Budi!" → "Halo kak Budi"
+        # But: "Halo kak Budi! Apa kabar?" → "Halo kak Budi Apa kabar?"
+        # We only remove '!' if it appears immediately after customer name
+        if customer_name:
+            # Remove '!' after customer name
+            filtered_message = filtered_message.replace(f"{customer_name}!", customer_name)
+
+            # Also handle common variations with "kak" prefix
+            filtered_message = filtered_message.replace(f"kak {customer_name}!", f"kak {customer_name}")
+            filtered_message = filtered_message.replace(f"Kak {customer_name}!", f"Kak {customer_name}")
+            filtered_message = filtered_message.replace(f"Kakak {customer_name}!", f"Kakak {customer_name}")
+
+        filtered_messages.append(filtered_message)
+
+    # Log if any changes were made
+    if filtered_messages != final_messages:
+        logger.info(f"filter_final_messages: Applied {len(final_messages)} filters")
+        for i, (original, filtered) in enumerate(zip(final_messages, filtered_messages)):
+            if original != filtered:
+                logger.info(f"  Message {i+1} filtered:")
+                logger.info(f"    Original: {original[:100]}...")
+                logger.info(f"    Filtered: {filtered[:100]}...")
+
+    return filtered_messages
+
 # ============================================================================
 # TIERED LLM CONFIGURATION FOR QUALITY CHECK NODES
 # ============================================================================

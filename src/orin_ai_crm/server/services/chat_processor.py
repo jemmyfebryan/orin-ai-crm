@@ -199,6 +199,12 @@ async def process_chat_request(
                     ai_replies = [msg.content]
                     break
 
+    # Apply rule-based filtering to final messages
+    if ai_replies:
+        from src.orin_ai_crm.core.agents.nodes.quality_check_nodes import filter_final_messages
+        customer_name = customer_data.get('name', '')
+        ai_replies = filter_final_messages(ai_replies, customer_name)
+
     # If still no content, this is an error
     if not ai_replies:
         logger.error("No AI reply found in final state!")

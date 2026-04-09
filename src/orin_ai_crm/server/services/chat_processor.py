@@ -124,10 +124,10 @@ async def process_chat_request(
 
     logger.info(f"Customer data: {customer_data}")
 
-    # 4. Determine if we should send the form
+    # 4. Determine if we should send the form (use value from get_or_create_customer)
+    send_form = customer.get('send_form', False)
     is_onboarded = customer.get('is_onboarded', False)
-    send_form = not is_onboarded if is_onboarded is not None else is_new_chat
-    logger.info(f"send_form determined as: {send_form} (is_onboarded={is_onboarded}, is_new_chat={is_new_chat})")
+    logger.info(f"send_form determined as: {send_form} (is_onboarded={is_onboarded}, is_new_chat={is_new_chat}, vps_user_id={customer.get('user_id')})")
 
     # 5. Save user message to database (unless skipping for batched requests)
     if not skip_user_save:

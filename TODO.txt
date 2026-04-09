@@ -7,6 +7,8 @@
 
 -Hapus waiting message "Mohon tunggu sebentar ..." (Done)
 -Agent name from Siorin to SiOrin (Done)
+-Tambahkan kolom 'user_id' untuk mapping ke devsites_orin
+
 -Ecommerce node -> setelah share link jika sudah lihat2, tawarkan pemasangan -> human takeover (Done)
 -Add agent for Chat API (tools from orinai-chat-app) (Done)
 -Implement Final Message untuk pemecah bubble pesan dan menghindari oversharing (Done)

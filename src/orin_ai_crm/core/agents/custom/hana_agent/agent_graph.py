@@ -363,8 +363,8 @@ async def agent_entry_handler(state: AgentState) -> Dict:
         state['customer_id'] = customer_id
         state['customer_data'] = customer_data
 
-        # Check if form should be sent
-        send_form = True if not customer.get('is_onboarded', False) else False
+        # Check if form should be sent (use value from get_or_create_customer)
+        send_form = customer.get('send_form', False)
         state['send_form'] = send_form
 
         logger.info(f"State updated: customer_id={customer_id}, send_form={send_form}")

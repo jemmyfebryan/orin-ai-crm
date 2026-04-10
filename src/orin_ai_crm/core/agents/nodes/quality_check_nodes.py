@@ -28,6 +28,7 @@ def filter_final_messages(final_messages: list[str], customer_name: str = "") ->
 
     Current filters:
     - Replace exclamation mark after customer name with comma: "{name}!" → "{name},"
+    - Remove image URLs (since images are sent separately via API)
 
     Args:
         final_messages: List of message strings from node_final_message
@@ -36,10 +37,22 @@ def filter_final_messages(final_messages: list[str], customer_name: str = "") ->
     Returns:
         Filtered list of message strings
     """
+    import re
+
     if not final_messages:
         return final_messages
 
     filtered_messages = []
+
+    # Pattern to match image URLs (http/https URLs ending with image extensions or containing 'image', 'photo', 'product', etc.)
+    # This matches URLs like:
+    # - https://ai.orin.id/public/products/product_2.png
+    # - http://example.com/image.jpg
+    # - https://cdn.example.com/photos/abc123.webp
+    image_url_pattern = re.compile(
+        r'https?://[^\s]+\.(?:png|jpg|jpeg|gif|webp|bmp|svg)(?:\?[^\s]*)?',
+        re.IGNORECASE
+    )
 
     for message in final_messages:
         filtered_message = message
@@ -57,7 +70,26 @@ def filter_final_messages(final_messages: list[str], customer_name: str = "") ->
             filtered_message = filtered_message.replace(f"Kak {customer_name}!", f"Kak {customer_name},")
             filtered_message = filtered_message.replace(f"Kakak {customer_name}!", f"Kakak {customer_name},")
 
-        filtered_messages.append(filtered_message)
+        # Filter: Remove image URLs (since images are sent separately via API)
+        # Remove any line that contains only an image URL
+        lines = filtered_message.split('\n')
+        filtered_lines = []
+        for line in lines:
+            # Skip lines that are just image URLs
+            if image_url_pattern.match(line.strip()):
+                logger.info(f"filter_final_messages: Removed image URL: {line.strip()}")
+                continue
+            # Also remove image URLs from within lines (replace with empty string)
+            cleaned_line = image_url_pattern.sub('', line)
+            # Clean up any double spaces left after removing URL
+            cleaned_line = ' '.join(cleaned_line.split())
+            if cleaned_line.strip():  # Only add non-empty lines
+                filtered_lines.append(cleaned_line)
+
+        filtered_message = '\n'.join(filtered_lines)
+
+        if filtered_message.strip():  # Only add non-empty messages
+            filtered_messages.append(filtered_message)
 
     # Log if any changes were made
     if filtered_messages != final_messages:
@@ -791,6 +823,12 @@ FORM_SENT: {bool(send_form)} {"(No need to send customer profile-related questio
 IMAGES_SENT: {bool(state.get("send_images"))}
 PDFS_SENT: {bool(state.get("send_pdfs"))}
 
+IMPORTANT - IMAGES SENT:
+- Jika IMAGES_SENT = True, artinya gambar sudah dikirim secara terpisah via API
+- JANGAN sertakan URL gambar di dalam pesan teks final
+- Jangan sebutkan "link gambar", "URL gambar", atau sejenisnya
+- Cukup berikan penjelasan singkat tentang gambar yang sudah dikirim
+
 CONVERSATION HISTORY:
 {conversation_summary if conversation_summary else "(No conversation history)"}
 
@@ -821,7 +859,8 @@ RULES FOR MULTI-BUBBLE RESPONSE:
 5. Jika ini pesan pertama ke customer (conversation history kosong), perkenalkan dirimu
 6. Jangan mengarang informasi yang tidak ada di dalam state
 7. Gunakan style bold untuk nama agent `*{agent_name}*`
-8. Jangan mengarang kemampuan tambahan seperti pengecekan pemasangan, 
+8. Jangan mengarang kemampuan tambahan seperti pengecekan pemasangan
+9. **JANGAN sertakan URL gambar di dalam pesan teks** (gambar sudah dikirim terpisah via API) 
 
 SESSION ENDING DETECTION:
 Cek CONVERSATION HISTORY di atas, khususnya user message terakhir.

@@ -49,8 +49,8 @@ engine = create_async_engine(
         "connect_timeout": 10,
         "autocommit": False,
         "charset": "utf8mb4",
-        "read_timeout": 30,     # 🔥 FIX: Prevent hanging on dead connections
-        "write_timeout": 30,    # 🔥 FIX: Prevent hanging on dead connections
+        # Note: aiomysql doesn't support read_timeout/write_timeout
+        # These are handled by pool_recycle and pool_reset_on_return instead
     }
 )
 ```
@@ -61,7 +61,6 @@ engine = create_async_engine(
 - Connections are recycled well before MySQL can close them
 - Combined with periodic refresh every 300s (5 min), provides double protection
 - `pool_reset_on_return='commit'` clears transaction state and temp tables when returning connections
-- `read_timeout`/`write_timeout` prevent hanging on dead connections
 
 #### Connection Pool Event Listeners
 

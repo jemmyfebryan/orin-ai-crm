@@ -29,8 +29,8 @@ engine = create_async_engine(
         "connect_timeout": 10,  # Connection timeout in seconds
         "autocommit": False,
         "charset": "utf8mb4",
-        "read_timeout": 30,     # 🔥 FIX: Prevent hanging on dead connections during read
-        "write_timeout": 30,    # 🔥 FIX: Prevent hanging on dead connections during write
+        # Note: aiomysql doesn't support read_timeout/write_timeout in connect_args
+        # These are handled by the pool_recycle and pool_reset_on_return settings instead
     }
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

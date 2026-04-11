@@ -5,8 +5,8 @@ Classifies user messages into "greeting" or "other" to determine
 whether to send follow-up messages after periods of inactivity.
 
 For greetings, sends two follow-up messages:
-- After 3 minutes: "Halo kak, ada yang bisa {agent_name} bantu? 😊"
-- After 6 minutes: "Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya"
+- Instantly: "Halo kak, ada yang bisa {agent_name} bantu? 😊"
+- After 3 minutes: "Baik Kak, silahkan chat lagi bila masih butuh bantuan. Untuk panduan online ORIN, bisa cek https://orin.id/panduan ya"
 """
 
 import asyncio
@@ -101,7 +101,7 @@ async def send_first_follow_up_message(
     agent_name: str
 ):
     """
-    Send first follow-up message to customer after 3 minutes of inactivity.
+    Send first follow-up message to customer instantly (no delay).
 
     Message fetched from database: first_follow_up_message
     """
@@ -150,7 +150,7 @@ async def send_second_follow_up_message(
     agent_name: str
 ):
     """
-    Send second follow-up message to customer after 6 minutes of inactivity.
+    Send second follow-up message to customer after 3 minutes of inactivity.
 
     Message fetched from database: second_follow_up_message
     """
@@ -199,8 +199,8 @@ async def schedule_follow_up_message(
     Schedule follow-up messages to be sent after delays.
 
     Sends two follow-up messages:
-    1. After delay_seconds (default: 180s / 3 minutes)
-    2. After 2 * delay_seconds (default: 360s / 6 minutes total)
+    1. Instantly (no delay)
+    2. After delay_seconds (default: 180s / 3 minutes)
 
     Cancels any existing pending task for this customer before scheduling new one.
 
@@ -209,7 +209,7 @@ async def schedule_follow_up_message(
         phone_number: Phone number for Freshchat
         lid_number: LID number for Freshchat
         conversation_id: Freshchat conversation ID (UUID)
-        delay_seconds: Delay before first follow-up (default: 180 seconds)
+        delay_seconds: Delay before second follow-up (default: 180 seconds)
 
     Returns:
         asyncio.Task: The scheduled task
@@ -253,15 +253,13 @@ async def _follow_up_delay(
 
     Timeline:
     - 0s: Customer sends greeting
-    - 180s (3 min): Send first follow-up
-    - 360s (6 min): Send second follow-up
+    - 0s (instant): Send first follow-up
+    - 180s (3 min): Send second follow-up
 
     This can be cancelled if customer sends another message.
     """
     try:
-        # First delay: 3 minutes
-        await asyncio.sleep(delay_seconds)
-
+        # Send first follow-up immediately (no delay)
         # Check if task is still scheduled (not cancelled)
         if customer_id in pending_follow_up_tasks:
             # Send first follow-up message
@@ -272,9 +270,9 @@ async def _follow_up_delay(
                 conversation_id=conversation_id,
                 agent_name=agent_name
             )
-            logger.info(f"First follow-up sent for customer {customer_id}, waiting 3 more minutes for second follow-up")
+            logger.info(f"First follow-up sent instantly for customer {customer_id}, waiting {delay_seconds}s for second follow-up")
 
-            # Second delay: another 3 minutes (total 6 minutes from greeting)
+            # Wait for second follow-up (3 minutes)
             await asyncio.sleep(delay_seconds)
 
             # Check again if task is still scheduled
@@ -331,7 +329,7 @@ async def node_intent_classification(state):
     Intent Classification Node - First node in the workflow.
 
     Classifies user message as "greeting" or "other":
-    - "greeting" → Schedule two follow-ups (3min and 6min), END workflow
+    - "greeting" → Schedule two follow-ups (instant and 3min), END workflow
     - "other" → Cancel any pending follow-ups, continue to agent_entry_handler
 
     Args:
@@ -393,7 +391,7 @@ async def node_intent_classification(state):
             except Exception as e:
                 logger.error(f"Failed to save greeting message: {e}")
 
-        # Schedule two follow-up messages (after 3 and 6 minutes)
+        # Schedule two follow-up messages (instant and after 3 minutes)
         if customer_id:
             await schedule_follow_up_message(
                 customer_id=customer_id,

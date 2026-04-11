@@ -25,8 +25,10 @@ async def lifespan(app: FastAPI):
     - Create database tables
     - Initialize default products if empty
     - Initialize default prompts if empty
+    - Start periodic pool refresh task
 
     Shutdown:
+    - Cancel periodic pool refresh task
     - Cleanup if needed
     """
     # Startup
@@ -64,9 +66,39 @@ async def lifespan(app: FastAPI):
     agent_name = await initialize_agent_name()
     logger.info(f"Agent name initialized: {agent_name}")
 
+    # 🔥 FIX: Start periodic pool refresh task to prevent stale connections
+    # This runs every 5 minutes to recycle all connections in the pool
+    async def periodic_pool_refresh():
+        """Periodically recycle all connections in the pool to prevent stale connections"""
+        while True:
+            try:
+                # Wait 5 minutes between refreshes
+                await asyncio.sleep(300)
+                logger.info("🔄 Refreshing connection pool (recycling all connections)...")
+                await engine.dispose()
+                logger.info("✅ Connection pool refreshed successfully")
+            except Exception as e:
+                logger.error(f"❌ Error refreshing connection pool: {e}")
+                # Continue even if refresh fails - will retry in 5 minutes
+
+    # Start the background task
+    pool_refresh_task = asyncio.create_task(periodic_pool_refresh())
+    logger.info("🔄 Periodic pool refresh task started (runs every 5 minutes)")
+
+    # Store task in app state for shutdown access
+    app.state.pool_refresh_task = pool_refresh_task
+
     logger.info("Application startup complete")
 
     yield
 
     # Shutdown
     logger.info("Application shutdown...")
+
+    # Cancel the periodic pool refresh task
+    if hasattr(app.state, 'pool_refresh_task'):
+        app.state.pool_refresh_task.cancel()
+        try:
+            await app.state.pool_refresh_task
+        except asyncio.CancelledError:
+            logger.info("Periodic pool refresh task cancelled")

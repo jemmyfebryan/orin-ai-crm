@@ -113,6 +113,42 @@ def retry_db_operation(
                             f"DB connection failed in {func.__name__} after {max_retries} attempts: {str(e)}"
                         )
 
+                except RuntimeError as e:
+                    # 🔥 FIX: Catch RuntimeError for TCPTransport closed errors
+                    # This happens when pool_pre_ping tries to ping a dead connection
+                    # The TCP transport is already closed, causing a RuntimeError instead of SQLAlchemy error
+                    last_exception = e
+                    error_msg = str(e).lower()
+
+                    # Only retry if it's a TCPTransport closed or handler closed error
+                    is_tcp_closed = any(
+                        keyword in error_msg
+                        for keyword in [
+                            "tcptransport closed",
+                            "handler is closed",
+                            "unable to perform operation",
+                        ]
+                    )
+
+                    if is_tcp_closed:
+                        # This is a TCP connection error, retry
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"RuntimeError (TCP closed) in {func.__name__} "
+                                f"(attempt {attempt + 1}/{max_retries}): {str(e)}\n"
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                            delay *= backoff_factor
+                        else:
+                            logger.error(
+                                f"RuntimeError (TCP closed) in {func.__name__} after {max_retries} attempts"
+                            )
+                    else:
+                        # Not a TCP error, raise immediately (programming error)
+                        logger.error(f"Non-TCP RuntimeError in {func.__name__}: {str(e)}")
+                        raise
+
                 except SQLAlchemyError as e:
                     # Other SQLAlchemy errors - don't retry, raise immediately
                     logger.error(f"SQLAlchemy error in {func.__name__}: {str(e)}")
@@ -218,6 +254,41 @@ def retry_db_endpoint(
                             f"Endpoint {func.__name__}: DB connection failed after {max_retries} attempts: {str(e)}"
                         )
 
+                except RuntimeError as e:
+                    # 🔥 FIX: Catch RuntimeError for TCPTransport closed errors
+                    # This happens when pool_pre_ping tries to ping a dead connection
+                    last_exception = e
+                    error_msg = str(e).lower()
+
+                    # Only retry if it's a TCPTransport closed or handler closed error
+                    is_tcp_closed = any(
+                        keyword in error_msg
+                        for keyword in [
+                            "tcptransport closed",
+                            "handler is closed",
+                            "unable to perform operation",
+                        ]
+                    )
+
+                    if is_tcp_closed:
+                        # This is a TCP connection error, retry
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"Endpoint {func.__name__}: RuntimeError (TCP closed) "
+                                f"(attempt {attempt + 1}/{max_retries}): {str(e)}\n"
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                            delay *= backoff_factor
+                        else:
+                            logger.error(
+                                f"Endpoint {func.__name__}: RuntimeError (TCP closed) after {max_retries} attempts"
+                            )
+                    else:
+                        # Not a TCP error, raise immediately (programming error)
+                        logger.error(f"Endpoint {func.__name__}: Non-TCP RuntimeError: {str(e)}")
+                        raise
+
                 except SQLAlchemyError as e:
                     # Other SQLAlchemy errors - don't retry, raise immediately
                     logger.error(f"Endpoint {func.__name__}: SQLAlchemy error: {str(e)}")
@@ -313,6 +384,35 @@ async def execute_with_retry(
                 delay *= backoff_factor
             else:
                 logger.error(f"DB connection failed after {max_retries} attempts: {str(e)}")
+
+        except RuntimeError as e:
+            # 🔥 FIX: Catch RuntimeError for TCPTransport closed errors
+            last_exception = e
+            error_msg = str(e).lower()
+
+            # Only retry if it's a TCPTransport closed or handler closed error
+            is_tcp_closed = any(
+                keyword in error_msg
+                for keyword in [
+                    "tcptransport closed",
+                    "handler is closed",
+                    "unable to perform operation",
+                ]
+            )
+
+            if is_tcp_closed:
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"RuntimeError (TCP closed) (attempt {attempt + 1}/{max_retries}): {str(e)}\n"
+                        f"Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    delay *= backoff_factor
+                else:
+                    logger.error(f"RuntimeError (TCP closed) after {max_retries} attempts: {str(e)}")
+            else:
+                # Not a TCP error, raise immediately
+                raise
 
     raise DatabaseConnectionError(
         f"Database operation failed after {max_retries} attempts: {str(last_exception)}"

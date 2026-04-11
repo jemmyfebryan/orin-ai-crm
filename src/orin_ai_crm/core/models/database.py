@@ -17,18 +17,56 @@ engine = create_async_engine(
     DB_URL,
     echo=False,
     pool_pre_ping=True,         # Enable connection health checks before using
-    pool_recycle=3600,          # Recycle connections after 1 hour (increased from 30min)
+    pool_recycle=280,           # 🔥 FIX: Recycle connections after ~4.67 minutes (280 seconds)
+                                 # MySQL wait_timeout is 600s, so 280s gives us 53% safety margin
+                                 # Connections are recycled well before MySQL can close them
     pool_size=20,               # Increased pool size for better concurrency (was 10)
     max_overflow=30,            # More overflow connections for traffic spikes (was 20)
     pool_timeout=120,           # Increased timeout for getting connection from pool (was 60)
+    pool_reset_on_return='commit',  # 🔥 FIX: Reset connection state when returned to pool
+                                 # This clears transaction state, temp tables, etc.
     connect_args={
         "connect_timeout": 10,  # Connection timeout in seconds
         "autocommit": False,
         "charset": "utf8mb4",
+        "read_timeout": 30,     # 🔥 FIX: Prevent hanging on dead connections during read
+        "write_timeout": 30,    # 🔥 FIX: Prevent hanging on dead connections during write
     }
 )
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 Base = declarative_base()
+
+# Connection Pool Event Listeners for monitoring
+# This helps identify connection lifecycle issues and stale connections
+from sqlalchemy import event
+import logging
+
+pool_logger = logging.getLogger(__name__)
+
+@event.listens_for(engine.sync_engine, "connect")
+def receive_connect(dbapi_conn, connection_record):
+    """Called when a new connection is created"""
+    pool_logger.debug(f"New DB connection created: {id(dbapi_conn)}")
+
+@event.listens_for(engine.sync_engine, "checkout")
+def receive_checkout(dbapi_conn, connection_record, connection_proxy):
+    """Called when a connection is checked out from the pool"""
+    pool_logger.debug(f"DB connection checked out from pool: {id(dbapi_conn)}")
+
+@event.listens_for(engine.sync_engine, "checkin")
+def receive_checkin(dbapi_conn, connection_record):
+    """Called when a connection is returned to the pool"""
+    pool_logger.debug(f"DB connection returned to pool: {id(dbapi_conn)}")
+
+@event.listens_for(engine.sync_engine, "close")
+def receive_close(dbapi_conn, connection_record):
+    """Called when a connection is closed"""
+    pool_logger.warning(f"DB connection closed (will be recycled): {id(dbapi_conn)}")
+
+@event.listens_for(engine.sync_engine, "invalidate")
+def receive_invalidate(dbapi_conn, connection_record, exception):
+    """Called when a connection is invalidated due to an error"""
+    pool_logger.error(f"DB connection INVALIDATED due to error: {id(dbapi_conn)} - {exception}")
 
 class Customer(Base):
     __tablename__ = "customers"

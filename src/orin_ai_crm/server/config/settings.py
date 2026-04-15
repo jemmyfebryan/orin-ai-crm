@@ -20,6 +20,11 @@ class Settings:
         self.freshchat_api_version = os.getenv("FRESHCHAT_API_VERSION", "v2")
         self.live_agent_user_id = os.getenv("LIVE_AGENT_USER_ID", "")
 
+        # Live Agent Alert Configuration
+        self.live_agent_alert_endpoint = os.getenv("LIVE_AGENT_ALERT_ENDPOINT", "")
+        self.live_agent_alert_to = os.getenv("LIVE_AGENT_ALERT_TO", "")
+        self.live_agent_alert_api_key = os.getenv("LIVE_AGENT_ALERT_API_KEY", "")
+
         # Freshchat Webhook Security - parse comma-separated to list
         webhook_ips = os.getenv("FRESHCHAT_WEBHOOK_ALLOWED_IPS", "")
         self.freshchat_webhook_allowed_ips = (

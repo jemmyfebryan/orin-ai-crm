@@ -289,29 +289,66 @@ async def notify_live_agent_takeover(
 
     # Format the message
     if customer_name:
-        message = f"{agent_name} dimatikan untuk customer Kak {customer_name} ({customer_phone}), mohon Live Agent untuk segera mengambil alih sesi pesan!"
+        notify_message = f"{agent_name} dimatikan untuk customer Kak {customer_name} ({customer_phone}), mohon Live Agent untuk segera mengambil alih sesi pesan!"
     else:
-        message = f"{agent_name} dimatikan untuk customer dengan nomor {customer_phone}, mohon Live Agent untuk segera mengambil alih sesi pesan!"
+        notify_message = f"{agent_name} dimatikan untuk customer dengan nomor {customer_phone}, mohon Live Agent untuk segera mengambil alih sesi pesan!"
 
-    # Check if live agent user ID is configured
-    if not settings.live_agent_user_id:
-        logger.warning("LIVE_AGENT_USER_ID not configured, skipping live agent notification")
+    # Check if live agent alert configuration is complete
+    if not settings.live_agent_alert_endpoint or not settings.live_agent_alert_to or not settings.live_agent_alert_api_key:
+        logger.warning("Live agent alert configuration incomplete (missing LIVE_AGENT_ALERT_ENDPOINT, LIVE_AGENT_ALERT_TO, or LIVE_AGENT_ALERT_API_KEY), skipping live agent notification")
         return False
 
-    # Send message to live agent conversation
+    # Send message to live agent alert endpoint
     logger.info(f"Sending takeover notification to live agent for customer: {customer_name} ({customer_phone})")
-    success = await send_message_to_freshchat(
-        conversation_id=settings.live_agent_user_id,
-        message_content=message,
-        retry_count=retry_count
-    )
 
-    if success:
-        logger.info(f"✅ Takeover notification sent successfully to live agent")
-    else:
-        logger.error(f"❌ Failed to send takeover notification after retries")
+    url = f"{settings.live_agent_alert_endpoint}/sendText"
+    payload = {
+        "args": {
+            "to": settings.live_agent_alert_to,
+            "content": notify_message
+        }
+    }
+    headers = {
+        "api_key": settings.live_agent_alert_api_key,
+        "Content-Type": "application/json"
+    }
 
-    return success
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+
+            if response.status_code == 200:
+                logger.info(f"✅ Takeover notification sent successfully to live agent")
+                return True
+            else:
+                logger.error(f"Failed to send takeover notification. Status: {response.status_code}, Response: {response.text}")
+
+                # Retry with exponential backoff
+                if retry_count < 3:
+                    wait_time = 2 ** retry_count  # 1s, 2s, 4s
+                    logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+                    await asyncio.sleep(wait_time)
+                    return await notify_live_agent_takeover(customer_name, customer_phone, retry_count + 1)
+                else:
+                    logger.error(f"Max retry attempts reached for takeover notification")
+                    return False
+
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while sending takeover notification to live agent")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await notify_live_agent_takeover(customer_name, customer_phone, retry_count + 1)
+        return False
+    except Exception as e:
+        logger.error(f"Error sending takeover notification: {str(e)}")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await notify_live_agent_takeover(customer_name, customer_phone, retry_count + 1)
+        return False
 
 
 async def notify_live_agent_release(
@@ -335,27 +372,64 @@ async def notify_live_agent_release(
 
     # Format the message
     if customer_name:
-        message = f"{agent_name} kembali dihidupkan untuk customer Kak {customer_name} ({customer_phone})!"
+        notify_message = f"{agent_name} kembali dihidupkan untuk customer Kak {customer_name} ({customer_phone})!"
     else:
-        message = f"{agent_name} kembali dihidupkan untuk customer dengan nomor {customer_phone}!"
+        notify_message = f"{agent_name} kembali dihidupkan untuk customer dengan nomor {customer_phone}!"
 
-    # Check if live agent user ID is configured
-    if not settings.live_agent_user_id:
-        logger.warning("LIVE_AGENT_USER_ID not configured, skipping live agent notification")
+    # Check if live agent alert configuration is complete
+    if not settings.live_agent_alert_endpoint or not settings.live_agent_alert_to or not settings.live_agent_alert_api_key:
+        logger.warning("Live agent alert configuration incomplete (missing LIVE_AGENT_ALERT_ENDPOINT, LIVE_AGENT_ALERT_TO, or LIVE_AGENT_ALERT_API_KEY), skipping live agent notification")
         return False
 
-    # Send message to live agent conversation
+    # Send message to live agent alert endpoint
     logger.info(f"Sending release notification to live agent for customer: {customer_name} ({customer_phone})")
-    success = await send_message_to_freshchat(
-        conversation_id=settings.live_agent_user_id,
-        message_content=message,
-        retry_count=retry_count
-    )
 
-    if success:
-        logger.info(f"✅ Release notification sent successfully to live agent")
-    else:
-        logger.error(f"❌ Failed to send release notification after retries")
+    url = f"{settings.live_agent_alert_endpoint}/sendText"
+    payload = {
+        "args": {
+            "to": settings.live_agent_alert_to,
+            "content": notify_message
+        }
+    }
+    headers = {
+        "api_key": settings.live_agent_alert_api_key,
+        "Content-Type": "application/json"
+    }
 
-    return success
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+
+            if response.status_code == 200:
+                logger.info(f"✅ Release notification sent successfully to live agent")
+                return True
+            else:
+                logger.error(f"Failed to send release notification. Status: {response.status_code}, Response: {response.text}")
+
+                # Retry with exponential backoff
+                if retry_count < 3:
+                    wait_time = 2 ** retry_count  # 1s, 2s, 4s
+                    logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+                    await asyncio.sleep(wait_time)
+                    return await notify_live_agent_release(customer_name, customer_phone, retry_count + 1)
+                else:
+                    logger.error(f"Max retry attempts reached for release notification")
+                    return False
+
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while sending release notification to live agent")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await notify_live_agent_release(customer_name, customer_phone, retry_count + 1)
+        return False
+    except Exception as e:
+        logger.error(f"Error sending release notification: {str(e)}")
+        if retry_count < 3:
+            wait_time = 2 ** retry_count
+            logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
+            await asyncio.sleep(wait_time)
+            return await notify_live_agent_release(customer_name, customer_phone, retry_count + 1)
+        return False
 

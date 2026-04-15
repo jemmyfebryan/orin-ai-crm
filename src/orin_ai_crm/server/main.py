@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.server.dependencies.lifespan import lifespan
-from src.orin_ai_crm.server.routes import health, admin, chat, freshchat, test_chat, dashboard
+from src.orin_ai_crm.server.routes import health, admin, chat, freshchat, test_chat, dashboard, orin_landing
 from src.orin_ai_crm.server.config.settings import settings
 
 logger = get_logger(__name__)
@@ -34,6 +34,7 @@ app.include_router(chat.router, tags=["Chat"])
 app.include_router(freshchat.router, tags=["Freshchat"])
 app.include_router(test_chat.router, tags=["Test Chat"])
 app.include_router(dashboard.router, tags=["Dashboard"])
+app.include_router(orin_landing.router, tags=["Orin Landing"])
 
 
 # --- RUN SERVER ---

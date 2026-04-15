@@ -456,6 +456,83 @@ async def soft_delete_customer(phone_number: str) -> dict:
 
 
 @retry_db_operation(max_retries=3)
+async def soft_delete_customer_by_lid(lid_number: str) -> dict:
+    """
+    Soft delete a customer by lid_number (for orin_landing_agent testing).
+
+    This is a testing feature that allows resetting a customer's chat history.
+    The customer record is not actually deleted from the database, just marked
+    as deleted. A new customer record will be created on the next message.
+
+    Args:
+        lid_number: The customer's LID number
+
+    Returns:
+        dict with:
+            - success: bool - whether the soft delete was successful
+            - customer_id: int - the ID of the deleted customer (if successful)
+            - message: str - status message
+
+    Example:
+        Input: lid_number="customer_lid_123"
+        Output: {success: True, customer_id: 123, message: "Customer 123 deleted successfully. Chat reset complete."}
+    """
+    from datetime import datetime
+    from src.orin_ai_crm.core.models.database import WIB
+
+    logger.info(f"soft_delete_customer_by_lid called - lid_number: {lid_number}")
+
+    try:
+        async with AsyncSessionLocal() as db:
+            # Find customer by lid_number (only non-deleted ones)
+            query = select(Customer).where(
+                Customer.lid_number == lid_number,
+                Customer.deleted_at.is_(None)
+            )
+            result = await db.execute(query)
+            customer = result.scalars().first()
+
+            if not customer:
+                logger.info(f"Customer not found for lid_number: {lid_number}")
+                return {
+                    'success': True,
+                    'message': f'No customer found for lid_number: {lid_number}',
+                    'customer_id': None
+                }
+
+            # Check if already deleted
+            if customer.deleted_at is not None:
+                logger.info(f"Customer already deleted: {customer.id}")
+                return {
+                    'success': True,
+                    'message': f'Customer already deleted at: {customer.deleted_at}',
+                    'customer_id': customer.id
+                }
+
+            # Soft delete: Set deleted_at timestamp
+            customer_id = customer.id
+            customer.deleted_at = datetime.now(WIB)
+            await db.commit()
+            await db.refresh(customer)
+
+            logger.info(f"Customer {customer_id} soft-deleted successfully (by lid_number)")
+
+            return {
+                'success': True,
+                'message': f'Customer {customer_id} deleted successfully. Chat reset complete.',
+                'customer_id': customer_id
+            }
+
+    except Exception as e:
+        logger.error(f"Error soft-deleting customer by lid_number: {str(e)}")
+        return {
+            'success': False,
+            'message': f'Error: {str(e)}',
+            'customer_id': None
+        }
+
+
+@retry_db_operation(max_retries=3)
 async def create_chat_log(
     customer_id: Optional[int],
     conversation_id: str,

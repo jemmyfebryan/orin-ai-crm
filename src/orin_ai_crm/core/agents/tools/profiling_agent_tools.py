@@ -149,15 +149,15 @@ async def check_profiling_completeness(
     - Finding which field to ask next (interactive profiling)
 
     Profiling is considered complete if at least ONE of:
+    - name (customer name)
     - domicile (location)
     - unit_qty (number of units, > 0)
     - vehicle_alias (vehicle type)
 
-    NOTE: 'name' is always known (contact_name, phone_number), so we skip asking for it.
-    Priority for asking: domicile → vehicle_alias → unit_qty
+    Priority for asking: name → domicile → vehicle_alias → unit_qty
 
     Args:
-        name: Customer name (always known, not checked)
+        name: Customer name
         domicile: Customer location
         vehicle_alias: Vehicle type
         unit_qty: Number of units
@@ -166,7 +166,7 @@ async def check_profiling_completeness(
     Returns:
         dict with:
             - is_complete (bool): Whether profiling is complete
-            - missing_field (str or None): The next field to ask (domicile, vehicle_alias, or unit_qty)
+            - missing_field (str or None): The next field to ask (name, domicile, vehicle_alias, or unit_qty)
             - recommended_route (str or None): "SALES" or "ECOMMERCE" if complete
             - unit_qty (int): Number of units
             - is_b2b (bool): Business customer flag
@@ -182,13 +182,13 @@ async def check_profiling_completeness(
     try:
 
         # Check if we have enough data to proceed
-        # At least one of: domicile, unit_qty (>0), or vehicle_alias
-        # NOTE: has_name is always True since name/contact_name/phone_number are always filled
+        # At least one of: name, domicile, unit_qty (>0), or vehicle_alias
+        has_name = bool(profile.get('name'))
         has_domicile = bool(profile.get('domicile'))
         has_unit_qty = profile.get('unit_qty', 0) > 0
         has_vehicle_alias = bool(profile.get('vehicle_alias'))
 
-        is_complete = has_domicile or has_unit_qty or has_vehicle_alias
+        is_complete = has_name or has_domicile or has_unit_qty or has_vehicle_alias
 
         # Determine route based on unit_qty
         # - If unit_qty >= 5 OR is_b2b = True → SALES
@@ -201,11 +201,12 @@ async def check_profiling_completeness(
         else:
             recommended_route = None
 
-        # Determine which field to ask next (priority: domicile → vehicle_alias → unit_qty)
-        # Skip 'name' since it's always known
+        # Determine which field to ask next (priority: name → domicile → vehicle_alias → unit_qty)
         missing_field = None
         if not is_complete:
-            if not has_domicile:
+            if not has_name:
+                missing_field = 'name'
+            elif not has_domicile:
                 missing_field = 'domicile'
             elif not has_vehicle_alias:
                 missing_field = 'vehicle_alias'
@@ -218,6 +219,7 @@ async def check_profiling_completeness(
             'recommended_route': recommended_route,
             'unit_qty': unit_qty,
             'is_b2b': is_b2b,
+            'has_name': has_name,
             'has_domicile': has_domicile,
             'has_unit_qty': has_unit_qty,
             'has_vehicle_alias': has_vehicle_alias,
@@ -232,10 +234,11 @@ async def check_profiling_completeness(
         traceback.print_exc()
         return {
             'is_complete': False,
-            'missing_field': 'domicile',  # Default to asking domicile on error
+            'missing_field': 'name',  # Default to asking name on error
             'recommended_route': None,
             'unit_qty': 0,
             'is_b2b': False,
+            'has_name': False,
             'has_domicile': False,
             'has_unit_qty': False,
             'has_vehicle_alias': False,

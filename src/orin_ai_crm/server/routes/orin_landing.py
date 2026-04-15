@@ -175,13 +175,13 @@ async def orin_landing_test_setup(request: Request):
 async def orin_landing_test_setup_submit(
     request: Request,
     lid_number: str = Form(...),
-    contact_name: str = Form(...)
+    contact_name: str = Form("")  # Optional - can be empty for landing page widget
 ):
     """Handle setup form submission and redirect to chat interface."""
     if not verify_test_token(request):
         return RedirectResponse(url="/orin-landing/test", status_code=303)
 
-    # Store customer info in cookie
+    # Store customer info in cookie (contact_name can be empty)
     response = RedirectResponse(url="/orin-landing/test/chat", status_code=303)
     response.set_cookie(
         key="test_lid_number",
@@ -191,7 +191,7 @@ async def orin_landing_test_setup_submit(
     )
     response.set_cookie(
         key="test_contact_name",
-        value=contact_name,
+        value=contact_name or "",  # Empty string if not provided
         httponly=False,
         max_age=3600
     )

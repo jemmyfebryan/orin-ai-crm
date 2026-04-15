@@ -324,6 +324,40 @@ Terima kasih Kak! 🙏"""
 
 
 @tool
+async def get_installation_cost(
+    state: Annotated[dict, InjectedState],
+) -> dict:
+    """
+    Get information about installation cost and technician coverage areas.
+
+    Use this tool when:
+    - Customer asks about installation cost/fee
+    - Customer asks about installation price
+    - Customer asks about biaya instalasi/pemasangan
+    - Customer asks about technician availability in their area
+    - Customer asks about teknisi area
+
+    Returns:
+        dict with: installation_info (dict) - Installation cost and coverage information
+    """
+    logger.info("TOOL: get_installation_cost")
+
+    # Get customer data to check domicile
+    customer_data = state.get('customer_data', {})
+    domicile = customer_data.get('domicile', '')
+
+    return {
+        'installation_info': {
+            'free_areas': ['Jakarta Timur', 'Surabaya'],
+            'free_areas_description': 'Jakarta Timur & sekitarnya dan Surabaya & sekitarnya',
+            'outside_area_fee': 'Ada biaya akomodasi teknis untuk area di luar Jakarta Timur dan Surabaya',
+            'customer_domicile': domicile,
+            'instruction': 'Berikan informasi ini ke customer. Jika customer bertanya tentang jumlah biaya akomodasi spesifik untuk area di luar Jakarta Timur/Surabaya, gunakan human_takeover tool untuk alihkan ke live agent.'
+        }
+    }
+
+
+@tool
 async def device_troubleshooting(
     state: Annotated[dict, InjectedState],
     device_name: Optional[str] = None,
@@ -812,6 +846,7 @@ SUPPORT_TOOLS = [
     forgot_password,
     get_account_info,
     license_extension,
+    get_installation_cost,
     device_troubleshooting,
     get_company_profile,
     list_customer_devices,

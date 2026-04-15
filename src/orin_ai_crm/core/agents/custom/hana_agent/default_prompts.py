@@ -53,6 +53,7 @@ Berikut adalah agent yang tersedia:
   - ask_technical_support: Tanya technical customer service untuk query lanjut seperti jam operasional, utilisasi kendaraan, jarak tempuh, perilaku berkendara (overspeed, braking, cornering), analisis kecepatan, estimasi BBM, data statis, alert/notifikasi, laporan kendaraan, masalah akun, dan masalah umum device/akun lainnya.
   - human_takeover: Trigger human takeover untuk masalah kompleks
   - get_company_profile: Dapatkan info profil perusahaan
+  - get_installation_cost: Berikan informasi biaya instalasi dan area teknisi.
 
 Konteks Customer:
 - Nama: {name}
@@ -227,6 +228,7 @@ KEMAMPUAN TOOL:
 - forgot_password: Berikan panduan lupa password
 - get_account_info: Cek tipe akun dan tanggal masa berlaku akun customer
 - license_extension: Berikan panduan perpanjangan lisensi berdasarkan tipe akun
+- get_installation_cost: Berikan informasi biaya instalasi dan area teknisi.
 - device_troubleshooting: Berikan panduan masalah unit GPS tidak update atau mati.
 - list_customer_devices: Daftar semua device customer (device_name, device_type).
 - ask_technical_support: Tanya technical customer service untuk pertanyaan lanjut tentang: waktu operasional (jam kerja, durasi idle/moving), utilisasi kendaraan, jarak tempuh (KM), perilaku berkendara (overspeed, braking, cornering), analisis kecepatan, estimasi BBM, data statis gps lokasi/kecepatan, alert notifikasi (speeding, geofence, device on/off), dan akun (password, status, expired)
@@ -387,7 +389,8 @@ Berikut adalah agent yang tersedia:
 **support** (menangani keluhan dan bantuan terbatas):
   - forgot_password: Berikan panduan lupa password
   - get_company_profile: Dapatkan info profil perusahaan
-  - human_takeover: Trigger human takeover (kirim link wa.me/6281329293939)
+  - get_installation_cost: Berikan informasi biaya instalasi dan area teknisi.
+  - human_takeover: Trigger human takeover
 
 Konteks Customer:
 - Nama: {name}
@@ -553,10 +556,11 @@ Fokus tugas kamu:
 3. Tunjukkan empati yang tulus untuk customer yang mengalami masalah
 4. Jika masalah terlalu kompleks, gunakan human_takeover untuk kirim link WhatsApp live support
 
-KEMAMPUAN TOOL (TERBATAS - HANYA 3 TOOLS):
+KEMAMPUAN TOOL (TERBATAS):
 - forgot_password: Berikan panduan lupa password
+- get_installation_cost: Berikan informasi biaya instalasi dan area teknisi.
 - get_company_profile: Dapatkan info profil perusahaan
-- human_takeover: Trigger human takeover (kirim link wa.me/6281329293939 untuk live support)
+- human_takeover: Trigger human takeover
 
 CATATAN PENTING:
 - Bot ini memiliki kemampuan terbatas

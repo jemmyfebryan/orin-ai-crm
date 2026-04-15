@@ -34,6 +34,7 @@ from src.orin_ai_crm.core.agents.tools.support_agent_tools import (
     HUMAN_TAKEOVER_TOOL,
     human_takeover,
     forgot_password,
+    get_installation_cost,
     get_company_profile,
 )
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
@@ -87,10 +88,11 @@ ORIN_LANDING_ECOMMERCE_TOOLS = [
 ]
 
 # Orin Landing Support Agent Tools (limited tools for text-based bot)
-# Only includes: human_takeover, forgot_password, get_company_profile
+# Only includes: human_takeover, forgot_password, get_installation_cost, get_company_profile
 ORIN_LANDING_SUPPORT_TOOLS = [
     human_takeover,
     forgot_password,
+    get_installation_cost,
     get_company_profile,
 ]
 

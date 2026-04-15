@@ -32,9 +32,17 @@ from src.orin_ai_crm.core.agents.tools.meeting_agent_tools import (
 from src.orin_ai_crm.core.agents.tools.support_agent_tools import (
     SUPPORT_TOOLS,
     HUMAN_TAKEOVER_TOOL,
+    human_takeover,
+    forgot_password,
+    get_company_profile,
 )
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import (
     PRODUCT_ECOMMERCE_TOOLS,
+    get_all_active_products,
+    get_product_details,
+    get_ecommerce_links,
+    get_products_by_category,
+    get_products_by_vehicle_type,
 )
 
 
@@ -64,6 +72,28 @@ ECOMMERCE_AGENT_TOOLS = PRODUCT_ECOMMERCE_TOOLS
 # Support Agent Tools (used by support_node for complaints and technical support)
 SUPPORT_AGENT_TOOLS = SUPPORT_TOOLS
 
+# ============================================================================
+# TOOL LIST FOR ORIN LANDING AGENT (API-based, text-only)
+# ============================================================================
+
+# Orin Landing Ecommerce Agent Tools (text-only, NO images/PDFs)
+# Excludes send_product_images and send_catalog for text-based bot
+ORIN_LANDING_ECOMMERCE_TOOLS = [
+    get_all_active_products,
+    get_product_details,
+    get_ecommerce_links,
+    get_products_by_category,
+    get_products_by_vehicle_type,
+]
+
+# Orin Landing Support Agent Tools (limited tools for text-based bot)
+# Only includes: human_takeover, forgot_password, get_company_profile
+ORIN_LANDING_SUPPORT_TOOLS = [
+    human_takeover,
+    forgot_password,
+    get_company_profile,
+]
+
 # Legacy: Keep old names for backward compatibility
 AGENT_TOOLS = PROFILING_AGENT_TOOLS
 
@@ -78,6 +108,9 @@ __all__ = [
     'SALES_MEETING_TOOLS',
     'PRODUCT_ECOMMERCE_TOOLS',
     'SUPPORT_TOOLS',
+    # Orin Landing Agent
+    'ORIN_LANDING_ECOMMERCE_TOOLS',
+    'ORIN_LANDING_SUPPORT_TOOLS',
     # Legacy
     'AGENT_TOOLS',
 ]

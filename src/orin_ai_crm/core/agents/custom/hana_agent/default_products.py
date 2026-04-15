@@ -23,7 +23,7 @@ DEFAULT_PRODUCTS = [
             "bonus": "FREE Pelacak mini Orin Tag Android",
             "server": "ORIN LITE"
         },
-        "price": "25rb/bulan (perpanjangan setelah 1 bulan pertama)",
+        "price": "50rb/bulan (perpanjangan setelah 1 bulan pertama)",
         "installation_type": "pasang_technisi",
         "can_shutdown_engine": False,
         "can_wiretap": False,
@@ -32,7 +32,7 @@ DEFAULT_PRODUCTS = [
         "battery_life": None,
         "power_source": "Vehicle battery",
         "tracking_type": "GPS Satelit",
-        "monthly_fee": "25rb/bulan",
+        "monthly_fee": "50rb/bulan",
         "ecommerce_links": {
             "tokopedia": "https://tk.tokopedia.com/ZSuoPBGPs/",
             "shopee": "https://id.shp.ee/5mJ3NnE"
@@ -57,7 +57,7 @@ DEFAULT_PRODUCTS = [
             "fitur_utama": ["Lacak real-time", "Matikan mesin jarak jauh", "Sadap suara", "Riwayat perjalanan seminggu terakhir"],
             "server": "ORIN LITE"
         },
-        "price": "25rb/bulan (perpanjangan setelah 1 bulan pertama)",
+        "price": "50rb/bulan (perpanjangan setelah 1 bulan pertama)",
         "installation_type": "pasang_technisi",
         "can_shutdown_engine": True,
         "can_wiretap": True,
@@ -66,7 +66,7 @@ DEFAULT_PRODUCTS = [
         "battery_life": None,
         "power_source": "Vehicle battery",
         "tracking_type": "GPS Satelit",
-        "monthly_fee": "25rb/bulan",
+        "monthly_fee": "50rb/bulan",
         "ecommerce_links": {
             "tokopedia": "https://tk.tokopedia.com/ZSuofHsQF/",
             "tiktokshop": "https://vt.tokopedia.com/t/ZSHw7cTrBkss4-Of0ut/",

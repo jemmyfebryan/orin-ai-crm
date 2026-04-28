@@ -3,6 +3,7 @@ Freshchat API client service.
 """
 import asyncio
 import httpx
+from typing import Optional
 
 from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.server.config.settings import settings
@@ -14,6 +15,8 @@ logger = get_logger(__name__)
 async def send_message_to_freshchat(
     conversation_id: str,
     message_content: str,
+    customer_id: Optional[int] = None,
+    save_to_db: bool = True,
     retry_count: int = 0
 ) -> bool:
     """
@@ -22,11 +25,15 @@ async def send_message_to_freshchat(
     Args:
         conversation_id: Freshchat conversation ID
         message_content: The message text to send
+        customer_id: Optional customer ID for database save
+        save_to_db: Whether to save the message to database (default: True)
         retry_count: Current retry attempt number
 
     Returns:
         bool: True if successful, False otherwise
     """
+    from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
+
     url = f"{settings.freshchat_url}/conversations/{conversation_id}/messages"
 
     payload = {
@@ -53,6 +60,12 @@ async def send_message_to_freshchat(
 
             if response.status_code == 200:
                 logger.info(f"Successfully sent message to Freshchat conversation {conversation_id}")
+
+                # Save to database if customer_id is provided and save_to_db is True
+                if customer_id and save_to_db:
+                    await save_message_to_db(customer_id, "ai", message_content, content_type="text")
+                    logger.debug(f"Saved message to DB for customer_id={customer_id}: {message_content[:50]}...")
+
                 return True
             else:
                 logger.error(f"Failed to send message to Freshchat. Status: {response.status_code}, Response: {response.text}")
@@ -62,7 +75,7 @@ async def send_message_to_freshchat(
                     wait_time = 2 ** retry_count  # 1s, 2s, 4s
                     logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
                     await asyncio.sleep(wait_time)
-                    return await send_message_to_freshchat(conversation_id, message_content, retry_count + 1)
+                    return await send_message_to_freshchat(conversation_id, message_content, customer_id, save_to_db, retry_count + 1)
                 else:
                     logger.error(f"Max retry attempts reached for conversation {conversation_id}")
                     return False
@@ -73,7 +86,7 @@ async def send_message_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_message_to_freshchat(conversation_id, message_content, retry_count + 1)
+            return await send_message_to_freshchat(conversation_id, message_content, customer_id, save_to_db, retry_count + 1)
         return False
     except Exception as e:
         logger.error(f"Error sending message to Freshchat: {str(e)}")
@@ -81,7 +94,7 @@ async def send_message_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_message_to_freshchat(conversation_id, message_content, retry_count + 1)
+            return await send_message_to_freshchat(conversation_id, message_content, customer_id, save_to_db, retry_count + 1)
         return False
 
 
@@ -122,6 +135,8 @@ async def get_freshchat_user_details(user_id: str) -> dict:
 async def send_image_to_freshchat(
     conversation_id: str,
     image_url: str,
+    customer_id: Optional[int] = None,
+    save_to_db: bool = True,
     retry_count: int = 0
 ) -> bool:
     """
@@ -130,11 +145,15 @@ async def send_image_to_freshchat(
     Args:
         conversation_id: Freshchat conversation ID
         image_url: The URL of the image to send
+        customer_id: Optional customer ID for database save
+        save_to_db: Whether to save the message to database (default: True)
         retry_count: Current retry attempt number
 
     Returns:
         bool: True if successful, False otherwise
     """
+    from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
+
     url = f"{settings.freshchat_url}/conversations/{conversation_id}/messages"
 
     payload = {
@@ -161,6 +180,12 @@ async def send_image_to_freshchat(
 
             if response.status_code == 200:
                 logger.info(f"Successfully sent image to Freshchat conversation {conversation_id}: {image_url}")
+
+                # Save to database if customer_id is provided and save_to_db is True
+                if customer_id and save_to_db:
+                    await save_message_to_db(customer_id, "ai", image_url, content_type="image")
+                    logger.debug(f"Saved image to DB for customer_id={customer_id}: {image_url}")
+
                 return True
             else:
                 logger.error(f"Failed to send image to Freshchat. Status: {response.status_code}, Response: {response.text}")
@@ -170,7 +195,7 @@ async def send_image_to_freshchat(
                     wait_time = 2 ** retry_count  # 1s, 2s, 4s
                     logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
                     await asyncio.sleep(wait_time)
-                    return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+                    return await send_image_to_freshchat(conversation_id, image_url, customer_id, save_to_db, retry_count + 1)
                 else:
                     logger.error(f"Max retry attempts reached for image send to conversation {conversation_id}")
                     return False
@@ -181,7 +206,7 @@ async def send_image_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+            return await send_image_to_freshchat(conversation_id, image_url, customer_id, save_to_db, retry_count + 1)
         return False
     except Exception as e:
         logger.error(f"Error sending image to Freshchat: {str(e)}")
@@ -189,13 +214,15 @@ async def send_image_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_image_to_freshchat(conversation_id, image_url, retry_count + 1)
+            return await send_image_to_freshchat(conversation_id, image_url, customer_id, save_to_db, retry_count + 1)
         return False
 
 
 async def send_pdf_to_freshchat(
     conversation_id: str,
     pdf_url: str,
+    customer_id: Optional[int] = None,
+    save_to_db: bool = True,
     retry_count: int = 0
 ) -> bool:
     """
@@ -204,11 +231,15 @@ async def send_pdf_to_freshchat(
     Args:
         conversation_id: Freshchat conversation ID
         pdf_url: The URL of the PDF file to send
+        customer_id: Optional customer ID for database save
+        save_to_db: Whether to save the message to database (default: True)
         retry_count: Current retry attempt number
 
     Returns:
         bool: True if successful, False otherwise
     """
+    from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db
+
     url = f"{settings.freshchat_url}/conversations/{conversation_id}/messages"
 
     payload = {
@@ -236,6 +267,12 @@ async def send_pdf_to_freshchat(
 
             if response.status_code == 200:
                 logger.info(f"Successfully sent PDF to Freshchat conversation {conversation_id}: {pdf_url}")
+
+                # Save to database if customer_id is provided and save_to_db is True
+                if customer_id and save_to_db:
+                    await save_message_to_db(customer_id, "ai", pdf_url, content_type="pdf")
+                    logger.debug(f"Saved PDF to DB for customer_id={customer_id}: {pdf_url}")
+
                 return True
             else:
                 logger.error(f"Failed to send PDF to Freshchat. Status: {response.status_code}, Response: {response.text}")
@@ -245,7 +282,7 @@ async def send_pdf_to_freshchat(
                     wait_time = 2 ** retry_count  # 1s, 2s, 4s
                     logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
                     await asyncio.sleep(wait_time)
-                    return await send_pdf_to_freshchat(conversation_id, pdf_url, retry_count + 1)
+                    return await send_pdf_to_freshchat(conversation_id, pdf_url, customer_id, save_to_db, retry_count + 1)
                 else:
                     logger.error(f"Max retry attempts reached for PDF send to conversation {conversation_id}")
                     return False
@@ -256,7 +293,7 @@ async def send_pdf_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_pdf_to_freshchat(conversation_id, pdf_url, retry_count + 1)
+            return await send_pdf_to_freshchat(conversation_id, pdf_url, customer_id, save_to_db, retry_count + 1)
         return False
     except Exception as e:
         logger.error(f"Error sending PDF to Freshchat: {str(e)}")
@@ -264,7 +301,7 @@ async def send_pdf_to_freshchat(
             wait_time = 2 ** retry_count
             logger.info(f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/3)")
             await asyncio.sleep(wait_time)
-            return await send_pdf_to_freshchat(conversation_id, pdf_url, retry_count + 1)
+            return await send_pdf_to_freshchat(conversation_id, pdf_url, customer_id, save_to_db, retry_count + 1)
         return False
 
 

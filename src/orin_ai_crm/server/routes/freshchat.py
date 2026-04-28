@@ -3,6 +3,7 @@ Freshchat integration endpoints - agent and webhook.
 """
 from typing import Optional
 import asyncio
+from difflib import SequenceMatcher
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends
 
 from src.orin_ai_crm.core.logger import get_logger
@@ -19,12 +20,67 @@ from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT, pending_timeouts
 from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
-from sqlalchemy import select, update
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer, ChatSession
+from sqlalchemy import select, update, desc
 from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def fuzzy_match_message(message: str, message_list: list[str], threshold: float = 0.9) -> bool:
+    """
+    Check if a message exists in a list using fuzzy matching.
+
+    Args:
+        message: The message to search for
+        message_list: List of messages to search in
+        threshold: Similarity threshold (0.0 to 1.0), default 0.9 for 90% match
+
+    Returns:
+        bool: True if a match is found above the threshold, False otherwise
+    """
+    for existing_msg in message_list:
+        similarity = SequenceMatcher(None, message, existing_msg).ratio()
+        if similarity >= threshold:
+            logger.debug(f"Fuzzy match found: '{message[:50]}...' ~ '{existing_msg[:50]}...' (similarity: {similarity:.2f})")
+            return True
+    return False
+
+
+async def is_ai_message(customer_id: int, message_content: str) -> bool:
+    """
+    Check if a message was sent by our AI by searching chat history.
+
+    Args:
+        customer_id: The customer's ID
+        message_content: The message content to check
+
+    Returns:
+        bool: True if the message exists in AI chat history (fuzzy match), False otherwise
+    """
+    try:
+        async with AsyncSessionLocal() as db:
+            # Query last 10 AI messages for this customer
+            query = (
+                select(ChatSession.content)
+                .where(
+                    ChatSession.customer_id == customer_id,
+                    ChatSession.message_role == "ai"
+                )
+                .order_by(desc(ChatSession.created_at))
+                .limit(10)
+            )
+
+            result = await db.execute(query)
+            ai_messages = [row[0] for row in result.all()]
+
+            # Use fuzzy matching to check if message exists
+            return fuzzy_match_message(message_content, ai_messages, threshold=0.9)
+
+    except Exception as e:
+        logger.error(f"Error checking AI message history: {str(e)}")
+        return False  # Default to False (assume it's a live agent)
 
 
 async def process_freshchat_agent_task(
@@ -91,11 +147,13 @@ async def process_freshchat_agent_task(
 
         # 3. Send PDFs FIRST (before images and text messages)
         send_pdfs = result.get("send_pdfs", [])
+        customer_id = result.get("customer_id")  # Get customer_id early for DB save
         if send_pdfs:
             logger.info(f"Sending {len(send_pdfs)} PDFs to Freshchat...")
             for i, pdf_url in enumerate(send_pdfs):
                 logger.info(f"Sending PDF {i+1}/{len(send_pdfs)}: {pdf_url}")
-                success = await send_pdf_to_freshchat(conversation_id, pdf_url)
+                # save_to_db=False because already saved in chat_processor.py
+                success = await send_pdf_to_freshchat(conversation_id, pdf_url, customer_id, save_to_db=False)
                 if not success:
                     logger.error(f"Failed to send PDF {i+1} to Freshchat")
                 else:
@@ -107,7 +165,8 @@ async def process_freshchat_agent_task(
             logger.info(f"Sending {len(send_images)} images to Freshchat...")
             for i, img_url in enumerate(send_images):
                 logger.info(f"Sending image {i+1}/{len(send_images)}: {img_url}")
-                success = await send_image_to_freshchat(conversation_id, img_url)
+                # save_to_db=False because already saved in chat_processor.py
+                success = await send_image_to_freshchat(conversation_id, img_url, customer_id, save_to_db=False)
                 if not success:
                     logger.error(f"Failed to send image {i+1} to Freshchat")
                 else:
@@ -121,7 +180,8 @@ async def process_freshchat_agent_task(
         ai_reply_ids = []
         for i, reply in enumerate(ai_replies):
             logger.info(f"Sending bubble {i+1}/{len(ai_replies)}: {reply[:50]}...")
-            success = await send_message_to_freshchat(conversation_id, reply)
+            # save_to_db=False because already saved in chat_processor.py
+            success = await send_message_to_freshchat(conversation_id, reply, customer_id, save_to_db=False)
             if not success:
                 logger.error(f"Failed to send bubble {i+1} to Freshchat")
             else:
@@ -572,25 +632,36 @@ async def freshchat_webhook_endpoint(
         payload = await request.json()
 
         # 4. Anti-Loop Mechanism (CRITICAL)
-        # Detect live agent messages and set human_takeover flag
+        # Detect live agent messages and set human_takeover flag using chat history fingerprinting
         actor = payload.get("actor", {})
         actor_type = actor.get("actor_type", "")
 
         if actor_type == "agent":
-            # Live agent detected - set human_takeover flag if not already set
-            logger.info("Live agent message detected - checking human_takeover flag...")
-
-            # Extract conversation details
+            # Extract message content for fingerprinting
             data = payload.get("data", {})
             message = data.get("message", {})
             conversation_id = message.get("conversation_id", "")
             user_id = message.get("user_id", "")
 
-            # Extract message content to verify it's a real agent message
+            # Extract message content
+            message_content = ""
             message_parts = message.get("message_parts", [])
-            has_content = bool(message_parts and len(message_parts) > 0)
 
-            if conversation_id and user_id and has_content:
+            if message_parts and len(message_parts) > 0:
+                # Handle text messages
+                if "text" in message_parts[0]:
+                    message_content = message_parts[0].get("text", {}).get("content", "")
+                # Handle image messages
+                elif "image" in message_parts[0]:
+                    message_content = message_parts[0].get("image", {}).get("url", "")
+                # Handle file messages
+                elif "file" in message_parts[0]:
+                    message_content = message_parts[0].get("file", {}).get("url", "")
+
+            logger.info(f"Agent message detected in conversation {conversation_id}")
+
+            # Check if this is a live agent message using chat history fingerprinting
+            if message_content:
                 try:
                     # Fetch user details to get phone number
                     user_details = await get_freshchat_user_details(user_id)
@@ -599,43 +670,59 @@ async def freshchat_webhook_endpoint(
                         phone_number = user_details.get("phone", "")
 
                         if phone_number:
-                            # Get customer record
-                            async with AsyncSessionLocal() as db:
-                                customer_stmt = select(Customer).where(
-                                    (Customer.phone_number == phone_number) |
-                                    (Customer.lid_number == phone_number)
-                                )
-                                customer_result = await db.execute(customer_stmt)
-                                customer = customer_result.scalars().first()
+                            # Get or create customer (handle case where customer doesn't exist yet)
+                            from src.orin_ai_crm.core.agents.tools.db_tools import get_or_create_customer
 
-                                if customer:
-                                    # Only set takeover flag if not already set
-                                    if not customer.human_takeover:
-                                        logger.info(f"Setting human_takeover=True for customer_id={customer.id} (live agent joined conversation)")
+                            customer_data = await get_or_create_customer(
+                                phone_number=phone_number,
+                                lid_number=None,
+                                contact_name=user_details.get("first_name", "")
+                            )
+                            customer_id = customer_data.get('customer_id')
 
-                                        # Update human_takeover flag
-                                        update_stmt = update(Customer).where(
-                                            Customer.id == customer.id
-                                        ).values(human_takeover=True)
+                            if customer_id:
+                                # Check if message exists in our AI chat history
+                                is_ai = await is_ai_message(customer_id, message_content)
 
-                                        await execute_with_retry(db.execute, update_stmt, max_retries=3)
-                                        await db.commit()
+                                if is_ai:
+                                    # This is our AI bot - ignore webhook
+                                    logger.info(f"AI message detected (found in chat history) - ignoring webhook for customer_id={customer_id}")
+                                    return FreshchatWebhookResponse(status="success")
+                                else:
+                                    # This is a live human agent - set human_takeover flag
+                                    logger.info(f"Live human agent message detected (NOT in chat history) for customer_id={customer_id}")
 
-                                        logger.info(f"✅ Live agent takeover activated for customer_id={customer.id}, phone={phone_number}")
+                                    # Get customer record to check current human_takeover status
+                                    async with AsyncSessionLocal() as db:
+                                        customer = await db.execute(select(Customer).where(Customer.id == customer_id))
+                                        customer = customer.scalars().first()
 
-                                        # Notify live agents about the takeover
-                                        customer_name = customer.name or customer.contact_name or ""
-                                        await notify_live_agent_takeover(
-                                            customer_name=customer_name,
-                                            customer_phone=phone_number
-                                        )
+                                        if customer and not customer.human_takeover:
+                                            logger.info(f"Setting human_takeover=True for customer_id={customer_id} (live agent joined conversation)")
 
-                                        logger.info(f"📢 Live agent notified about takeover for customer_id={customer.id}")
-                                    else:
-                                        logger.info(f"Human takeover already active for customer_id={customer.id} - no action needed")
+                                            # Update human_takeover flag
+                                            update_stmt = update(Customer).where(
+                                                Customer.id == customer_id
+                                            ).values(human_takeover=True)
+
+                                            await execute_with_retry(db.execute, update_stmt, max_retries=3)
+                                            await db.commit()
+
+                                            logger.info(f"✅ Live agent takeover activated for customer_id={customer_id}, phone={phone_number}")
+
+                                            # Notify live agents about the takeover
+                                            customer_name = customer.name or customer.contact_name or ""
+                                            await notify_live_agent_takeover(
+                                                customer_name=customer_name,
+                                                customer_phone=phone_number
+                                            )
+
+                                            logger.info(f"📢 Live agent notified about takeover for customer_id={customer_id}")
+                                        elif customer:
+                                            logger.info(f"Human takeover already active for customer_id={customer_id} - no action needed")
 
                 except Exception as e:
-                    logger.error(f"Error processing live agent message: {str(e)}")
+                    logger.error(f"Error processing agent message: {str(e)}")
                     import traceback
                     traceback.print_exc()
 
@@ -712,21 +799,35 @@ async def freshchat_webhook_endpoint(
         if message_content.strip() == "reset_chat":
             logger.info(f"reset_chat command detected for phone_number: {phone_number}")
 
+            # Get customer first for sending confirmation message with customer_id
+            from src.orin_ai_crm.core.agents.tools.db_tools import get_or_create_customer
+
+            customer_data = await get_or_create_customer(
+                phone_number=phone_number,
+                lid_number=None,
+                contact_name=contact_name
+            )
+            customer_id = customer_data.get('customer_id')
+
             # Soft delete the customer in background
             async def reset_chat_task():
                 result = await soft_delete_customer(phone_number)
                 if result.get('success'):
                     logger.info(f"Customer soft deleted successfully: {result.get('customer_id')}")
-                    # Send confirmation message to Freshchat
+                    # Send confirmation message to Freshchat with customer_id
                     await send_message_to_freshchat(
                         conversation_id=conversation_id,
-                        message_content=f"✅ {result.get('message')}"
+                        message_content=f"✅ {result.get('message')}",
+                        customer_id=customer_id,
+                        save_to_db=True  # Save this system message to DB
                     )
                 else:
                     logger.error(f"Failed to soft delete customer: {result.get('message')}")
                     await send_message_to_freshchat(
                         conversation_id=conversation_id,
-                        message_content=f"❌ {result.get('message')}"
+                        message_content=f"❌ {result.get('message')}",
+                        customer_id=customer_id,
+                        save_to_db=True  # Save this system message to DB
                     )
 
             # Queue background task for soft delete

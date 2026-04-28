@@ -3,14 +3,16 @@ Application lifespan management - startup and shutdown events.
 """
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 
 from fastapi import FastAPI
 from sqlalchemy import text
 
 from src.orin_ai_crm.core.logger import get_logger
-from src.orin_ai_crm.core.models.database import engine, Base
+from src.orin_ai_crm.core.models.database import engine, Base, AsyncSessionLocal, Customer, WIB
 from src.orin_ai_crm.core.agents.tools.product_agent_tools import initialize_default_products_if_empty
 from src.orin_ai_crm.core.agents.tools.prompt_tools import initialize_prompts_if_empty, initialize_agent_name
+from sqlalchemy import update
 
 logger = get_logger(__name__)
 
@@ -26,9 +28,11 @@ async def lifespan(app: FastAPI):
     - Initialize default products if empty
     - Initialize default prompts if empty
     - Start periodic pool refresh task
+    - Start periodic human_takeover reset task
 
     Shutdown:
     - Cancel periodic pool refresh task
+    - Cancel periodic human_takeover reset task
     - Cleanup if needed
     """
     # Startup
@@ -88,6 +92,48 @@ async def lifespan(app: FastAPI):
     # Store task in app state for shutdown access
     app.state.pool_refresh_task = pool_refresh_task
 
+    # 🔄 Reset human_takeover flag after 1 hour
+    # This runs every 10 minutes to reset human_takeover for customers updated more than 1 hour ago
+    async def periodic_human_takeover_reset():
+        """Periodically reset human_takeover flag for customers updated more than 1 hour ago"""
+        while True:
+            try:
+                # Wait 10 minutes between checks
+                await asyncio.sleep(600)
+
+                async with AsyncSessionLocal() as session:
+                    # Calculate cutoff time (1 hour ago from now in WIB)
+                    cutoff_time = datetime.now(WIB) - timedelta(hours=1)
+
+                    # Find customers with human_takeover=True and updated_at < 1 hour ago
+                    stmt = (
+                        update(Customer)
+                        .where(Customer.human_takeover == True)
+                        .where(Customer.updated_at < cutoff_time)
+                        .where(Customer.deleted_at == None)  # Exclude soft-deleted customers
+                        .values(human_takeover=False)
+                    )
+
+                    result = await session.execute(stmt)
+                    affected_count = result.rowcount
+                    await session.commit()
+
+                    if affected_count > 0:
+                        logger.info(f"🔄 Reset human_takeover flag for {affected_count} customer(s) (updated more than 1 hour ago)")
+                    else:
+                        logger.debug("🔄 No customers to reset human_takeover flag (all recent)")
+
+            except Exception as e:
+                logger.error(f"❌ Error resetting human_takeover flag: {e}")
+                # Continue even if reset fails - will retry in 10 minutes
+
+    # Start the background task
+    human_takeover_reset_task = asyncio.create_task(periodic_human_takeover_reset())
+    logger.info("🔄 Periodic human_takeover reset task started (runs every 10 minutes)")
+
+    # Store task in app state for shutdown access
+    app.state.human_takeover_reset_task = human_takeover_reset_task
+
     logger.info("Application startup complete")
 
     yield
@@ -102,3 +148,11 @@ async def lifespan(app: FastAPI):
             await app.state.pool_refresh_task
         except asyncio.CancelledError:
             logger.info("Periodic pool refresh task cancelled")
+
+    # Cancel the periodic human_takeover reset task
+    if hasattr(app.state, 'human_takeover_reset_task'):
+        app.state.human_takeover_reset_task.cancel()
+        try:
+            await app.state.human_takeover_reset_task
+        except asyncio.CancelledError:
+            logger.info("Periodic human_takeover reset task cancelled")

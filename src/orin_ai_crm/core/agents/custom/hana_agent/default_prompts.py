@@ -14,7 +14,7 @@ DEFAULT_PROMPTS = [
     {
         "prompt_key": "agent_name",
         "prompt_name": "Agent Name",
-        "prompt_text": "SiOrin",
+        "prompt_text": "Sherloc",
         "description": "The name of the AI agent - used throughout all prompts and responses"
     },
     {
@@ -357,7 +357,7 @@ Return ONLY the classification as JSON with "intent" and "reasoning" fields.""",
     {
         "prompt_key": "orin_landing_agent_name",
         "prompt_name": "Orin Landing Agent Name",
-        "prompt_text": "SiOrin",
+        "prompt_text": "Sherloc",
         "description": "The name of the Orin Landing AI agent - used throughout all prompts and responses"
     },
     {

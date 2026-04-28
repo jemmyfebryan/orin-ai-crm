@@ -14,12 +14,13 @@ from src.orin_ai_crm.server.schemas.freshchat import (
 from src.orin_ai_crm.server.security.auth import verify_bearer_token
 from src.orin_ai_crm.server.security.webhook import is_ip_allowed, verify_freshchat_signature
 from src.orin_ai_crm.server.config.settings import settings
-from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details
+from src.orin_ai_crm.server.services.freshchat_api import send_message_to_freshchat, send_image_to_freshchat, send_pdf_to_freshchat, get_freshchat_user_details, notify_live_agent_takeover
 from src.orin_ai_crm.server.services.chat_processor import process_chat_request
 from src.orin_ai_crm.server.services.message_batcher import queue_or_batch_webhook, MAX_BUFFER_SIZE, MAX_CHAR_COUNT, pending_timeouts
 from src.orin_ai_crm.core.agents.tools.db_tools import save_message_to_db, soft_delete_customer
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_agent_name
-from src.orin_ai_crm.core.models.database import AsyncSessionLocal
+from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
+from sqlalchemy import select, update
 from src.orin_ai_crm.core.utils.db_retry import execute_with_retry
 
 logger = get_logger(__name__)
@@ -571,11 +572,78 @@ async def freshchat_webhook_endpoint(
         payload = await request.json()
 
         # 4. Anti-Loop Mechanism (CRITICAL)
+        # Detect live agent messages and set human_takeover flag
         actor = payload.get("actor", {})
         actor_type = actor.get("actor_type", "")
 
-        if actor_type != "user":
-            # Still return 200 OK to Freshchat (don't retry)
+        if actor_type == "agent":
+            # Live agent detected - set human_takeover flag if not already set
+            logger.info("Live agent message detected - checking human_takeover flag...")
+
+            # Extract conversation details
+            data = payload.get("data", {})
+            message = data.get("message", {})
+            conversation_id = message.get("conversation_id", "")
+            user_id = message.get("user_id", "")
+
+            # Extract message content to verify it's a real agent message
+            message_parts = message.get("message_parts", [])
+            has_content = bool(message_parts and len(message_parts) > 0)
+
+            if conversation_id and user_id and has_content:
+                try:
+                    # Fetch user details to get phone number
+                    user_details = await get_freshchat_user_details(user_id)
+
+                    if user_details:
+                        phone_number = user_details.get("phone", "")
+
+                        if phone_number:
+                            # Get customer record
+                            async with AsyncSessionLocal() as db:
+                                customer_stmt = select(Customer).where(
+                                    (Customer.phone_number == phone_number) |
+                                    (Customer.lid_number == phone_number)
+                                )
+                                customer_result = await db.execute(customer_stmt)
+                                customer = customer_result.scalars().first()
+
+                                if customer:
+                                    # Only set takeover flag if not already set
+                                    if not customer.human_takeover:
+                                        logger.info(f"Setting human_takeover=True for customer_id={customer.id} (live agent joined conversation)")
+
+                                        # Update human_takeover flag
+                                        update_stmt = update(Customer).where(
+                                            Customer.id == customer.id
+                                        ).values(human_takeover=True)
+
+                                        await execute_with_retry(db.execute, update_stmt, max_retries=3)
+                                        await db.commit()
+
+                                        logger.info(f"✅ Live agent takeover activated for customer_id={customer.id}, phone={phone_number}")
+
+                                        # Notify live agents about the takeover
+                                        customer_name = customer.name or customer.contact_name or ""
+                                        await notify_live_agent_takeover(
+                                            customer_name=customer_name,
+                                            customer_phone=phone_number
+                                        )
+
+                                        logger.info(f"📢 Live agent notified about takeover for customer_id={customer.id}")
+                                    else:
+                                        logger.info(f"Human takeover already active for customer_id={customer.id} - no action needed")
+
+                except Exception as e:
+                    logger.error(f"Error processing live agent message: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+
+            # Return success - don't process agent messages through AI
+            return FreshchatWebhookResponse(status="success")
+
+        elif actor_type != "user":
+            # System or other actor types - ignore
             return FreshchatWebhookResponse(status="success")
 
         # 5. Action Filter (only process message_create)

@@ -275,23 +275,23 @@ async def get_account_type_from_vps(phone_number: str) -> Optional[dict]:
     }
 
 
-async def get_device_type_from_vps(phone_number: str, device_name: Optional[str] = None) -> Optional[str]:
+async def get_device_type_from_vps(phone_number: str, device_id: Optional[int] = None) -> Optional[str]:
     """
     Get user's device type from VPS database by phone number.
 
     The device type is found by:
     1. Finding the user by phone_number
-    2. Getting their device (first device if device_name not specified, or specific device by name)
+    2. Getting their device (first device if device_id not specified, or specific device by id)
     3. Looking up the device type's protocol or name
 
     Args:
         phone_number: Customer's phone number (can be in various formats)
-        device_name: Optional specific device name to look up. If None, returns first device.
+        device_id: Optional specific device ID to look up. If None, returns first device.
 
     Returns:
         Device type string (from protocol or name column) or None if not found
     """
-    logger.info(f"get_device_type_from_vps called - phone_number: {phone_number}")
+    logger.info(f"get_device_type_from_vps called - phone_number: {phone_number}, device_id: {device_id}")
 
     if not phone_number:
         logger.warning("Empty phone_number provided")
@@ -362,18 +362,18 @@ async def get_device_type_from_vps(phone_number: str, device_name: Optional[str]
     user_id = users[0].get("id")
     logger.info(f"Found user in VPS DB: user_id = {user_id}")
 
-    # Step 2: Get user's device (first device or specific device by name)
-    if device_name:
-        # Query for specific device by name
+    # Step 2: Get user's device (first device or specific device by id)
+    if device_id:
+        # Query for specific device by id
         device_query = f"""
             SELECT device_type_id
             FROM devices
             WHERE user_id = {user_id}
-            AND device_name = '{device_name.replace("'", "''")}'
+            AND id = {device_id}
             AND deleted_at IS NULL
             LIMIT 1
         """
-        logger.info(f"VPS Device Query (by name '{device_name}'): {device_query}")
+        logger.info(f"VPS Device Query (by id {device_id}): {device_query}")
     else:
         # Query for first device (original behavior)
         device_query = f"""
@@ -446,7 +446,7 @@ async def get_customer_devices_from_vps(phone_number: str) -> List[dict]:
         phone_number: Customer's phone number (can be in various formats)
 
     Returns:
-        List of device dicts with device_name, device_type (protocol/name), or empty list if not found
+        List of device dicts with device_id, device_name, device_type (protocol/name), device_type_id, or empty list if not found
     """
     logger.info(f"get_customer_devices_from_vps called - phone_number: {phone_number}")
 
@@ -521,7 +521,7 @@ async def get_customer_devices_from_vps(phone_number: str) -> List[dict]:
 
     # Step 2: Get all devices for the user
     device_query = f"""
-        SELECT d.device_name, dt.protocol, dt.name, dt.id as device_type_id
+        SELECT d.id as device_id, d.device_name, dt.protocol, dt.name, dt.id as device_type_id
         FROM devices d
         LEFT JOIN device_types dt ON d.device_type_id = dt.id
         WHERE d.user_id = {user_id}
@@ -548,6 +548,7 @@ async def get_customer_devices_from_vps(phone_number: str) -> List[dict]:
     for device in devices:
         device_type = device.get("protocol") or device.get("name")
         formatted_devices.append({
+            'device_id': device.get('device_id'),
             'device_name': device.get('device_name'),
             'device_type': device_type,
             'device_type_id': device.get('device_type_id')

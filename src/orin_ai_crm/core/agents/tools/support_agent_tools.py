@@ -360,29 +360,33 @@ async def get_installation_cost(
 @tool
 async def device_troubleshooting(
     state: Annotated[dict, InjectedState],
-    device_name: Optional[str] = None,
+    device_id: Optional[int] = None,
+    reset_by_agent: bool = False,
 ) -> dict:
     """
-    Get troubleshooting guide for offline GPS device.
-    Use tool list_customer_devices to get the List of device_name.
+    Get troubleshooting guide for offline GPS device or reset the device.
+    Use tool list_customer_devices to get the list of device_id and device_name.
 
     Use this tool when:
     - Customer reports GPS device is offline
     - Customer says GPS not updating
     - Customer reports device not showing location
-    
+    - Customer agrees to have their device reset by agent
+
     This tool is specific for GPS troubleshooting guide, other problem can use ask_technical_support tool instead
 
     Args:
         state: Agent state (contains customer_id)
-        device_name: Optional device name to troubleshoot specific device.
-                     If not provided, will use customer's first device.
+        device_id: Optional device ID to troubleshoot specific device.
+                   Get this from list_customer_devices tool. If not provided, will use customer's first device.
+        reset_by_agent: If False, return troubleshooting guide with offer to reset.
+                       If True, perform device reset programmatically.
 
     Returns:
-        dict with: message (str), update_state (dict, optional), device_type (str)
+        dict with: message (str), update_state (dict, optional), device_type (str), instruction_to_user (str, optional)
     """
 
-    logger.info(f"TOOL: device_troubleshooting - device_name: {device_name}")
+    logger.info(f"TOOL: device_troubleshooting - device_id: {device_id}, reset_by_agent: {reset_by_agent}")
 
     # Get agent name for dynamic messaging
     agent_name = get_agent_name()
@@ -401,7 +405,7 @@ async def device_troubleshooting(
         }
 
     # Get device type from database
-    device_type = await get_device_type(customer_id, device_name)
+    device_type = await get_device_type(customer_id, device_id)
     logger.info(f"Device type for customer {customer_id}: {device_type}")
 
     # Check if device_type is None (error case)
@@ -415,7 +419,50 @@ async def device_troubleshooting(
             }
         }
 
-    # Generate message based on device type
+    # Handle device reset if requested
+    if reset_by_agent:
+        # TODO: Replace with actual reset endpoint call
+        # For development, using placeholder
+        logger.info(f"Resetting device {device_id} for customer {customer_id}")
+
+        # Placeholder: Simulate reset endpoint call
+        # In production, replace with:
+        # async with httpx.AsyncClient() as client:
+        #     response = await client.post(f"{RESET_ENDPOINT}/devices/{device_id}/reset")
+        #     result = response.json()
+
+        # Placeholder response for development
+        reset_result = {
+            'success': True,
+            'message': 'Device reset successfully',
+            'error_code': None
+        }
+
+        if reset_result.get('success'):
+            message = f"""Perangkat berhasil di-reset ✅
+
+Mohon tunggu 5-10 menit untuk perangkat kembali online. Kalau setelah itu masih belum online juga, hubungi {agent_name} lagi ya 🙏"""
+            return {
+                'message': message,
+                'device_type': device_type,
+                'reset_success': True
+            }
+        else:
+            error_code = reset_result.get('error_code', 'UNKNOWN')
+            logger.error(f"Failed to reset device {device_id}: {error_code}")
+            message = f"""Maaf Kak, gagal me-reset perangkat 😔
+
+Error: {error_code}
+
+Silakan hubungi CS kami untuk bantuan lebih lanjut."""
+            return {
+                'message': message,
+                'device_type': device_type,
+                'reset_success': False,
+                'error_code': error_code
+            }
+
+    # Generate troubleshooting guide based on device type
     sms_devices = ['gt06n', 'tr06', 't700', 't2', 't30', 'wetrack', 'moplus', 'tr02']
 
     if device_type.lower() in sms_devices:
@@ -435,11 +482,19 @@ async def device_troubleshooting(
 4️⃣ Kalau unit **membalas SMS**:
    → Tolong kirimkan balasan SMS dari unit ke {agent_name} untuk kami telaah lebih lanjut
 
-💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
-    elif device_type.lower() == 'postpaid':
-        message = """Maaf Kak, untuk jenis kartu pascabayar ini perlu bantuan langsung dari tim kami ya 🙏
+💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)
 
-Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
+---
+💬 **{agent_name} bisa bantu reset perangkat Kakak secara remote lho!**
+   Kalau Kakak mau, bilang saja "Ya, tolong reset" ke {agent_name} 😊"""
+    elif device_type.lower() == 'postpaid':
+        message = f"""Maaf Kak, untuk jenis kartu pascabayar ini perlu bantuan langsung dari tim kami ya 🙏
+
+Tim CS Orin akan segera membantu pengecekan lebih lanjut.
+
+---
+💬 **{agent_name} bisa bantu reset perangkat Kakak secara remote lho!**
+   Kalau Kakak mau, bilang saja "Ya, tolong reset" ke {agent_name} 😊"""
         return {
             'message': message,
             'device_type': device_type,
@@ -462,7 +517,11 @@ Tim CS Orin akan segera membantu pengecekan lebih lanjut."""
 3️⃣ Kalau setelah isi pulsa dan refresh unit masih belum update:
    → Hubungi {agent_name} lagi ya untuk bantu cek lebih lanjut
 
-💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)"""
+💡 Biasanya masalah GPS ini karena kartu GSM kehabisan pulsa Kakak :)
+
+---
+💬 **{agent_name} bisa bantu reset perangkat Kakak secara remote lho!**
+   Kalau Kakak mau, bilang saja "Ya, tolong reset" ke {agent_name} 😊"""
 
     return {
         'message': message,

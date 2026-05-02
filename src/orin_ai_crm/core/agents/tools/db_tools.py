@@ -299,7 +299,7 @@ async def get_account_type(customer_id: int) -> Optional[dict]:
     return account_info
 
 
-async def get_device_type(customer_id: int, device_name: Optional[str] = None) -> Optional[str]:
+async def get_device_type(customer_id: int, device_id: Optional[int] = None) -> Optional[str]:
     """
     Get customer's device type from VPS database.
 
@@ -308,14 +308,14 @@ async def get_device_type(customer_id: int, device_name: Optional[str] = None) -
 
     Args:
         customer_id: The customer's ID
-        device_name: Optional specific device name to look up. If None, returns first device.
+        device_id: Optional specific device ID to look up. If None, returns first device.
 
     Returns:
         Optional[str]: Device type (from VPS device_types.protocol or name) or None if not found
     """
     from src.orin_ai_crm.core.agents.tools.vps_tools import get_device_type_from_vps
 
-    logger.info(f"get_device_type called - customer_id: {customer_id}, device_name: {device_name}")
+    logger.info(f"get_device_type called - customer_id: {customer_id}, device_id: {device_id}")
 
     async with AsyncSessionLocal() as db:
         # Fetch customer's phone number
@@ -333,7 +333,7 @@ async def get_device_type(customer_id: int, device_name: Optional[str] = None) -
     logger.info(f"Found phone_number for customer {customer_id}: {phone_number}")
 
     # Query VPS database for device type
-    device_type = await get_device_type_from_vps(phone_number, device_name)
+    device_type = await get_device_type_from_vps(phone_number, device_id)
     logger.info(f"Device type for customer {customer_id}: {device_type}")
 
     return device_type

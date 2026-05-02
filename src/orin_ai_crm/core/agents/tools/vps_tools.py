@@ -683,3 +683,154 @@ async def get_vps_user_details(vps_user_id: int) -> Optional[dict]:
         'device_names': device_names,
         'unit_qty': unit_qty
     }
+
+
+async def get_user_id_from_device_id(device_id: int) -> Optional[int]:
+    """
+    Get user_id from VPS database by device ID.
+
+    Args:
+        device_id: Device ID from VPS devices table
+
+    Returns:
+        user_id (int) or None if not found/error
+    """
+    logger.info(f"get_user_id_from_device_id called - device_id: {device_id}")
+
+    if not device_id:
+        logger.warning("Empty device_id provided")
+        return None
+
+    # Query to get user_id from devices table
+    query = f"""
+        SELECT user_id
+        FROM devices
+        WHERE id = {device_id}
+        AND deleted_at IS NULL
+        LIMIT 1
+    """
+
+    logger.info(f"VPS Query for user_id from device: {query}")
+
+    result = await query_vps_db(query)
+
+    if not result:
+        logger.warning(f"VPS DB returned invalid result for device_id: {device_id}")
+        return None
+
+    devices = result.get("rows", [])
+
+    if not devices or len(devices) == 0:
+        logger.info(f"No device found in VPS DB for device_id: {device_id}")
+        return None
+
+    user_id = devices[0].get("user_id")
+
+    if not user_id:
+        logger.warning(f"Device found but user_id is NULL for device_id: {device_id}")
+        return None
+
+    logger.info(f"Found user_id: {user_id} for device_id: {device_id}")
+    return user_id
+
+
+async def get_user_token_from_user_id(user_id: int) -> Optional[str]:
+    """
+    Get API token from VPS database by user ID.
+
+    Logic:
+    - If users.parent_id != 0, use parent_id to fetch token
+    - If users.parent_id == 0, use original user_id to fetch token
+    - Returns the newest non-expired token (sorted by expired_at DESC)
+
+    Args:
+        user_id: User ID from VPS users table
+
+    Returns:
+        api_token (str) or error message string if token not found/expired
+    """
+    logger.info(f"get_user_token_from_user_id called - user_id: {user_id}")
+
+    if not user_id:
+        logger.warning("Empty user_id provided")
+        return "Error: user_id is empty"
+
+    # Step 1: Get parent_id from users table
+    user_query = f"SELECT parent_id FROM users WHERE id = {user_id} AND deleted_at IS NULL LIMIT 1"
+
+    logger.info(f"VPS Query for user parent_id: {user_query}")
+
+    user_result = await query_vps_db(user_query)
+
+    if not user_result:
+        logger.warning(f"VPS DB returned invalid result for user_id: {user_id}")
+        return f"Error: Failed to query VPS database for user_id {user_id}"
+
+    users = user_result.get("rows", [])
+
+    if not users or len(users) == 0:
+        logger.info(f"No user found in VPS DB for user_id: {user_id}")
+        return f"Error: User not found for user_id {user_id}"
+
+    parent_id = users[0].get("parent_id")
+
+    # Determine which user_id to use for token lookup
+    if parent_id and parent_id != 0:
+        token_user_id = parent_id
+        logger.info(f"Using parent_id {parent_id} for token lookup")
+    else:
+        token_user_id = user_id
+        logger.info(f"Using original user_id {user_id} for token lookup")
+
+    # Step 2: Get API token from user_tokens table
+    # Note: user_tokens table might not have deleted_at column
+    token_query = f"SELECT api_token, expired_at FROM user_tokens WHERE user_id = {token_user_id} ORDER BY expired_at DESC LIMIT 1"
+
+    logger.info(f"VPS Query for user token: {token_query}")
+
+    token_result = await query_vps_db(token_query)
+
+    if not token_result:
+        logger.warning(f"VPS DB returned invalid result for token lookup")
+        return f"Error: Failed to query VPS database for user_tokens"
+
+    tokens = token_result.get("rows", [])
+
+    if not tokens or len(tokens) == 0:
+        logger.info(f"No token found in VPS DB for user_id: {token_user_id}")
+        return f"Error: No valid API token found for user_id {user_id}"
+
+    token_data = tokens[0]
+    api_token = token_data.get("api_token")
+    expired_at = token_data.get("expired_at")
+
+    if not api_token:
+        logger.warning(f"Token found but api_token is NULL for user_id: {user_id}")
+        return f"Error: API token is NULL for user_id {user_id}"
+
+    # Check if token is expired
+    if expired_at:
+        from datetime import datetime
+        # Parse the expired_at timestamp
+        if isinstance(expired_at, str):
+            try:
+                # Try parsing with timezone
+                expired_dt = datetime.fromisoformat(expired_at.replace('Z', '+00:00'))
+            except:
+                logger.warning(f"Could not parse expired_at: {expired_at}")
+                return f"Error: Invalid token expiration date for user_id {user_id}"
+        else:
+            expired_dt = expired_at
+
+        # Ensure timezone awareness
+        if expired_dt.tzinfo is None:
+            expired_dt = expired_dt.replace(tzinfo=datetime.now().tzinfo)
+
+        # Check if expired
+        if expired_dt < datetime.now(expired_dt.tzinfo):
+            logger.warning(f"Token is expired for user_id: {user_id} (expired_at: {expired_at})")
+            return f"Error: No valid (non-expired) API token found for user_id {user_id}"
+
+    logger.info(f"Found valid API token for user_id: {user_id}")
+    return api_token
+

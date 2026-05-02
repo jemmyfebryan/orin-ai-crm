@@ -19,9 +19,10 @@ from src.orin_ai_crm.core.logger import get_logger
 from src.orin_ai_crm.core.agents.config import llm_config, get_llm
 from src.orin_ai_crm.core.models.database import AsyncSessionLocal, Customer
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db, get_agent_name
-from src.orin_ai_crm.core.agents.tools.vps_tools import query_vps_db
+from src.orin_ai_crm.core.agents.tools.vps_tools import query_vps_db, get_user_id_from_device_id, get_user_token_from_user_id
 from src.orin_ai_crm.core.agents.tools.db_tools import get_device_type
 from src.orin_ai_crm.core.agents.tools.prompt_tools import get_prompt_from_db
+from src.orin_ai_crm.core.agents.tools.api_tools import reset_device_unit
 from src.orin_ai_crm.core.utils.phone_utils import build_phone_number_sql_conditions
 from sqlalchemy import select
 
@@ -421,22 +422,48 @@ async def device_troubleshooting(
 
     # Handle device reset if requested
     if reset_by_agent:
-        # TODO: Replace with actual reset endpoint call
-        # For development, using placeholder
         logger.info(f"Resetting device {device_id} for customer {customer_id}")
 
-        # Placeholder: Simulate reset endpoint call
-        # In production, replace with:
-        # async with httpx.AsyncClient() as client:
-        #     response = await client.post(f"{RESET_ENDPOINT}/devices/{device_id}/reset")
-        #     result = response.json()
+        # Step 1: Get user_id from device_id
+        user_id = await get_user_id_from_device_id(device_id)
 
-        # Placeholder response for development
-        reset_result = {
-            'success': True,
-            'message': 'Device reset successfully',
-            'error_code': None
-        }
+        if user_id is None:
+            message = """Maaf Kak, gagal me-reset perangkat 😔
+
+Error: Device tidak ditemukan di database.
+
+Silakan hubungi CS kami untuk bantuan lebih lanjut."""
+            return {
+                'message': message,
+                'device_type': device_type,
+                'reset_success': False,
+                'error': 'Device not found'
+            }
+
+        logger.info(f"Found user_id: {user_id} for device_id: {device_id}")
+
+        # Step 2: Get API token from user_id
+        api_token = await get_user_token_from_user_id(user_id)
+
+        # Check if api_token is an error message (starts with "Error:")
+        if isinstance(api_token, str) and api_token.startswith("Error:"):
+            logger.error(f"Failed to get API token: {api_token}")
+            message = f"""Maaf Kak, gagal me-reset perangkat 😔
+
+{api_token}
+
+Silakan hubungi CS kami untuk bantuan lebih lanjut."""
+            return {
+                'message': message,
+                'device_type': device_type,
+                'reset_success': False,
+                'error': api_token
+            }
+
+        logger.info(f"Successfully retrieved API token for user_id: {user_id}")
+
+        # Step 3: Call the reset API
+        reset_result = await reset_device_unit(device_id, api_token)
 
         if reset_result.get('success'):
             message = f"""Perangkat berhasil di-reset ✅
@@ -445,21 +472,23 @@ Mohon tunggu 5-10 menit untuk perangkat kembali online. Kalau setelah itu masih 
             return {
                 'message': message,
                 'device_type': device_type,
-                'reset_success': True
+                'reset_success': True,
+                'status_code': reset_result.get('status_code')
             }
         else:
-            error_code = reset_result.get('error_code', 'UNKNOWN')
-            logger.error(f"Failed to reset device {device_id}: {error_code}")
+            error_msg = reset_result.get('message', 'Unknown error')
+            logger.error(f"Failed to reset device {device_id}: {error_msg}")
             message = f"""Maaf Kak, gagal me-reset perangkat 😔
 
-Error: {error_code}
+Error: {error_msg}
 
 Silakan hubungi CS kami untuk bantuan lebih lanjut."""
             return {
                 'message': message,
                 'device_type': device_type,
                 'reset_success': False,
-                'error_code': error_code
+                'error': error_msg,
+                'status_code': reset_result.get('status_code')
             }
 
     # Generate troubleshooting guide based on device type

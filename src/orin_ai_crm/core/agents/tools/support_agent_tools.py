@@ -372,7 +372,6 @@ async def device_troubleshooting(
     - Customer reports GPS device is offline
     - Customer says GPS not updating
     - Customer reports device not showing location
-    - Customer agrees to have their device reset by agent
 
     This tool is specific for GPS troubleshooting guide, other problem can use ask_technical_support tool instead
 
@@ -380,11 +379,12 @@ async def device_troubleshooting(
         state: Agent state (contains customer_id)
         device_id: Optional device ID to troubleshoot specific device.
                    Get this from list_customer_devices tool. If not provided, will use customer's first device.
-        reset_by_agent: If False, return troubleshooting guide with offer to reset.
-                       If True, perform device reset programmatically.
-
+        reset_by_agent: Set to False when customer not yet confirm or no specific unit mentioned.
+                        Set to True ONLY when customer explicitly want to reset and the device specifically mentioned.
+                        Default: False
+                       
     Returns:
-        dict with: message (str), update_state (dict, optional), device_type (str), instruction_to_user (str, optional)
+        dict with: message (str), update_state (dict, optional), device_type (str)
     """
 
     logger.info(f"TOOL: device_troubleshooting - device_id: {device_id}, reset_by_agent: {reset_by_agent}")
